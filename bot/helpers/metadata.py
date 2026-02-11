@@ -574,55 +574,54 @@ async def set_wav(data, handle, dur_ms=0):
 # HANDLER OGG VORBIS (KHUSUS SPOTIFY)
 # ==========================================
 async def set_vorbis(data, handle, dur_ms=0):
-    """
-    Handler khusus untuk file OGG (Spotify).
-    Hanya fungsi ini yang dimodifikasi untuk Spotify agar aman.
-    """
+    """Handler khusus OGG Vorbis (Spotify)"""
     if handle.tags is None:
         try: handle.add_tags()
         except: pass
     
-    # --- Standard Tags ---
+    # Basic Tags
     handle.tags['TITLE'] = data['title']
     handle.tags['ALBUM'] = data['album']
-    handle.tags['ALBUMARTIST'] = data['albumartist']
     handle.tags['ARTIST'] = data['artist']
+    handle.tags['ALBUMARTIST'] = data['albumartist']
     
-    # Copyright (Penting untuk Spotify)
-    cpr = data.get('copyright') or ''
-    if cpr: handle.tags['COPYRIGHT'] = cpr
-        
-    # Label / Publisher / Organization
-    # Kita menggunakan .get() agar aman jika key tidak ada (fallback ke safe logic)
-    pub = data.get('publisher') or data.get('label') or data.get('organization') or ''
-    if pub: 
-        handle.tags['PUBLISHER'] = pub
-        handle.tags['ORGANIZATION'] = pub # Tag ini sering dibaca MediaInfo sebagai Label
-        handle.tags['LABEL'] = pub        # Tag eksplisit Label
-        handle.tags['pub'] = pub          # Alias
+    # --- METADATA LANJUTAN (KUNCI MEDIAINFO) ---
+    
+    # 1. GENRE (Pastikan masuk)
+    if data.get('genre'):
+        handle.tags['GENRE'] = data['genre']
 
-    # Tracks & Discs
+    # 2. LABEL (Vorbis pakai ORGANIZATION atau LABEL)
+    label_val = data.get('label') or data.get('organization') or data.get('publisher')
+    if label_val:
+        handle.tags['ORGANIZATION'] = label_val # MediaInfo sering baca ini sbg Label
+        handle.tags['LABEL'] = label_val
+        handle.tags['PUBLISHER'] = label_val
+
+    # 3. COPYRIGHT
+    cpr = data.get('copyright')
+    if cpr:
+        handle.tags['COPYRIGHT'] = cpr
+
+    # 4. ISRC
+    if data.get('isrc'):
+        handle.tags['ISRC'] = data['isrc']
+
+    # 5. TRACK & DISC
     handle.tags['TRACKNUMBER'] = str(data.get('tracknumber') or '1')
     handle.tags['TRACKTOTAL'] = str(data.get('totaltracks') or '1')
-    handle.tags['DISCNUMBER'] = str(data.get('volume') or '1')
-    handle.tags['DISCTOTAL'] = str(data.get('totalvolume') or '1')
+    handle.tags['DISCNUMBER'] = str(data.get('discnumber') or '1') # Perbaiki key dari 'volume'
+    handle.tags['DISCTOTAL'] = str(data.get('totalvolumes') or '1')
 
-    # Codes (ISRC Penting untuk identifikasi lagu)
-    if data.get('upc'): handle.tags['UPC'] = data['upc']
-    if data.get('isrc'): handle.tags['ISRC'] = data['isrc']
-
-    # Dates
-    # Format tanggal Spotify biasanya YYYY-MM-DD, OGG support ini
-    if data.get('date'): handle.tags['DATE'] = data['date']
+    # 6. DATES
+    if data.get('date'): handle.tags['DATE'] = data['date'] # Year
     if data.get('release_date'): handle.tags['ORIGINALDATE'] = data['release_date']
-    
-    # Misc
-    # Genre sekarang diambil dinamis dari handler.py, kode ini tinggal menulisnya
-    if data.get('genre'): handle.tags['GENRE'] = data['genre']
-    if data.get('composer'): handle.tags['COMPOSER'] = data['composer']
-    if data.get('lyrics'): handle.tags['LYRICS'] = data['lyrics']
-    
-    # Cover Art (Tetap menggunakan fungsi global savePic yang sudah support OGG)
+
+    # 7. EXPLICIT
+    if data.get('explicit'):
+        handle.tags['RATING'] = "Explicit"
+
+    # Simpan Cover
     await savePic(handle, data)
     handle.save()
     return True
