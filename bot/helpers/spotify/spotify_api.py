@@ -170,18 +170,18 @@ class TrackInfo:
     artist_id: str = None
     album_id: str = None
     gid_hex: str = None
-    # Field Tambahan untuk Caption & Handler
+    # Field Handler
     quality: str = None
     provider: str = None
     release_date: str = None
     total_tracks: str = None
     total_volumes: int = 1
     explicit_str: str = "No"
-    # --- METADATA TAMBAHAN ---
-    genres: List[str] = None  # Menyimpan list genre
-    label: str = None         # Nama Record Label
-    copyright: str = None     # Copyright C-line / P-line
-    isrc: str = None          # International Standard Recording Code
+    # --- METADATA TAMBAHAN (WAJIB ADA) ---
+    genres: List[str] = None  # List Genre
+    label: str = None         # Record Label
+    copyright: str = None     # Copyright Text
+    isrc: str = None          # Kode ISRC
 
 @dataclass
 class TrackDownloadInfo:
@@ -2083,9 +2083,12 @@ class SpotifyAPI:
 
     def get_track_info(self, track_id: str, quality_tier: QualityEnum, codec_options: CodecOptions, **extra_kwargs) -> Optional[TrackInfo]:
         """
-        Mengambil info track LENGKAP (Genre, Label, Copyright).
+        Mengambil info track LENGKAP dengan melakukan 3 Request:
+        1. Track (Basic Info)
+        2. Artist (Untuk GENRE)
+        3. Album (Untuk LABEL & COPYRIGHT)
         """
-        self.logger.debug(f"SpotifyAPI.get_track_info entered for track_id: {track_id}")
+        self.logger.debug(f"Deep Fetching info for track_id: {track_id}")
         
         web_api_token = self._get_web_api_token()
         if not web_api_token:
@@ -2093,129 +2096,110 @@ class SpotifyAPI:
             web_api_token = self._get_web_api_token()
         
         try:
-            # 1. Ambil Data Dasar Track
-            web_api_track_data = self.get_track_by_id(track_id) 
-            if not web_api_track_data: return None
-
             headers = {"Authorization": f"Bearer {web_api_token}"}
-
-            # --- PARSING DATA DASAR ---
-            name = web_api_track_data.get('name')
-            duration_ms = web_api_track_data.get('duration_ms')
-            explicit_bool = web_api_track_data.get('explicit', False)
-            track_number = web_api_track_data.get('track_number')
-            disc_number = web_api_track_data.get('disc_number')
-            isrc = web_api_track_data.get('external_ids', {}).get('isrc', "")
             
-            artists_data = web_api_track_data.get('artists', [])
+            # REQUEST 1: Track Info
+            r_track = requests.get(f"https://api.spotify.com/v1/tracks/{track_id}", headers=headers, timeout=10)
+            if r_track.status_code != 200: return None
+            track_data = r_track.json()
+
+            # Parsing Dasar
+            name = track_data.get('name')
+            duration_ms = track_data.get('duration_ms')
+            explicit_bool = track_data.get('explicit', False)
+            track_number = track_data.get('track_number')
+            disc_number = track_data.get('disc_number')
+            isrc = track_data.get('external_ids', {}).get('isrc', "")
+            
+            # Artist Info
+            artists_data = track_data.get('artists', [])
             artist_names = [artist.get('name') for artist in artists_data if artist.get('name')]
-            artist_ids = [artist.get('id') for artist in artists_data if artist.get('id')]
-            primary_artist_id = artist_ids[0] if artist_ids else None
+            primary_artist_id = artists_data[0].get('id') if artists_data else None
             
-            album_data = web_api_track_data.get('album', {})
+            # Album Info
+            album_data = track_data.get('album', {})
             album_name = album_data.get('name')
-            album_id_spotify = album_data.get('id')
-            album_release_date_str = album_data.get('release_date')
+            album_id = album_data.get('id')
+            album_release_date = album_data.get('release_date', '')
             album_total_tracks = album_data.get('total_tracks')
-            album_artist_data = album_data.get('artists', [])
-            album_artist_names = [aa.get('name') for aa in album_artist_data if aa.get('name')]
+            album_artists = [a.get('name') for a in album_data.get('artists', [])]
 
-            # --- [BARU] FETCH EXTRA METADATA ---
+            # --- DEEP FETCH (KUNCI PERBAIKAN) ---
             genres = []
-            label_name = "Spotify"
-            copyright_text = ""
+            label_name = None
+            copyright_text = None
 
-            # A. Fetch Artist untuk GENRE (Genre ada di Artist, bukan Track)
+            # REQUEST 2: Fetch Artist untuk GENRE
+            # (Genre Spotify menempel di Artist, bukan Track)
             if primary_artist_id:
                 try:
-                    r_artist = requests.get(f"https://api.spotify.com/v1/artists/{primary_artist_id}", headers=headers, timeout=5)
-                    if r_artist.status_code == 200:
-                        a_data = r_artist.json()
-                        raw_genres = a_data.get('genres', [])
-                        # Rapikan genre: Capitalize setiap kata
-                        genres = [g.title() for g in raw_genres]
+                    r_art = requests.get(f"https://api.spotify.com/v1/artists/{primary_artist_id}", headers=headers, timeout=5)
+                    if r_art.status_code == 200:
+                        art_data = r_art.json()
+                        # Rapikan Genre (Capitalize)
+                        genres = [g.title() for g in art_data.get('genres', [])]
                 except Exception as e:
-                    self.logger.warning(f"Gagal fetch genre artist: {e}")
+                    self.logger.warning(f"Gagal fetch genre: {e}")
 
-            # B. Fetch Full Album untuk LABEL & COPYRIGHT (Track object tidak punya ini)
-            if album_id_spotify:
+            # REQUEST 3: Fetch Album untuk LABEL & COPYRIGHT
+            # (Label & Copyright hanya ada di endpoint Album lengkap)
+            if album_id:
                 try:
-                    r_album = requests.get(f"https://api.spotify.com/v1/albums/{album_id_spotify}", headers=headers, timeout=5)
-                    if r_album.status_code == 200:
-                        alb_full = r_album.json()
-                        label_name = alb_full.get('label', 'Spotify')
-                        # Ambil copyright pertama
-                        if alb_full.get('copyrights'):
-                            copyright_text = alb_full['copyrights'][0].get('text', '')
+                    r_alb = requests.get(f"https://api.spotify.com/v1/albums/{album_id}", headers=headers, timeout=5)
+                    if r_alb.status_code == 200:
+                        alb_data = r_alb.json()
+                        label_name = alb_data.get('label')
+                        if alb_data.get('copyrights'):
+                            copyright_text = alb_data['copyrights'][0].get('text')
                 except Exception as e:
-                    self.logger.warning(f"Gagal fetch label album: {e}")
+                    self.logger.warning(f"Gagal fetch label: {e}")
 
             # Cover Art
             cover_url = None
             if album_data.get('images'):
-                preferred_image = next((img for img in album_data['images'] if img.get('height') == 640), None)
-                cover_url = preferred_image.get('url') if preferred_image else album_data['images'][0].get('url')
-            
-            # Parsing Tahun
-            album_release_year_int = 0
-            if album_release_date_str and len(album_release_date_str) >= 4:
-                try: album_release_year_int = int(album_release_date_str[:4])
-                except: pass
+                cover_url = album_data['images'][0].get('url')
 
-            gid_hex_value = self._convert_base62_to_gid_hex(track_id) 
+            # Tahun
+            year = album_release_date[:4] if album_release_date else ""
 
-            # --- ISI TAGS ---
+            # Tags Object
             tags_obj = Tags(
-                album_artist=album_artist_names if album_artist_names else artist_names,
-                track_number=str(track_number) if track_number is not None else "1",
-                total_tracks=str(album_total_tracks) if album_total_tracks is not None else "1",
-                disc_number=str(disc_number) if disc_number is not None else "1",
-                release_date=album_release_date_str,
-                year=str(album_release_year_int)
+                album_artist=album_artists,
+                track_number=str(track_number),
+                total_tracks=str(album_total_tracks),
+                disc_number=str(disc_number),
+                release_date=album_release_date,
+                year=year
             )
 
-            # --- QUALTIY STRING ---
-            quality_str = "High (320kbps)" 
-            if quality_tier and hasattr(quality_tier, 'name'):
-                if "HIFI" in quality_tier.name or "VERY" in quality_tier.name:
-                    quality_str = "Very High (320kbps)"
-                elif "NORMAL" in quality_tier.name:
-                    quality_str = "Normal (160kbps)"
-
-            # --- RETURN OBJECT ---
-            track_info_instance = TrackInfo(
+            # Return Object
+            return TrackInfo(
                 id=track_id,
                 name=name,
                 artists=artist_names,
-                artist_id=primary_artist_id,
-                album_id=album_id_spotify,
                 album=album_name,
-                duration=duration_ms // 1000 if duration_ms else 0,
+                duration=duration_ms // 1000,
                 cover_url=cover_url,
                 explicit=explicit_bool,
                 tags=tags_obj,
-                codec=CodecEnum.VORBIS, 
-                release_year=album_release_year_int,
-                gid_hex=gid_hex_value,
+                codec=CodecEnum.VORBIS,
                 
-                # Field Tambahan
-                quality=quality_str,
+                # Metadata Penting
+                quality="High (320kbps)",
                 provider="Spotify",
-                release_date=album_release_date_str,
-                total_tracks=album_total_tracks,
+                release_date=album_release_date,
+                total_tracks=str(album_total_tracks),
                 total_volumes=1,
                 
-                # METADATA BARU
-                genres=genres,
-                label=label_name,
-                copyright=copyright_text,
-                isrc=isrc
+                # DATA BARU
+                genres=genres,          # List Genre Asli
+                label=label_name,       # Label Asli
+                copyright=copyright_text, # Copyright Asli
+                isrc=isrc               # ISRC Asli
             )
-            
-            return track_info_instance
 
         except Exception as e:
-            self.logger.error(f"Error in get_track_info: {e}", exc_info=True)
+            self.logger.error(f"Error get_track_info: {e}", exc_info=True)
             return None 
 
     def _get_valid_token(self):
