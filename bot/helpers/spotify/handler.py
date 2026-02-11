@@ -357,75 +357,57 @@ async def process_artist(client, artist_id, user):
 
 # --- HELPER MAPPING ---
 def map_spotify_to_bot_metadata(track_info, user, is_episode=False):
+    # Ambil Cover
     cover_url = track_info.cover_url
-    explicit_val = track_info.explicit if track_info.explicit is not None else False
     
-    rel_date = "Unknown"
-    if track_info.tags and hasattr(track_info.tags, 'release_date') and track_info.tags.release_date:
-        rel_date = str(track_info.tags.release_date)
-    elif hasattr(track_info, 'release_year') and track_info.release_year:
-        rel_date = str(track_info.release_year)
-        
+    # Ambil Tanggal
+    rel_date = track_info.release_date or ""
+    year = rel_date[:4] if rel_date else ""
+    
+    # Ambil Tags
     tags = track_info.tags
-    
-    t_num = getattr(tags, 'track_number', None) if tags else None
-    t_num = str(t_num) if t_num else "1"
-    
-    t_tot = getattr(tags, 'total_tracks', None) if tags else None
-    t_tot = str(t_tot) if t_tot else "1"
-    
-    d_num = getattr(tags, 'disc_number', None) if tags else None
-    d_num = str(d_num) if d_num else "1"
-    
-    t_vols = "1"
-    alb_artist = getattr(tags, 'album_artist', "Unknown") if tags else "Unknown"
+    t_num = getattr(tags, 'track_number', "1")
+    t_tot = getattr(tags, 'total_tracks', "1")
+    d_num = getattr(tags, 'disc_number', "1")
+    alb_artist = getattr(tags, 'album_artist', ["Unknown"])[0] if getattr(tags, 'album_artist') else "Unknown"
 
-    # --- LOGIKA GENRE DINAMIS ---
-    # Jika genre ditemukan dari API, gabungkan dengan koma. Jika tidak, fallback ke Pop.
+    # --- PERBAIKAN GENRE ---
+    # Jika genres ada isinya, gabung dengan koma.
+    # Jika kosong, baru fallback ke "Pop" atau "Unknown"
     genre_str = "Pop"
-    if hasattr(track_info, 'genres') and track_info.genres:
+    if track_info.genres and len(track_info.genres) > 0:
         genre_str = ", ".join(track_info.genres)
     
-    # Ambil Metadata tambahan
-    label_str = getattr(track_info, 'label', None)
-    copyright_str = getattr(track_info, 'copyright', None)
-    isrc_str = getattr(track_info, 'isrc', None)
-
     meta = {
         'title': track_info.name,
         'artist': track_info.artists[0] if track_info.artists else "Unknown",
-        'artists': track_info.artists, # List artist lengkap (opsional, untuk multi-artist tag)
         'album': track_info.album,
         'albumartist': alb_artist,
-        'date': str(track_info.release_year) if track_info.release_year else "",
+        'date': year,
         'release_date': rel_date,
-        'tracknumber': t_num,
-        'totaltracks': t_tot,
-        'discnumber': d_num,
-        'totalvolumes': t_vols,
-        'genre': genre_str,  # <--- SUDAH DINAMIS
+        'tracknumber': str(t_num),
+        'totaltracks': str(t_tot),
+        'discnumber': str(d_num),
+        'totalvolumes': "1",
+        
+        # Metadata Dinamis
+        'genre': genre_str,           # <--- Genre Asli
+        'label': track_info.label,    # <--- Label Asli
+        'copyright': track_info.copyright, # <--- Copyright Asli
+        'isrc': track_info.isrc,      # <--- ISRC Asli
+        'organization': track_info.label, # Backup untuk Label
+        
         'duration': track_info.duration, 
         'quality': "High (320kbps)",
         'provider': "Spotify",
-        'explicit': explicit_val,
+        'explicit': track_info.explicit,
         'type': 'track',
         'cover': cover_url,
-        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/",
-        
-        # Metadata Tambahan
-        'label': label_str,
-        'organization': label_str, # FFmpeg sering pakai organization untuk Label
-        'copyright': copyright_str,
-        'isrc': isrc_str,
-        'comment': f"Downloaded via {Config.BOT_USERNAME}" if hasattr(Config, 'BOT_USERNAME') else "Downloaded via Spotify Bot"
+        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
     
     if is_episode:
         meta['type'] = 'episode'
-        meta['album'] = track_info.album 
-        meta['artist'] = track_info.artists[0] 
-        # Episode biasanya tidak punya genre musik, bisa diset Podcast
         meta['genre'] = "Podcast"
         
     return meta
-
