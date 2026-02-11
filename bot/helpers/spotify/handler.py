@@ -380,9 +380,21 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False):
     t_vols = "1"
     alb_artist = getattr(tags, 'album_artist', "Unknown") if tags else "Unknown"
 
+    # --- LOGIKA GENRE DINAMIS ---
+    # Jika genre ditemukan dari API, gabungkan dengan koma. Jika tidak, fallback ke Pop.
+    genre_str = "Pop"
+    if hasattr(track_info, 'genres') and track_info.genres:
+        genre_str = ", ".join(track_info.genres)
+    
+    # Ambil Metadata tambahan
+    label_str = getattr(track_info, 'label', None)
+    copyright_str = getattr(track_info, 'copyright', None)
+    isrc_str = getattr(track_info, 'isrc', None)
+
     meta = {
         'title': track_info.name,
         'artist': track_info.artists[0] if track_info.artists else "Unknown",
+        'artists': track_info.artists, # List artist lengkap (opsional, untuk multi-artist tag)
         'album': track_info.album,
         'albumartist': alb_artist,
         'date': str(track_info.release_year) if track_info.release_year else "",
@@ -391,19 +403,29 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False):
         'totaltracks': t_tot,
         'discnumber': d_num,
         'totalvolumes': t_vols,
-        'genre': "Pop", 
+        'genre': genre_str,  # <--- SUDAH DINAMIS
         'duration': track_info.duration, 
         'quality': "High (320kbps)",
         'provider': "Spotify",
         'explicit': explicit_val,
         'type': 'track',
         'cover': cover_url,
-        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/",
+        
+        # Metadata Tambahan
+        'label': label_str,
+        'organization': label_str, # FFmpeg sering pakai organization untuk Label
+        'copyright': copyright_str,
+        'isrc': isrc_str,
+        'comment': f"Downloaded via {Config.BOT_USERNAME}" if hasattr(Config, 'BOT_USERNAME') else "Downloaded via Spotify Bot"
     }
     
     if is_episode:
         meta['type'] = 'episode'
         meta['album'] = track_info.album 
         meta['artist'] = track_info.artists[0] 
+        # Episode biasanya tidak punya genre musik, bisa diset Podcast
+        meta['genre'] = "Podcast"
         
     return meta
+
