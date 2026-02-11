@@ -177,6 +177,11 @@ class TrackInfo:
     total_tracks: str = None
     total_volumes: int = 1
     explicit_str: str = "No"
+    # --- METADATA TAMBAHAN ---
+    genres: List[str] = None  # Menyimpan list genre
+    label: str = None         # Nama Record Label
+    copyright: str = None     # Copyright C-line / P-line
+    isrc: str = None          # International Standard Recording Code
 
 @dataclass
 class TrackDownloadInfo:
@@ -2078,7 +2083,7 @@ class SpotifyAPI:
 
     def get_track_info(self, track_id: str, quality_tier: QualityEnum, codec_options: CodecOptions, **extra_kwargs) -> Optional[TrackInfo]:
         """
-        Mengambil info track dan menyiapkan data untuk Handler.
+        Mengambil info track LENGKAP (Genre, Label, Copyright).
         """
         self.logger.debug(f"SpotifyAPI.get_track_info entered for track_id: {track_id}")
         
@@ -2088,33 +2093,63 @@ class SpotifyAPI:
             web_api_token = self._get_web_api_token()
         
         try:
+            # 1. Ambil Data Dasar Track
             web_api_track_data = self.get_track_by_id(track_id) 
             if not web_api_track_data: return None
 
-            # --- PARSING DATA ---
+            headers = {"Authorization": f"Bearer {web_api_token}"}
+
+            # --- PARSING DATA DASAR ---
             name = web_api_track_data.get('name')
             duration_ms = web_api_track_data.get('duration_ms')
-            
-            # [FIX 1] Explicit biarkan Boolean (True/False) di sini.
-            # Konversi string dilakukan di Handler agar fleksibel.
             explicit_bool = web_api_track_data.get('explicit', False)
-            
             track_number = web_api_track_data.get('track_number')
             disc_number = web_api_track_data.get('disc_number')
+            isrc = web_api_track_data.get('external_ids', {}).get('isrc', "")
             
             artists_data = web_api_track_data.get('artists', [])
             artist_names = [artist.get('name') for artist in artists_data if artist.get('name')]
             artist_ids = [artist.get('id') for artist in artists_data if artist.get('id')]
+            primary_artist_id = artist_ids[0] if artist_ids else None
             
             album_data = web_api_track_data.get('album', {})
             album_name = album_data.get('name')
             album_id_spotify = album_data.get('id')
             album_release_date_str = album_data.get('release_date')
             album_total_tracks = album_data.get('total_tracks')
-            
             album_artist_data = album_data.get('artists', [])
             album_artist_names = [aa.get('name') for aa in album_artist_data if aa.get('name')]
-            
+
+            # --- [BARU] FETCH EXTRA METADATA ---
+            genres = []
+            label_name = "Spotify"
+            copyright_text = ""
+
+            # A. Fetch Artist untuk GENRE (Genre ada di Artist, bukan Track)
+            if primary_artist_id:
+                try:
+                    r_artist = requests.get(f"https://api.spotify.com/v1/artists/{primary_artist_id}", headers=headers, timeout=5)
+                    if r_artist.status_code == 200:
+                        a_data = r_artist.json()
+                        raw_genres = a_data.get('genres', [])
+                        # Rapikan genre: Capitalize setiap kata
+                        genres = [g.title() for g in raw_genres]
+                except Exception as e:
+                    self.logger.warning(f"Gagal fetch genre artist: {e}")
+
+            # B. Fetch Full Album untuk LABEL & COPYRIGHT (Track object tidak punya ini)
+            if album_id_spotify:
+                try:
+                    r_album = requests.get(f"https://api.spotify.com/v1/albums/{album_id_spotify}", headers=headers, timeout=5)
+                    if r_album.status_code == 200:
+                        alb_full = r_album.json()
+                        label_name = alb_full.get('label', 'Spotify')
+                        # Ambil copyright pertama
+                        if alb_full.get('copyrights'):
+                            copyright_text = alb_full['copyrights'][0].get('text', '')
+                except Exception as e:
+                    self.logger.warning(f"Gagal fetch label album: {e}")
+
             # Cover Art
             cover_url = None
             if album_data.get('images'):
@@ -2152,23 +2187,29 @@ class SpotifyAPI:
                 id=track_id,
                 name=name,
                 artists=artist_names,
-                artist_id=artist_ids[0] if artist_ids else None,
+                artist_id=primary_artist_id,
                 album_id=album_id_spotify,
                 album=album_name,
                 duration=duration_ms // 1000 if duration_ms else 0,
                 cover_url=cover_url,
-                explicit=explicit_bool, # Boolean Murni
+                explicit=explicit_bool,
                 tags=tags_obj,
                 codec=CodecEnum.VORBIS, 
                 release_year=album_release_year_int,
                 gid_hex=gid_hex_value,
                 
-                # Field Tambahan untuk Handler
+                # Field Tambahan
                 quality=quality_str,
                 provider="Spotify",
                 release_date=album_release_date_str,
                 total_tracks=album_total_tracks,
-                total_volumes=1
+                total_volumes=1,
+                
+                # METADATA BARU
+                genres=genres,
+                label=label_name,
+                copyright=copyright_text,
+                isrc=isrc
             )
             
             return track_info_instance
