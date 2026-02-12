@@ -2314,31 +2314,26 @@ class SpotifyAPI:
             for t in raw_tracks:
                 if not t: continue
                 
-                # [FIX] Ambil Artist ID agar Handler bisa cek Genre
                 artist_data = t.get("artists", [])
                 artist_name = artist_data[0]["name"] if artist_data else "Unknown"
                 artist_id = artist_data[0].get("id") if artist_data else None 
 
-                # [BARU] Ambil ISRC per Track
                 isrc_code = t.get("external_ids", {}).get("isrc", "")
 
                 track_obj = TrackInfo(
                     name=t.get("name"),
                     id=t.get("id"),
                     artists=[artist_name],
-                    artist_id=artist_id,  # <--- Penting untuk Genre
+                    artist_id=artist_id,
                     album=data.get("name"),
                     duration=t.get("duration_ms", 0) // 1000,
                     cover_url=cover_url,
                     release_year=data.get("release_date", "")[:4],
                     explicit=t.get("explicit", False),
-                    
-                    # [BARU] Masukkan Metadata Lengkap ke Object
                     label=label_name,
                     copyright=copyright_str,
                     upc=upc_code,
                     isrc=isrc_code,
-                    
                     tags=Tags(
                         track_number=t.get("track_number"),
                         total_tracks=data.get("total_tracks"),
