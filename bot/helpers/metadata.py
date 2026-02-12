@@ -571,50 +571,83 @@ async def set_wav(data, handle, dur_ms=0):
 
 
 # ==========================================
-# HANDLER OGG VORBIS (BARU - KHUSUS SPOTIFY)
+# HANDLER OGG VORBIS (KHUSUS SPOTIFY)
 # ==========================================
 async def set_vorbis(data, handle, dur_ms=0):
     """Handler khusus untuk file OGG (Spotify)"""
+    # Pastikan container tags ada
     if handle.tags is None:
         try: handle.add_tags()
         except: pass
     
-    # Vorbis Comments menggunakan Key-Value list, mirip FLAC
-    # Kita bisa reuse logika field yang mirip dengan FLAC
-    
+    # --- 1. Standard Tags ---
     handle.tags['TITLE'] = data['title']
     handle.tags['ALBUM'] = data['album']
     handle.tags['ALBUMARTIST'] = data['albumartist']
     handle.tags['ARTIST'] = data['artist']
     
+    # --- 2. Copyright & Publisher ---
     cpr = data.get('copyright') or ''
-    if cpr: handle.tags['COPYRIGHT'] = cpr
+    if cpr: 
+        handle.tags['COPYRIGHT'] = cpr
         
     pub = data.get('publisher') or data.get('organization') or ''
-    if pub: handle.tags['PUBLISHER'] = pub
+    if pub: 
+        handle.tags['PUBLISHER'] = pub
+        handle.tags['ORGANIZATION'] = pub # Alias untuk kompatibilitas
+        handle.tags['LABEL'] = pub        # Alias untuk kompatibilitas
 
-    # Tracks & Discs
-    handle.tags['TRACKNUMBER'] = str(data.get('tracknumber') or '1')
-    handle.tags['TRACKTOTAL'] = str(data.get('totaltracks') or '1')
-    handle.tags['DISCNUMBER'] = str(data.get('volume') or '1')
-    handle.tags['DISCTOTAL'] = str(data.get('totalvolume') or '1')
+    # --- 3. Tracks & Discs ---
+    # Konversi ke string untuk keamanan
+    t_num = str(data.get('tracknumber') or '1')
+    t_tot = str(data.get('totaltracks') or '1')
+    d_num = str(data.get('discnumber') or data.get('volume') or '1')
+    d_tot = str(data.get('totalvolumes') or data.get('totalvolume') or '1')
 
-    # Codes
-    if data.get('upc'): handle.tags['UPC'] = data['upc']
-    if data.get('isrc'): handle.tags['ISRC'] = data['isrc']
-
-    # Dates
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    if data.get('date'): handle.tags['DATE'] = data['date']
-    if data.get('release_date'): handle.tags['ORIGINALDATE'] = data['release_date']
+    handle.tags['TRACKNUMBER'] = t_num
+    handle.tags['TRACKTOTAL'] = t_tot
+    handle.tags['TOTALTRACKS'] = t_tot
     
-    # Misc
+    handle.tags['DISCNUMBER'] = d_num
+    handle.tags['DISCTOTAL'] = d_tot
+    handle.tags['TOTALDISCS'] = d_tot
+
+    # --- 4. Codes (UPC, ISRC) ---
+    if data.get('upc'): 
+        handle.tags['UPC'] = data['upc']
+        handle.tags['BARCODE'] = data['upc']
+        handle.tags['EAN'] = data['upc'] # European Article Number
+
+    if data.get('isrc'): 
+        handle.tags['ISRC'] = data['isrc']
+
+    # --- 5. Dates ---
+    if data.get('date'): 
+        handle.tags['DATE'] = data['date']
+        handle.tags['YEAR'] = data['date'] # Alias
+
+    if data.get('release_date'): 
+        handle.tags['ORIGINALDATE'] = data['release_date']
+    
+    # --- 6. EXPLICIT RATING ---
+    # Menggunakan standar ITUNESADVISORY di dalam Vorbis Comment
+    # 1 = Explicit, 2 = Clean, 0 = None
+    if data.get('explicit') is True:
+        handle.tags['ITUNESADVISORY'] = '1'
+        handle.tags['RATING'] = 'Explicit'
+    elif data.get('explicit') is False:
+        handle.tags['ITUNESADVISORY'] = '2'
+        handle.tags['RATING'] = 'Clean'
+
+    # --- 7. Misc ---
     if data.get('genre'): handle.tags['GENRE'] = data['genre']
     if data.get('composer'): handle.tags['COMPOSER'] = data['composer']
     if data.get('lyrics'): handle.tags['LYRICS'] = data['lyrics']
     
-    # Cover Art untuk OGG sama dengan FLAC (menggunakan Picture block)
+    # --- 8. Cover Art ---
+    # Memanggil fungsi helper savePic (yang menangani Base64 encoding untuk OGG)
     await savePic(handle, data)
+    
     handle.save()
     return True
 
