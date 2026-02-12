@@ -321,8 +321,6 @@ async def process_playlist(client, playlist_id, user):
     await edit_message(msg, f"⬇️ **Spotify:** Playlist: {playlist_info.name}\nTotal: {total} Lagu")
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-
-    # Gunakan .get() untuk r_id agar aman
     r_id = user.get('r_id', 'unknown')
 
     meta_playlist = {
@@ -365,12 +363,20 @@ async def process_playlist(client, playlist_id, user):
             download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
             
             if download_result and download_result.temp_file_path:
-                # Mapping metadata (ISRC, Composer, dll otomatis terisi di sini)
-                meta = map_spotify_to_bot_metadata(track, user)
                 
+                # [FIX UTAMA PLAYLIST]
+                # Panggil Full Track Info agar Label/UPC/Copyright terambil dari Album
+                full_track_info = client.get_track_info(track.id, "HIGH", None)
+                
+                # Gunakan info lengkap jika berhasil, jika gagal pakai info sederhana dari playlist
+                target_info = full_track_info if full_track_info else track
+                
+                # Mapping Metadata
+                meta = map_spotify_to_bot_metadata(target_info, user)
+                
+                # Proses File
                 clean_artist = meta['artist'].replace("/", "_")
                 clean_title = meta['title'].replace("/", "_")
-                
                 orig_track_num = str(meta['tracknumber']).zfill(2)
                 filename = f"{orig_track_num} - {clean_artist} - {clean_title}.ogg"
                 
@@ -385,8 +391,6 @@ async def process_playlist(client, playlist_id, user):
                         t_path = await create_cover_file(meta['cover'], meta, thumbnail=True)
                         meta['thumbnail'] = t_path
                     
-                    # [FIX LYRICS] Kirim User ID Valid ke set_metadata
-                    # Ini kunci agar lirik otomatis dicari untuk setiap track di playlist
                     user_id_val = user.get('user_id') or user.get('id')
                     await set_metadata(meta, user_id_val)
                     
@@ -404,18 +408,16 @@ async def process_playlist(client, playlist_id, user):
 
     if not processed_tracks:
         raise Exception("Gagal mengunduh isi playlist (Semua lagu gagal).")
-
+    
+    # ... (Sisa kode zip upload sama)
     meta_playlist['tracks'] = processed_tracks
     
     if playlist_zip:
         await edit_message(user['bot_msg'], f"🗜️ **Zipping:** Menyiapkan {len(processed_tracks)} lagu...")
-        
         thumb_url = getattr(playlist_info, 'small_cover_url', None) or meta_playlist.get('cover')
-        
         if thumb_url:
              zip_thumb_path = await create_cover_file(thumb_url, meta_playlist, thumbnail=True)
              meta_playlist['thumbnail'] = zip_thumb_path
-             
              if meta_playlist.get('cover'):
                  try:
                      large_cover = await create_cover_file(meta_playlist['cover'], meta_playlist, thumbnail=False)
