@@ -2285,12 +2285,17 @@ class SpotifyAPI:
             track_objects = []
             for t in raw_tracks:
                 if not t: continue
-                artist_name = t["artists"][0]["name"] if t.get("artists") else "Unknown"
                 
+                # [FIX] Ambil Artist ID agar Handler bisa cek Genre
+                artist_data = t.get("artists", [])
+                artist_name = artist_data[0]["name"] if artist_data else "Unknown"
+                artist_id = artist_data[0].get("id") if artist_data else None 
+
                 track_obj = TrackInfo(
                     name=t.get("name"),
                     id=t.get("id"),
                     artists=[artist_name],
+                    artist_id=artist_id,  # <--- [PENTING] Tambahkan baris ini
                     album=data.get("name"),
                     duration=t.get("duration_ms", 0) // 1000,
                     cover_url=cover_url,
@@ -2395,8 +2400,11 @@ class SpotifyAPI:
                 # Skip jika track kosong atau Local File (tidak punya ID)
                 if not t or not t.get("id"): continue 
                 
-                artist_name = t["artists"][0]["name"] if t.get("artists") else "Unknown"
-                
+                # [FIX] Ambil Artist ID
+                artist_data = t.get("artists", [])
+                artist_name = artist_data[0]["name"] if artist_data else "Unknown"
+                artist_id = artist_data[0].get("id") if artist_data else None
+
                 # Ambil data Album
                 alb = t.get("album", {})
                 album_name = alb.get("name", "Unknown")
@@ -2408,14 +2416,13 @@ class SpotifyAPI:
                     name=t.get("name"),
                     id=t.get("id"),
                     artists=[artist_name],
+                    artist_id=artist_id,  # <--- [PENTING] Tambahkan baris ini
                     album=album_name,
                     duration=t.get("duration_ms", 0) // 1000,
                     cover_url=track_cover,
                     release_year=alb.get("release_date", "")[:4],
                     explicit=t.get("explicit", False),
                     tags=Tags(
-                        # PENTING: Ambil Track Number & Disc Number dari Album Asli
-                        # Ini agar format nama file "01 - Judul" sesuai album aslinya
                         track_number=t.get("track_number"),
                         total_tracks=alb.get("total_tracks"),
                         disc_number=t.get("disc_number"),
@@ -2424,7 +2431,7 @@ class SpotifyAPI:
                     )
                 )
                 track_objects.append(track_obj)
-            
+
             self.logger.info(f"Berhasil memproses playlist: {data.get('name')} ({len(track_objects)} lagu)")
 
             # Return PlaylistInfo LENGKAP dengan small_cover_url
