@@ -170,18 +170,18 @@ class TrackInfo:
     artist_id: str = None
     album_id: str = None
     gid_hex: str = None
-    # Field Tambahan
     quality: str = None
     provider: str = None
     release_date: str = None
     total_tracks: str = None
     total_volumes: int = 1
     explicit_str: str = "No"
-    # [BARU] Field Metadata Tambahan
+    # [FIX] Pastikan ini ada
     isrc: str = ""
-    label: str = ""       # Publisher / Label
-    copyright: str = ""   # Copyright
-    upc: str = ""         # Barcode / EAN
+    label: str = ""       
+    copyright: str = ""   
+    upc: str = ""
+    error: str = None # Field extra
 
 @dataclass
 class TrackDownloadInfo:
@@ -2082,9 +2082,6 @@ class SpotifyAPI:
         return self.parse_url(url)
 
     def get_track_info(self, track_id: str, quality_tier: QualityEnum, codec_options: CodecOptions, **extra_kwargs) -> Optional[TrackInfo]:
-        """
-        Mengambil info track dan menyiapkan data untuk Handler.
-        """
         self.logger.debug(f"SpotifyAPI.get_track_info entered for track_id: {track_id}")
         
         web_api_token = self._get_web_api_token()
@@ -2099,9 +2096,6 @@ class SpotifyAPI:
             # --- PARSING DATA ---
             name = web_api_track_data.get('name')
             duration_ms = web_api_track_data.get('duration_ms')
-            
-            # [FIX 1] Explicit biarkan Boolean (True/False) di sini.
-            # Konversi string dilakukan di Handler agar fleksibel.
             explicit_bool = web_api_track_data.get('explicit', False)
             
             track_number = web_api_track_data.get('track_number')
@@ -2120,19 +2114,13 @@ class SpotifyAPI:
             album_artist_data = album_data.get('artists', [])
             album_artist_names = [aa.get('name') for aa in album_artist_data if aa.get('name')]
 
-            # --- [BARU] AMBIL METADATA EKSTRA (ISRC, UPC, Label, Copyright) ---
-            # 1. ISRC (Ada di object track)
+            # --- [FIX] AMBIL METADATA EKSTRA ---
             isrc_code = web_api_track_data.get('external_ids', {}).get('isrc', '')
-
-            # 2. UPC/EAN (Ada di object album)
+            
             upc_code = album_data.get('external_ids', {}).get('upc', '')
             if not upc_code:
                 upc_code = album_data.get('external_ids', {}).get('ean', '')
 
-            # 3. Label & Copyright
-            # Note: API 'get_track' biasanya mengembalikan 'Simplified Album Object' yang
-            # seringkali TIDAK mengandung label/copyright. Namun kode ini disiapkan
-            # jika sewaktu-waktu Spotify menyertakannya.
             label_name = album_data.get('label', '')
             
             copyrights_list = []
@@ -2140,7 +2128,6 @@ class SpotifyAPI:
                 if c.get('text'):
                     copyrights_list.append(c['text'])
             copyright_str = " / ".join(copyrights_list)
-            # ------------------------------------------------------------------
             
             # Cover Art
             cover_url = None
@@ -2148,7 +2135,6 @@ class SpotifyAPI:
                 preferred_image = next((img for img in album_data['images'] if img.get('height') == 640), None)
                 cover_url = preferred_image.get('url') if preferred_image else album_data['images'][0].get('url')
             
-            # Parsing Tahun
             album_release_year_int = 0
             if album_release_date_str and len(album_release_date_str) >= 4:
                 try: album_release_year_int = int(album_release_date_str[:4])
@@ -2156,7 +2142,6 @@ class SpotifyAPI:
 
             gid_hex_value = self._convert_base62_to_gid_hex(track_id) 
 
-            # --- ISI TAGS ---
             tags_obj = Tags(
                 album_artist=album_artist_names if album_artist_names else artist_names,
                 track_number=str(track_number) if track_number is not None else "1",
@@ -2166,7 +2151,6 @@ class SpotifyAPI:
                 year=str(album_release_year_int)
             )
 
-            # --- QUALITY STRING ---
             quality_str = "High (320kbps)" 
             if quality_tier and hasattr(quality_tier, 'name'):
                 if "HIFI" in quality_tier.name or "VERY" in quality_tier.name:
@@ -2174,7 +2158,6 @@ class SpotifyAPI:
                 elif "NORMAL" in quality_tier.name:
                     quality_str = "Normal (160kbps)"
 
-            # --- RETURN OBJECT ---
             track_info_instance = TrackInfo(
                 id=track_id,
                 name=name,
@@ -2184,20 +2167,17 @@ class SpotifyAPI:
                 album=album_name,
                 duration=duration_ms // 1000 if duration_ms else 0,
                 cover_url=cover_url,
-                explicit=explicit_bool, # Boolean Murni
+                explicit=explicit_bool,
                 tags=tags_obj,
                 codec=CodecEnum.VORBIS, 
                 release_year=album_release_year_int,
                 gid_hex=gid_hex_value,
-                
-                # Field Tambahan untuk Handler
                 quality=quality_str,
                 provider="Spotify",
                 release_date=album_release_date_str,
                 total_tracks=album_total_tracks,
                 total_volumes=1,
-
-                # [BARU] Masukkan Metadata Lengkap ke Object TrackInfo
+                # [FIX] Masukkan Metadata
                 isrc=isrc_code,
                 upc=upc_code,
                 label=label_name,
