@@ -95,6 +95,7 @@ async def process_track(client, track_id, user, is_episode=False):
     await edit_message(msg, f"⬇️ **Spotify:** Mengunduh {'Episode' if is_episode else 'Lagu'}...")
 
     try:
+        # 1. Ambil Info Track/Episode
         if is_episode:
              track_info = client.get_episode_info(track_id, "HIGH", None)
         else:
@@ -103,6 +104,7 @@ async def process_track(client, track_id, user, is_episode=False):
         if not track_info:
             raise Exception("Gagal mengambil metadata.")
 
+        # 2. Download Audio Stream
         download_result = None
         if is_episode:
              download_result = client.get_episode_download(track_id=track_id, quality_tier="HIGH")
@@ -112,17 +114,23 @@ async def process_track(client, track_id, user, is_episode=False):
         if not download_result or not download_result.temp_file_path:
             raise Exception("Gagal mengunduh stream audio.")
 
-        # [FIX] AMBIL GENRE DARI ARTIS
+        # 3. [FIX GENRE] Ambil Genre dari Artis (Jika bukan episode)
         fetched_genre = None
         if not is_episode and track_info.artist_id:
             fetched_genre = fetch_artist_genre(client, track_info.artist_id)
 
-        # Pass fetched_genre ke mapping
+        # 4. Map Metadata (Pass fetched_genre)
         meta = map_spotify_to_bot_metadata(track_info, user, is_episode, custom_genre=fetched_genre)
         
-        # ... (Sisa kode sama persis sampai bawah)
-        final_filename = f"{meta['artist']} - {meta['title']}.ogg".replace("/", "_")
-        user_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Spotify"
+        # 5. Setup Nama File & Folder
+        # Bersihkan karakter ilegal pada nama file
+        clean_artist = meta['artist'].replace("/", "_")
+        clean_title = meta['title'].replace("/", "_")
+        final_filename = f"{clean_artist} - {clean_title}.ogg"
+        
+        # Gunakan .get() untuk r_id agar aman
+        r_id = user.get('r_id', 'unknown')
+        user_folder = f"{Config.DOWNLOAD_BASE_DIR}/{r_id}/Spotify"
         os.makedirs(user_folder, exist_ok=True)
         
         final_path = os.path.join(user_folder, final_filename)
@@ -134,12 +142,17 @@ async def process_track(client, track_id, user, is_episode=False):
         if os.path.getsize(final_path) < 1024:
             raise Exception("File audio korup/kosong (0 bytes).")
 
+        # 6. Buat Thumbnail
         if meta.get('cover'):
             thumb_path = await create_cover_file(meta['cover'], meta, thumbnail=True)
             meta['thumbnail'] = thumb_path
             
         await edit_message(msg, "🏷 **Spotify:** Menulis Metadata...")
-        await set_metadata(meta, user['user_id'])
+        
+        # 7. [FIX LYRICS] Kirim User ID yang Valid
+        # Penting: lyrics_manager butuh user_id untuk fetch lirik
+        user_id_val = user.get('user_id') or user.get('id')
+        await set_metadata(meta, user_id_val)
 
         await edit_message(msg, "⬆️ **Spotify:** Mengunggah...")
         await track_upload(meta, user)
@@ -152,6 +165,7 @@ async def process_album(client, album_id, user):
     msg = user.get('bot_msg')
     await edit_message(msg, "🔍 **Spotify:** Mengambil Info Album...")
 
+    # 1. Ambil Info Album
     album_info = client.get_album_info(album_id)
     if not album_info:
         raise Exception("Album tidak ditemukan.")
@@ -161,21 +175,21 @@ async def process_album(client, album_id, user):
     
     await edit_message(msg, f"⬇️ **Spotify:** Album ditemukan: {album_info.name}\nJumlah Lagu: {total}")
     
-    # --- [FIX GENRE] AMBIL GENRE DARI ARTIS UTAMA ---
-    # Kita ambil dari track pertama untuk efisiensi request API
+    # 2. [FIX GENRE] Ambil Genre dari Artis Utama (Cukup 1x request)
     album_genre = None
     try:
         if tracks and tracks[0].artist_id:
-            # Pastikan fungsi fetch_artist_genre sudah ada di handler.py
             album_genre = fetch_artist_genre(client, tracks[0].artist_id)
-            if album_genre:
-                LOGGER.info(f"Genre ditemukan untuk album ini: {album_genre}")
+            if album_genre: LOGGER.info(f"Genre ditemukan: {album_genre}")
     except Exception as e:
         LOGGER.warning(f"Gagal mengambil genre album: {e}")
-    # -----------------------------------------------
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
+    # 3. Setup Metadata Album & Folder
+    # Gunakan .get() untuk r_id agar lebih aman
+    r_id = user.get('r_id', 'unknown')
+    
     meta_album = {
         'title': album_info.name,
         'artist': album_info.artist,
@@ -188,13 +202,13 @@ async def process_album(client, album_id, user):
         'totaltracks': str(total),
         'totalvolumes': "1",
         'explicit': False,
-        'genre': album_genre if album_genre else "Pop", # Update genre album juga
-        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+        'genre': album_genre if album_genre else "Pop",
+        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{r_id}-temp/"
     }
     
+    # 4. Siapkan Thumbnail Album
     if meta_album.get('cover'):
          poster_path = await create_cover_file(meta_album['cover'], meta_album, thumbnail=False)
-         # [FIX] Ganti 'thumb' menjadi 'thumbnail'
          meta_album['thumbnail'] = poster_path
 
     poster_key = f'poster_album_{album_id}'
@@ -205,12 +219,13 @@ async def process_album(client, album_id, user):
         user[poster_key] = meta_album['poster_msg']
 
     processed_tracks = []
-    user_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Spotify/{album_info.name}"
+    user_folder = f"{Config.DOWNLOAD_BASE_DIR}/{r_id}/Spotify/{album_info.name}"
     os.makedirs(user_folder, exist_ok=True)
     meta_album['folderpath'] = user_folder
 
     upload_per_track = not album_zip
 
+    # 5. Looping Download Track
     for i, track in enumerate(tracks):
         try:
             current_num = i + 1
@@ -219,9 +234,8 @@ async def process_album(client, album_id, user):
             download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
             
             if download_result and download_result.temp_file_path:
-                # --- [FIX GENRE] PASS CUSTOM GENRE KE MAPPING ---
+                # [FIX] Mapping Metadata (Pass album_genre ke sini)
                 meta = map_spotify_to_bot_metadata(track, user, custom_genre=album_genre)
-                # ------------------------------------------------
                 
                 meta['totaltracks'] = str(total)
                 
@@ -243,7 +257,11 @@ async def process_album(client, album_id, user):
                         t_path = await create_cover_file(meta['cover'], meta, thumbnail=True)
                         meta['thumbnail'] = t_path
                     
-                    await set_metadata(meta, user['user_id'])
+                    # 6. [FIX LYRICS] Kirim User ID Valid ke set_metadata
+                    # Ini kunci agar lirik otomatis dicari
+                    user_id_val = user.get('user_id') or user.get('id')
+                    await set_metadata(meta, user_id_val)
+                    
                     processed_tracks.append(meta)
 
                     if upload_per_track:
@@ -261,16 +279,18 @@ async def process_album(client, album_id, user):
 
     meta_album['tracks'] = processed_tracks
     
+    # 7. Handling Upload ZIP (Jika Mode Album)
     if album_zip:
         await edit_message(user['bot_msg'], f"🗜️ **Zipping:** Menyiapkan {len(processed_tracks)} lagu...")
         
+        # Gunakan cover kecil (small_cover_url) untuk thumbnail ZIP agar ringan
         thumb_url = getattr(album_info, 'small_cover_url', None) or meta_album.get('cover')
         
         if thumb_url:
              zip_thumb_path = await create_cover_file(thumb_url, meta_album, thumbnail=True)
-             # [FIX] Ganti 'thumb' menjadi 'thumbnail'
              meta_album['thumbnail'] = zip_thumb_path
              
+             # Simpan cover.jpg HD di dalam ZIP
              if meta_album.get('cover'):
                  try:
                      large_cover = await create_cover_file(meta_album['cover'], meta_album, thumbnail=False)
@@ -302,6 +322,9 @@ async def process_playlist(client, playlist_id, user):
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
+    # Gunakan .get() untuk r_id agar aman
+    r_id = user.get('r_id', 'unknown')
+
     meta_playlist = {
         'title': playlist_info.name,
         'artist': playlist_info.creator,
@@ -311,12 +334,11 @@ async def process_playlist(client, playlist_id, user):
         'totaltracks': str(total),
         'totalvolumes': "1",
         'quality': "High (320kbps)",
-        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{r_id}-temp/"
     }
     
     if meta_playlist.get('cover'):
          p_path = await create_cover_file(meta_playlist['cover'], meta_playlist, thumbnail=False)
-         # [FIX] Ganti 'thumb' menjadi 'thumbnail'
          meta_playlist['thumbnail'] = p_path
     
     poster_key = f'poster_playlist_{playlist_id}'
@@ -326,7 +348,7 @@ async def process_playlist(client, playlist_id, user):
         meta_playlist['poster_msg'] = await post_art_poster(user, meta_playlist)
         user[poster_key] = meta_playlist['poster_msg']
 
-    user_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Spotify/{playlist_info.name}"
+    user_folder = f"{Config.DOWNLOAD_BASE_DIR}/{r_id}/Spotify/{playlist_info.name}"
     os.makedirs(user_folder, exist_ok=True)
     meta_playlist['folderpath'] = user_folder
 
@@ -343,6 +365,7 @@ async def process_playlist(client, playlist_id, user):
             download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
             
             if download_result and download_result.temp_file_path:
+                # Mapping metadata (ISRC, Composer, dll otomatis terisi di sini)
                 meta = map_spotify_to_bot_metadata(track, user)
                 
                 clean_artist = meta['artist'].replace("/", "_")
@@ -360,10 +383,13 @@ async def process_playlist(client, playlist_id, user):
                 if os.path.exists(final_path) and os.path.getsize(final_path) > 1024:
                     if meta.get('cover'):
                         t_path = await create_cover_file(meta['cover'], meta, thumbnail=True)
-                        # [FIX] Ganti 'thumb' menjadi 'thumbnail'
                         meta['thumbnail'] = t_path
                     
-                    await set_metadata(meta, user['user_id'])
+                    # [FIX LYRICS] Kirim User ID Valid ke set_metadata
+                    # Ini kunci agar lirik otomatis dicari untuk setiap track di playlist
+                    user_id_val = user.get('user_id') or user.get('id')
+                    await set_metadata(meta, user_id_val)
+                    
                     processed_tracks.append(meta)
 
                     if upload_per_track:
@@ -388,7 +414,6 @@ async def process_playlist(client, playlist_id, user):
         
         if thumb_url:
              zip_thumb_path = await create_cover_file(thumb_url, meta_playlist, thumbnail=True)
-             # [FIX] Ganti 'thumb' menjadi 'thumbnail'
              meta_playlist['thumbnail'] = zip_thumb_path
              
              if meta_playlist.get('cover'):
@@ -429,6 +454,7 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False, custom_genre
     final_genre = custom_genre if custom_genre else "Pop"
 
     # Persiapan Data Metadata (Safe Get)
+    # Menggunakan getattr agar aman jika field belum ada di TrackInfo
     isrc = getattr(track_info, 'isrc', '')
     upc = getattr(track_info, 'upc', '')
     label = getattr(track_info, 'label', '')
@@ -476,12 +502,13 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False, custom_genre
         'composer': composer_val,
         'producer': composer_val, # Producer juga kita isi Artist agar tidak kosong
         
-        # [FIX LYRICS] Inisialisasi kosong, nanti diisi oleh metadata.py -> lyrics_manager
+        # [FIX LYRICS] Inisialisasi None, nanti diisi oleh metadata.py -> lyrics_manager
         'lyrics': None, 
 
         'type': 'track',
         'cover': cover_url,
-        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+        # Menggunakan .get() agar lebih aman daripada user['r_id']
+        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user.get('r_id', 'unknown')}-temp/"
     }
     
     if is_episode:
