@@ -170,13 +170,18 @@ class TrackInfo:
     artist_id: str = None
     album_id: str = None
     gid_hex: str = None
-    # Field Tambahan untuk Caption & Handler
+    # Field Tambahan
     quality: str = None
     provider: str = None
     release_date: str = None
     total_tracks: str = None
     total_volumes: int = 1
     explicit_str: str = "No"
+    # [BARU] Field Metadata Tambahan
+    isrc: str = ""
+    label: str = ""       # Publisher / Label
+    copyright: str = ""   # Copyright
+    upc: str = ""         # Barcode / EAN
 
 @dataclass
 class TrackDownloadInfo:
@@ -2114,6 +2119,28 @@ class SpotifyAPI:
             
             album_artist_data = album_data.get('artists', [])
             album_artist_names = [aa.get('name') for aa in album_artist_data if aa.get('name')]
+
+            # --- [BARU] AMBIL METADATA EKSTRA (ISRC, UPC, Label, Copyright) ---
+            # 1. ISRC (Ada di object track)
+            isrc_code = web_api_track_data.get('external_ids', {}).get('isrc', '')
+
+            # 2. UPC/EAN (Ada di object album)
+            upc_code = album_data.get('external_ids', {}).get('upc', '')
+            if not upc_code:
+                upc_code = album_data.get('external_ids', {}).get('ean', '')
+
+            # 3. Label & Copyright
+            # Note: API 'get_track' biasanya mengembalikan 'Simplified Album Object' yang
+            # seringkali TIDAK mengandung label/copyright. Namun kode ini disiapkan
+            # jika sewaktu-waktu Spotify menyertakannya.
+            label_name = album_data.get('label', '')
+            
+            copyrights_list = []
+            for c in album_data.get('copyrights', []):
+                if c.get('text'):
+                    copyrights_list.append(c['text'])
+            copyright_str = " / ".join(copyrights_list)
+            # ------------------------------------------------------------------
             
             # Cover Art
             cover_url = None
@@ -2139,7 +2166,7 @@ class SpotifyAPI:
                 year=str(album_release_year_int)
             )
 
-            # --- QUALTIY STRING ---
+            # --- QUALITY STRING ---
             quality_str = "High (320kbps)" 
             if quality_tier and hasattr(quality_tier, 'name'):
                 if "HIFI" in quality_tier.name or "VERY" in quality_tier.name:
@@ -2168,15 +2195,21 @@ class SpotifyAPI:
                 provider="Spotify",
                 release_date=album_release_date_str,
                 total_tracks=album_total_tracks,
-                total_volumes=1
+                total_volumes=1,
+
+                # [BARU] Masukkan Metadata Lengkap ke Object TrackInfo
+                isrc=isrc_code,
+                upc=upc_code,
+                label=label_name,
+                copyright=copyright_str
             )
             
             return track_info_instance
 
         except Exception as e:
             self.logger.error(f"Error in get_track_info: {e}", exc_info=True)
-            return None 
-
+            return None
+ 
     def _get_valid_token(self):
         """
         Helper untuk mendapatkan token Web API yang valid.
@@ -2244,7 +2277,23 @@ class SpotifyAPI:
             # --- PARSING DATA ---
             data = r.json()
             
-            # [LOGIKA BARU] Ambil Cover Besar & Kecil
+            # --- [BARU] AMBIL METADATA ALBUM (Label, Copyright, UPC) ---
+            label_name = data.get("label", "")
+            
+            # Ambil Copyright (Gabungkan tipe C dan P jika ada)
+            copyrights_list = []
+            for c in data.get("copyrights", []):
+                if c.get("text"):
+                    copyrights_list.append(c["text"])
+            copyright_str = " / ".join(copyrights_list)
+            
+            # Ambil UPC/EAN (Barcode)
+            upc_code = data.get("external_ids", {}).get("upc", "")
+            if not upc_code:
+                 upc_code = data.get("external_ids", {}).get("ean", "")
+            # -----------------------------------------------------------
+            
+            # [LOGIKA COVER] Ambil Cover Besar & Kecil
             cover_url = ""
             small_cover_url = ""
             
@@ -2252,7 +2301,6 @@ class SpotifyAPI:
                 cover_url = data["images"][0]["url"] # Gambar Terbesar (Original)
                 
                 # Cari gambar yang ukurannya <= 320px untuk Thumbnail ZIP
-                # Telegram butuh gambar < 320px agar muncul sebagai ikon file
                 for img in data["images"]:
                     if img.get("height") and img.get("height") <= 320:
                         small_cover_url = img["url"]
@@ -2291,16 +2339,26 @@ class SpotifyAPI:
                 artist_name = artist_data[0]["name"] if artist_data else "Unknown"
                 artist_id = artist_data[0].get("id") if artist_data else None 
 
+                # [BARU] Ambil ISRC per Track
+                isrc_code = t.get("external_ids", {}).get("isrc", "")
+
                 track_obj = TrackInfo(
                     name=t.get("name"),
                     id=t.get("id"),
                     artists=[artist_name],
-                    artist_id=artist_id,  # <--- [PENTING] Tambahkan baris ini
+                    artist_id=artist_id,  # <--- Penting untuk Genre
                     album=data.get("name"),
                     duration=t.get("duration_ms", 0) // 1000,
                     cover_url=cover_url,
                     release_year=data.get("release_date", "")[:4],
                     explicit=t.get("explicit", False),
+                    
+                    # [BARU] Masukkan Metadata Lengkap ke Object
+                    label=label_name,
+                    copyright=copyright_str,
+                    upc=upc_code,
+                    isrc=isrc_code,
+                    
                     tags=Tags(
                         track_number=t.get("track_number"),
                         total_tracks=data.get("total_tracks"),
