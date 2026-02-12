@@ -580,24 +580,34 @@ async def set_vorbis(data, handle, dur_ms=0):
         try: handle.add_tags()
         except: pass
     
-    # --- 1. Standard Tags ---
-    handle.tags['TITLE'] = data['title']
-    handle.tags['ALBUM'] = data['album']
-    handle.tags['ALBUMARTIST'] = data['albumartist']
-    handle.tags['ARTIST'] = data['artist']
+    # --- 1. Info Utama ---
+    # Menggunakan .get() dengan default string kosong agar aman
+    handle.tags['TITLE'] = data.get('title', '')
+    handle.tags['ALBUM'] = data.get('album', '')
+    handle.tags['ALBUMARTIST'] = data.get('albumartist', '')
+    handle.tags['ARTIST'] = data.get('artist', '')
     
-    # --- 2. Copyright & Publisher ---
+    # --- 2. Composer (SOLUSI YANG ANDA MINTA) ---
+    if data.get('composer'): 
+        handle.tags['COMPOSER'] = data['composer']
+    
+    # --- 3. Lirik (SOLUSI LIRIK HILANG) ---
+    # Kita tulis ke dua field agar terbaca di berbagai player
+    if data.get('lyrics'): 
+        handle.tags['LYRICS'] = data['lyrics']           # Standar Vorbis
+        handle.tags['UNSYNCEDLYRICS'] = data['lyrics']   # Kompatibilitas Player lain
+
+    # --- 4. Copyright & Publisher ---
     cpr = data.get('copyright') or ''
-    if cpr: 
-        handle.tags['COPYRIGHT'] = cpr
+    if cpr: handle.tags['COPYRIGHT'] = cpr
         
     pub = data.get('publisher') or data.get('organization') or ''
     if pub: 
         handle.tags['PUBLISHER'] = pub
-        handle.tags['ORGANIZATION'] = pub # Alias untuk kompatibilitas
-        handle.tags['LABEL'] = pub        # Alias untuk kompatibilitas
+        handle.tags['ORGANIZATION'] = pub # Alias untuk kompatibilitas PC
+        handle.tags['LABEL'] = pub        # Alias
 
-    # --- 3. Tracks & Discs ---
+    # --- 5. Tracks & Discs ---
     # Konversi ke string untuk keamanan
     t_num = str(data.get('tracknumber') or '1')
     t_tot = str(data.get('totaltracks') or '1')
@@ -612,25 +622,24 @@ async def set_vorbis(data, handle, dur_ms=0):
     handle.tags['DISCTOTAL'] = d_tot
     handle.tags['TOTALDISCS'] = d_tot
 
-    # --- 4. Codes (UPC, ISRC) ---
+    # --- 6. Codes (UPC, ISRC) ---
     if data.get('upc'): 
         handle.tags['UPC'] = data['upc']
         handle.tags['BARCODE'] = data['upc']
-        handle.tags['EAN'] = data['upc'] # European Article Number
+        handle.tags['EAN'] = data['upc']
 
     if data.get('isrc'): 
         handle.tags['ISRC'] = data['isrc']
 
-    # --- 5. Dates ---
+    # --- 7. Dates ---
     if data.get('date'): 
         handle.tags['DATE'] = data['date']
-        handle.tags['YEAR'] = data['date'] # Alias
+        handle.tags['YEAR'] = data['date']
 
     if data.get('release_date'): 
         handle.tags['ORIGINALDATE'] = data['release_date']
     
-    # --- 6. EXPLICIT RATING ---
-    # Menggunakan standar ITUNESADVISORY di dalam Vorbis Comment
+    # --- 8. Explicit Rating ---
     # 1 = Explicit, 2 = Clean, 0 = None
     if data.get('explicit') is True:
         handle.tags['ITUNESADVISORY'] = '1'
@@ -639,13 +648,11 @@ async def set_vorbis(data, handle, dur_ms=0):
         handle.tags['ITUNESADVISORY'] = '2'
         handle.tags['RATING'] = 'Clean'
 
-    # --- 7. Misc ---
+    # --- 9. Genre ---
     if data.get('genre'): handle.tags['GENRE'] = data['genre']
-    if data.get('composer'): handle.tags['COMPOSER'] = data['composer']
-    if data.get('lyrics'): handle.tags['LYRICS'] = data['lyrics']
     
-    # --- 8. Cover Art ---
-    # Memanggil fungsi helper savePic (yang menangani Base64 encoding untuk OGG)
+    # --- 10. Cover Art ---
+    # Memanggil fungsi helper savePic yang sudah ada di file Anda
     await savePic(handle, data)
     
     handle.save()
