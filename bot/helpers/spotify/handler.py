@@ -414,6 +414,8 @@ async def process_artist(client, artist_id, user):
 
 def map_spotify_to_bot_metadata(track_info, user, is_episode=False, custom_genre=None):
     cover_url = track_info.cover_url
+    
+    # 1. Handling Explicit (Rating)
     explicit_val = track_info.explicit if track_info.explicit is not None else False
     
     rel_date = "Unknown"
@@ -423,38 +425,53 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False, custom_genre
         rel_date = str(track_info.release_year)
         
     tags = track_info.tags
-    
-    t_num = getattr(tags, 'track_number', None) if tags else None
-    t_num = str(t_num) if t_num else "1"
-    
-    t_tot = getattr(tags, 'total_tracks', None) if tags else None
-    t_tot = str(t_tot) if t_tot else "1"
-    
-    d_num = getattr(tags, 'disc_number', None) if tags else None
-    d_num = str(d_num) if d_num else "1"
-    
-    t_vols = "1"
-    alb_artist = getattr(tags, 'album_artist', "Unknown") if tags else "Unknown"
-
-    # [FIX] Gunakan custom_genre jika ada, jika tidak default ke Pop atau Unknown
     final_genre = custom_genre if custom_genre else "Pop"
+
+    # 2. Persiapan Data Metadata Baru
+    # Ambil dari object TrackInfo yang sudah kita update di spotify_api.py
+    isrc = getattr(track_info, 'isrc', '')
+    upc = getattr(track_info, 'upc', '')
+    label = getattr(track_info, 'label', '')
+    copyright_txt = getattr(track_info, 'copyright', '')
 
     meta = {
         'title': track_info.name,
         'artist': track_info.artists[0] if track_info.artists else "Unknown",
         'album': track_info.album,
-        'albumartist': alb_artist,
+        'albumartist': getattr(tags, 'album_artist', "Unknown") if tags else "Unknown",
+        
+        # Date & Year
         'date': str(track_info.release_year) if track_info.release_year else "",
         'release_date': rel_date,
-        'tracknumber': t_num,
-        'totaltracks': t_tot,
-        'discnumber': d_num,
-        'totalvolumes': t_vols,
-        'genre': final_genre,  # <--- SUDAH DINAMIS
+        
+        # Tracks & Discs
+        'tracknumber': str(getattr(tags, 'track_number', '1')),
+        'totaltracks': str(getattr(tags, 'total_tracks', '1')),
+        'discnumber': str(getattr(tags, 'disc_number', '1')),
+        'volume': str(getattr(tags, 'disc_number', '1')), # volume = discnumber
+        'totalvolumes': "1",
+        
+        # Genre
+        'genre': final_genre,
+        
+        # Technical
         'duration': track_info.duration, 
         'quality': "High (320kbps)",
         'provider': "Spotify",
-        'explicit': explicit_val,
+        
+        # [BARU] METADATA LENGKAP
+        'explicit': explicit_val,  # Handler metadata.py akan ubah ini jadi Rating/Advisory
+        'isrc': isrc,
+        'upc': upc,                # BARCODE / EAN
+        'copyright': copyright_txt,# Copyright & cpr
+        'publisher': label,        # Label & pub & Organization
+        'organization': label,     # Fallback organization
+        
+        # Placeholders untuk Composer/Producer (Spotify Standard API tidak menyediakan ini langsung)
+        # Kita bisa isi dengan Artist jika mau, atau biarkan kosong.
+        'composer': '', 
+        'producer': '',
+        
         'type': 'track',
         'cover': cover_url,
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
@@ -466,4 +483,3 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False, custom_genre
         meta['artist'] = track_info.artists[0] 
         
     return meta
-
