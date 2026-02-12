@@ -56,6 +56,40 @@ async def start_spotify(link: str, user: dict):
         await edit_message(msg, f"❌ **Error:** {str(e)}")
 
 
+def fetch_artist_genre(client, artist_id):
+    """Helper untuk mengambil Genre dari Artist ID"""
+    try:
+        if not artist_id: return None
+        
+        # Ambil info artis dari API (gunakan fungsi yang sudah ada di spotify_api.py)
+        # Note: Kita ambil raw dict atau object ArtistInfo
+        # get_artist_info di spotify_api.py mengembalikan object ArtistInfo, 
+        # tapi kita butuh akses ke raw genres yang mungkin tidak terekspos di object tersebut
+        # atau kita perlu modifikasi sedikit cara panggilnya.
+        
+        # Kita panggil get_artist_info, lalu cek atributnya atau panggil API manual jika perlu.
+        # Namun, cara termudah dan teraman sesuai kode Anda:
+        
+        # Gunakan client.get_artist_info yang sudah Anda punya
+        artist_obj = client.get_artist_info(artist_id)
+        
+        # Karena class ArtistInfo di spotify_api.py tidak menyimpan field 'genres',
+        # kita harus sedikit 'mengintip' atau memodifikasi.
+        # TAPI, ada cara lain: pakai get_several_artists (raw json) jika hanya butuh genre.
+        
+        raw_artists = client.get_several_artists([artist_id])
+        if raw_artists and raw_artists[0]:
+            genres = raw_artists[0].get('genres', [])
+            if genres:
+                # Ambil genre pertama dan ubah jadi Title Case (misal: "indie pop" -> "Indie Pop")
+                return genres[0].title()
+                
+    except Exception as e:
+        LOGGER.warning(f"Gagal mengambil genre: {e}")
+    
+    return None
+
+
 async def process_track(client, track_id, user, is_episode=False):
     msg = user.get('bot_msg')
     await edit_message(msg, f"⬇️ **Spotify:** Mengunduh {'Episode' if is_episode else 'Lagu'}...")
@@ -78,8 +112,15 @@ async def process_track(client, track_id, user, is_episode=False):
         if not download_result or not download_result.temp_file_path:
             raise Exception("Gagal mengunduh stream audio.")
 
-        meta = map_spotify_to_bot_metadata(track_info, user, is_episode)
+        # [FIX] AMBIL GENRE DARI ARTIS
+        fetched_genre = None
+        if not is_episode and track_info.artist_id:
+            fetched_genre = fetch_artist_genre(client, track_info.artist_id)
+
+        # Pass fetched_genre ke mapping
+        meta = map_spotify_to_bot_metadata(track_info, user, is_episode, custom_genre=fetched_genre)
         
+        # ... (Sisa kode sama persis sampai bawah)
         final_filename = f"{meta['artist']} - {meta['title']}.ogg".replace("/", "_")
         user_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Spotify"
         os.makedirs(user_folder, exist_ok=True)
@@ -94,7 +135,6 @@ async def process_track(client, track_id, user, is_episode=False):
             raise Exception("File audio korup/kosong (0 bytes).")
 
         if meta.get('cover'):
-            # [FIX] Ganti 'thumb' menjadi 'thumbnail'
             thumb_path = await create_cover_file(meta['cover'], meta, thumbnail=True)
             meta['thumbnail'] = thumb_path
             
@@ -121,6 +161,19 @@ async def process_album(client, album_id, user):
     
     await edit_message(msg, f"⬇️ **Spotify:** Album ditemukan: {album_info.name}\nJumlah Lagu: {total}")
     
+    # --- [FIX GENRE] AMBIL GENRE DARI ARTIS UTAMA ---
+    # Kita ambil dari track pertama untuk efisiensi request API
+    album_genre = None
+    try:
+        if tracks and tracks[0].artist_id:
+            # Pastikan fungsi fetch_artist_genre sudah ada di handler.py
+            album_genre = fetch_artist_genre(client, tracks[0].artist_id)
+            if album_genre:
+                LOGGER.info(f"Genre ditemukan untuk album ini: {album_genre}")
+    except Exception as e:
+        LOGGER.warning(f"Gagal mengambil genre album: {e}")
+    # -----------------------------------------------
+
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
     meta_album = {
@@ -135,6 +188,7 @@ async def process_album(client, album_id, user):
         'totaltracks': str(total),
         'totalvolumes': "1",
         'explicit': False,
+        'genre': album_genre if album_genre else "Pop", # Update genre album juga
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
     
@@ -165,7 +219,10 @@ async def process_album(client, album_id, user):
             download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
             
             if download_result and download_result.temp_file_path:
-                meta = map_spotify_to_bot_metadata(track, user)
+                # --- [FIX GENRE] PASS CUSTOM GENRE KE MAPPING ---
+                meta = map_spotify_to_bot_metadata(track, user, custom_genre=album_genre)
+                # ------------------------------------------------
+                
                 meta['totaltracks'] = str(total)
                 
                 clean_title = meta['title'].replace("/", "_")
@@ -355,8 +412,7 @@ async def process_artist(client, artist_id, user):
     await edit_message(msg, "⚠️ **Info:** Download Artis belum didukung penuh. Silakan download per Album.")
 
 
-# --- HELPER MAPPING ---
-def map_spotify_to_bot_metadata(track_info, user, is_episode=False):
+def map_spotify_to_bot_metadata(track_info, user, is_episode=False, custom_genre=None):
     cover_url = track_info.cover_url
     explicit_val = track_info.explicit if track_info.explicit is not None else False
     
@@ -380,6 +436,9 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False):
     t_vols = "1"
     alb_artist = getattr(tags, 'album_artist', "Unknown") if tags else "Unknown"
 
+    # [FIX] Gunakan custom_genre jika ada, jika tidak default ke Pop atau Unknown
+    final_genre = custom_genre if custom_genre else "Pop"
+
     meta = {
         'title': track_info.name,
         'artist': track_info.artists[0] if track_info.artists else "Unknown",
@@ -391,7 +450,7 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False):
         'totaltracks': t_tot,
         'discnumber': d_num,
         'totalvolumes': t_vols,
-        'genre': "Pop", 
+        'genre': final_genre,  # <--- SUDAH DINAMIS
         'duration': track_info.duration, 
         'quality': "High (320kbps)",
         'provider': "Spotify",
@@ -407,3 +466,4 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False):
         meta['artist'] = track_info.artists[0] 
         
     return meta
+
