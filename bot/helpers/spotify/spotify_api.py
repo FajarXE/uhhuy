@@ -2093,7 +2093,7 @@ class SpotifyAPI:
             web_api_track_data = self.get_track_by_id(track_id) 
             if not web_api_track_data: return None
 
-            # --- PARSING DATA ---
+            # --- PARSING DATA BASIC ---
             name = web_api_track_data.get('name')
             duration_ms = web_api_track_data.get('duration_ms')
             explicit_bool = web_api_track_data.get('explicit', False)
@@ -2105,35 +2105,53 @@ class SpotifyAPI:
             artist_names = [artist.get('name') for artist in artists_data if artist.get('name')]
             artist_ids = [artist.get('id') for artist in artists_data if artist.get('id')]
             
-            album_data = web_api_track_data.get('album', {})
-            album_name = album_data.get('name')
-            album_id_spotify = album_data.get('id')
-            album_release_date_str = album_data.get('release_date')
-            album_total_tracks = album_data.get('total_tracks')
+            # Info Album Sederhana (dari response track)
+            album_data_simple = web_api_track_data.get('album', {})
+            album_name = album_data_simple.get('name')
+            album_id_spotify = album_data_simple.get('id')
+            album_release_date_str = album_data_simple.get('release_date')
+            album_total_tracks = album_data_simple.get('total_tracks')
             
-            album_artist_data = album_data.get('artists', [])
+            album_artist_data = album_data_simple.get('artists', [])
             album_artist_names = [aa.get('name') for aa in album_artist_data if aa.get('name')]
 
-            # --- [FIX] AMBIL METADATA EKSTRA ---
-            isrc_code = web_api_track_data.get('external_ids', {}).get('isrc', '')
+            # --- [FIX UTAMA] Request Tambahan ke Full Album untuk Label/UPC/Copyright ---
+            # Karena di 'album_data_simple', field label/copyright biasanya KOSONG.
+            label_name = ""
+            copyright_str = ""
+            upc_code = ""
             
-            upc_code = album_data.get('external_ids', {}).get('upc', '')
-            if not upc_code:
-                upc_code = album_data.get('external_ids', {}).get('ean', '')
+            if album_id_spotify:
+                try:
+                    headers = {"Authorization": f"Bearer {web_api_token}"}
+                    # Request ke Endpoint Album untuk dapat metadata lengkap
+                    url = f"https://api.spotify.com/v1/albums/{album_id_spotify}?market=US"
+                    r_alb = requests.get(url, headers=headers, timeout=5)
+                    
+                    if r_alb.status_code == 200:
+                        full_alb = r_alb.json()
+                        
+                        # Ambil Label
+                        label_name = full_alb.get("label", "")
+                        
+                        # Ambil Copyright
+                        copyrights_list = [c["text"] for c in full_alb.get("copyrights", []) if c.get("text")]
+                        copyright_str = " / ".join(copyrights_list)
+                        
+                        # Ambil UPC/EAN
+                        upc_code = full_alb.get("external_ids", {}).get("upc", "")
+                        if not upc_code: upc_code = full_alb.get("external_ids", {}).get("ean", "")
+                except Exception as e:
+                    self.logger.warning(f"Gagal fetch extra album metadata: {e}")
 
-            label_name = album_data.get('label', '')
-            
-            copyrights_list = []
-            for c in album_data.get('copyrights', []):
-                if c.get('text'):
-                    copyrights_list.append(c['text'])
-            copyright_str = " / ".join(copyrights_list)
-            
+            # --- AMBIL ISRC (Ada di object track) ---
+            isrc_code = web_api_track_data.get('external_ids', {}).get('isrc', '')
+
             # Cover Art
             cover_url = None
-            if album_data.get('images'):
-                preferred_image = next((img for img in album_data['images'] if img.get('height') == 640), None)
-                cover_url = preferred_image.get('url') if preferred_image else album_data['images'][0].get('url')
+            if album_data_simple.get('images'):
+                preferred_image = next((img for img in album_data_simple['images'] if img.get('height') == 640), None)
+                cover_url = preferred_image.get('url') if preferred_image else album_data_simple['images'][0].get('url')
             
             album_release_year_int = 0
             if album_release_date_str and len(album_release_date_str) >= 4:
@@ -2177,7 +2195,8 @@ class SpotifyAPI:
                 release_date=album_release_date_str,
                 total_tracks=album_total_tracks,
                 total_volumes=1,
-                # [FIX] Masukkan Metadata
+                
+                # [FIX] Masukkan Metadata Lengkap
                 isrc=isrc_code,
                 upc=upc_code,
                 label=label_name,
