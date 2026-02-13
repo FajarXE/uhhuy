@@ -238,15 +238,15 @@ async def process_album(client, album_id, user):
             display_title = track.name[:25] + "..." if len(track.name) > 25 else track.name
             
             status_text = (
-                f"╭─ **ᴘʀᴏɢʀᴇss**\n"
-                f"│\n"
-                f"├ {prog_bar}\n"
-                f"│\n"
-                f"├ **ᴅᴏɴᴇ :** {current_num} / {total}\n"
-                f"│\n"
-                f"├ **ᴛɪᴛʟᴇ :** {display_title}\n"
-                f"│\n"
-                f"╰─ **ᴛʏᴘᴇ :** Album"
+                f"**╭─ ᴘʀᴏɢʀᴇss**\n"
+                f"**│**\n"
+                f"**├** {prog_bar}\n"
+                f"**│**\n"
+                f"**├ ᴅᴏɴᴇ :** {current_num} / {total}\n"
+                f"**│**\n"
+                f"**├ ᴛɪᴛʟᴇ :** {display_title}\n"
+                f"**│**\n"
+                f"**╰─ ᴛʏᴘᴇ :** Album"
             )
             
             await edit_message(msg, status_text)
@@ -402,15 +402,15 @@ async def process_playlist(client, playlist_id, user):
             display_title = track.name[:25] + "..." if len(track.name) > 25 else track.name
             
             status_text = (
-                f"╭─ **ᴘʀᴏɢʀᴇss**\n"
-                f"│\n"
-                f"├ {prog_bar}\n"
-                f"│\n"
-                f"├ **ᴅᴏɴᴇ :** {current_num} / {total}\n"
-                f"│\n"
-                f"├ **ᴛɪᴛʟᴇ :** {display_title}\n"
-                f"│\n"
-                f"╰─ **ᴛʏᴘᴇ :** Playlist"
+                f"**╭─ ᴘʀᴏɢʀᴇss**\n"
+                f"**│**\n"
+                f"**├** {prog_bar}\n"
+                f"**│**\n"
+                f"**├** ᴅᴏɴᴇ :** {current_num} / {total}\n"
+                f"**│**\n"
+                f"**├** ᴛɪᴛʟᴇ :** {display_title}\n"
+                f"**│**\n"
+                f"**╰─ ᴛʏᴘᴇ :** Playlist"
             )
             
             await edit_message(msg, status_text)
