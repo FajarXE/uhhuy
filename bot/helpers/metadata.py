@@ -485,6 +485,7 @@ async def set_mp3(data, handle, dur_ms=0):
     d_tot = str(data.get('totalvolume') or '')
     disc_pos = f"{d_num}/{d_tot}" if (d_tot and d_tot != '0') else d_num
     
+    # --- Standard Tags ---
     handle.tags.add(TIT2(encoding=3, text=data['title']))
     handle.tags.add(TALB(encoding=3, text=data['album']))
     handle.tags.add(TPE2(encoding=3, text=data['albumartist']))
@@ -492,7 +493,9 @@ async def set_mp3(data, handle, dur_ms=0):
     handle.tags.add(TPE1(encoding=3, text=data['artist']))
     handle.tags.add(TCOP(encoding=3, text=data['copyright']))
     
-    pub = data.get('publisher') or data.get('organization') or ''
+    # [MODIFIKASI] Label / Publisher
+    # Mengecek key 'label' juga selain 'publisher'
+    pub = data.get('publisher') or data.get('label') or data.get('organization') or ''
     if pub:
         handle.tags.add(TPUB(encoding=3, text=pub))
 
@@ -505,7 +508,18 @@ async def set_mp3(data, handle, dur_ms=0):
     if data.get('release_date'): handle.tags.add(TDRL(encoding=3, text=data['release_date']))
     if data.get('subgenre'): handle.tags.add(TXXX(encoding=3, desc='SUBGENRE', text=data['subgenre']))
     
+    # [MODIFIKASI] Producer (User Defined Text)
+    if data.get('producer'):
+        handle.tags.add(TXXX(encoding=3, desc='PRODUCER', text=data['producer']))
+
     handle.tags.add(TSRC(encoding=3, text=data['isrc']))
+    
+    # [MODIFIKASI] UPC / BARCODE / EAN (User Defined Text)
+    if data.get('upc'):
+        handle.tags.add(TXXX(encoding=3, desc='UPC', text=data['upc']))
+        handle.tags.add(TXXX(encoding=3, desc='BARCODE', text=data['upc']))
+        handle.tags.add(TXXX(encoding=3, desc='EAN', text=data['upc']))
+
     if data.get('lyrics'):
         handle.tags.add(USLT(encoding=3, lang=u'eng', desc=u'desc', text=data['lyrics']))
     if data.get('composer'): 
