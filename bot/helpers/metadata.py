@@ -388,17 +388,22 @@ async def set_m4a(data, handle):
     # --- COPYRIGHT (cpr) ---
     cpr = data.get('copyright') or ''
     if cpr:
-        handle.tags['\u00a9cpr'] = cpr
-        # Custom atom fallback
+        handle.tags['\u00a9cpr'] = cpr  # Standard Atom
+        # Custom atom fallbacks agar terbaca di berbagai player
         handle.tags['----:com.apple.iTunes:cpr'] = cpr.encode('utf-8')
+        handle.tags['----:com.apple.iTunes:COPYRIGHT'] = cpr.encode('utf-8') # [ADDED]
 
     # --- PUBLISHER (pub) ---
-    pub = data.get('publisher') or data.get('organization') or ''
+    pub = data.get('publisher') or data.get('label') or data.get('organization') or ''
     if pub:
         handle.tags['\u00a9pub'] = pub # Standard Atom Publisher
         handle.tags['----:com.apple.iTunes:PUBLISHER'] = str(pub).encode('utf-8')
         handle.tags['----:com.apple.iTunes:LABEL'] = str(pub).encode('utf-8')
-        handle.tags['----:com.apple.iTunes:pub'] = str(pub).encode('utf-8') # Alias
+        handle.tags['----:com.apple.iTunes:pub'] = str(pub).encode('utf-8')
+
+    # --- PRODUCER [ADDED] ---
+    if data.get('producer'):
+        handle.tags['----:com.apple.iTunes:PRODUCER'] = str(data['producer']).encode('utf-8')
 
     # --- GENRE & COMPOSER ---
     if data.get('genre'): 
@@ -424,10 +429,12 @@ async def set_m4a(data, handle):
     handle.tags['trkn'] = [(t_num, t_tot)]
     handle.tags['disk'] = [(d_num, d_tot)]
     
-    # --- UPC ---
+    # --- UPC / BARCODE / EAN [ADDED] ---
     if data.get('upc'):
-        handle.tags['----:com.apple.iTunes:UPC'] = str(data['upc']).encode('utf-8')
-        handle.tags['----:com.apple.iTunes:BARCODE'] = str(data['upc']).encode('utf-8')
+        val = str(data['upc']).encode('utf-8')
+        handle.tags['----:com.apple.iTunes:UPC'] = val
+        handle.tags['----:com.apple.iTunes:BARCODE'] = val
+        handle.tags['----:com.apple.iTunes:EAN'] = val # [ADDED] EAN
 
     # --- ISRC ---
     if data.get('isrc'):
