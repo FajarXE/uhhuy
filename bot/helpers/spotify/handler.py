@@ -165,7 +165,7 @@ async def process_album(client, album_id, user):
     msg = user.get('bot_msg')
     await edit_message(msg, "🔍 **Spotify:** Mengambil Info Album...")
 
-    # 1. Ambil Info Album Global (Label, Copyright, UPC ada di sini)
+    # 1. Ambil Info Album Global
     album_info = client.get_album_info(album_id)
     if not album_info:
         raise Exception("Album tidak ditemukan.")
@@ -175,7 +175,7 @@ async def process_album(client, album_id, user):
     
     await edit_message(msg, f"⬇️ **Spotify:** Album ditemukan: {album_info.name}\nJumlah Lagu: {total}")
     
-    # 2. Ambil Genre dari Artis Utama (Cukup 1x request untuk efisiensi)
+    # 2. Ambil Genre
     album_genre = None
     try:
         if tracks and tracks[0].artist_id:
@@ -185,8 +185,6 @@ async def process_album(client, album_id, user):
         LOGGER.warning(f"Gagal mengambil genre album: {e}")
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-
-    # 3. Setup Metadata Album & Folder
     r_id = user.get('r_id', 'unknown')
     
     meta_album = {
@@ -205,7 +203,6 @@ async def process_album(client, album_id, user):
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{r_id}-temp/"
     }
     
-    # 4. Siapkan Thumbnail Album
     if meta_album.get('cover'):
          poster_path = await create_cover_file(meta_album['cover'], meta_album, thumbnail=False)
          meta_album['thumbnail'] = poster_path
@@ -234,25 +231,33 @@ async def process_album(client, album_id, user):
             
             if download_result and download_result.temp_file_path:
                 
-                # [FIX UTAMA: ISRC ALBUM]
-                # API Album tidak memberikan ISRC di list track.
-                # Kita wajib request Full Track Info untuk mendapatkan ISRC-nya.
+                # A. Fetch Full Info untuk dapat ISRC & Metadata lengkap
                 full_track_info = None
                 try:
                     full_track_info = client.get_track_info(track.id, "HIGH", None)
                 except Exception as e:
-                    LOGGER.warning(f"Gagal fetch full track info untuk {track.name}: {e}")
+                    LOGGER.warning(f"Gagal fetch full track info: {e}")
 
-                # Gunakan info lengkap jika berhasil, jika gagal pakai info sederhana dari album
+                # B. Gabungkan Data (PENTING!)
+                # Gunakan info lengkap jika ada, TAPI...
                 target_track = full_track_info if full_track_info else track
                 
-                # Pass genre album yang sudah diambil di awal
+                # [FIX NOMOR TRACK]
+                # Kita wajib menimpa nomor track dengan data dari 'track' (Album Context).
+                # Karena 'full_track_info' kadang berisi nomor track dari album aslinya (bukan album ini).
+                if track.tags and target_track.tags:
+                    target_track.tags.track_number = track.tags.track_number
+                    target_track.tags.disc_number = track.tags.disc_number
+                    target_track.tags.total_tracks = track.tags.total_tracks
+                
+                # C. Mapping Metadata
                 meta = map_spotify_to_bot_metadata(target_track, user, custom_genre=album_genre)
                 
-                # Pastikan Metadata Album konsisten (karena get_track_info single kadang meleset di totaltracks)
+                # Pastikan Metadata Album konsisten
                 meta['totaltracks'] = str(total)
-                meta['album'] = album_info.name # Paksa nama album agar rapi sesuai folder
+                meta['album'] = album_info.name 
                 
+                # Generate Filename (Sekarang pasti pakai nomor urut album yang benar)
                 clean_title = meta['title'].replace("/", "_")
                 track_str = str(meta['tracknumber']).zfill(2)
                 filename = f"{track_str} - {clean_title}.ogg"
@@ -271,7 +276,6 @@ async def process_album(client, album_id, user):
                         t_path = await create_cover_file(meta['cover'], meta, thumbnail=True)
                         meta['thumbnail'] = t_path
                     
-                    # [FIX LYRICS] Kirim User ID Valid ke set_metadata
                     user_id_val = user.get('user_id') or user.get('id')
                     await set_metadata(meta, user_id_val)
                     
@@ -292,18 +296,15 @@ async def process_album(client, album_id, user):
 
     meta_album['tracks'] = processed_tracks
     
-    # 7. Handling Upload ZIP (Jika Mode Album)
     if album_zip:
         await edit_message(user['bot_msg'], f"🗜️ **Zipping:** Menyiapkan {len(processed_tracks)} lagu...")
         
-        # Gunakan cover kecil (small_cover_url) untuk thumbnail ZIP agar ringan
         thumb_url = getattr(album_info, 'small_cover_url', None) or meta_album.get('cover')
         
         if thumb_url:
              zip_thumb_path = await create_cover_file(thumb_url, meta_album, thumbnail=True)
              meta_album['thumbnail'] = zip_thumb_path
              
-             # Simpan cover.jpg HD di dalam ZIP
              if meta_album.get('cover'):
                  try:
                      large_cover = await create_cover_file(meta_album['cover'], meta_album, thumbnail=False)
