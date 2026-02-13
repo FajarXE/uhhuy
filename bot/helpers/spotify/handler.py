@@ -165,7 +165,7 @@ async def process_album(client, album_id, user):
     msg = user.get('bot_msg')
     await edit_message(msg, "🔍 **Spotify:** Mengambil Info Album...")
 
-    # 1. Ambil Info Album
+    # 1. Ambil Info Album Global (Label, Copyright, UPC ada di sini)
     album_info = client.get_album_info(album_id)
     if not album_info:
         raise Exception("Album tidak ditemukan.")
@@ -175,7 +175,7 @@ async def process_album(client, album_id, user):
     
     await edit_message(msg, f"⬇️ **Spotify:** Album ditemukan: {album_info.name}\nJumlah Lagu: {total}")
     
-    # 2. [FIX GENRE] Ambil Genre dari Artis Utama (Cukup 1x request)
+    # 2. Ambil Genre dari Artis Utama (Cukup 1x request untuk efisiensi)
     album_genre = None
     try:
         if tracks and tracks[0].artist_id:
@@ -187,7 +187,6 @@ async def process_album(client, album_id, user):
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
     # 3. Setup Metadata Album & Folder
-    # Gunakan .get() untuk r_id agar lebih aman
     r_id = user.get('r_id', 'unknown')
     
     meta_album = {
@@ -234,10 +233,25 @@ async def process_album(client, album_id, user):
             download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
             
             if download_result and download_result.temp_file_path:
-                # [FIX] Mapping Metadata (Pass album_genre ke sini)
-                meta = map_spotify_to_bot_metadata(track, user, custom_genre=album_genre)
                 
+                # [FIX UTAMA: ISRC ALBUM]
+                # API Album tidak memberikan ISRC di list track.
+                # Kita wajib request Full Track Info untuk mendapatkan ISRC-nya.
+                full_track_info = None
+                try:
+                    full_track_info = client.get_track_info(track.id, "HIGH", None)
+                except Exception as e:
+                    LOGGER.warning(f"Gagal fetch full track info untuk {track.name}: {e}")
+
+                # Gunakan info lengkap jika berhasil, jika gagal pakai info sederhana dari album
+                target_track = full_track_info if full_track_info else track
+                
+                # Pass genre album yang sudah diambil di awal
+                meta = map_spotify_to_bot_metadata(target_track, user, custom_genre=album_genre)
+                
+                # Pastikan Metadata Album konsisten (karena get_track_info single kadang meleset di totaltracks)
                 meta['totaltracks'] = str(total)
+                meta['album'] = album_info.name # Paksa nama album agar rapi sesuai folder
                 
                 clean_title = meta['title'].replace("/", "_")
                 track_str = str(meta['tracknumber']).zfill(2)
@@ -257,8 +271,7 @@ async def process_album(client, album_id, user):
                         t_path = await create_cover_file(meta['cover'], meta, thumbnail=True)
                         meta['thumbnail'] = t_path
                     
-                    # 6. [FIX LYRICS] Kirim User ID Valid ke set_metadata
-                    # Ini kunci agar lirik otomatis dicari
+                    # [FIX LYRICS] Kirim User ID Valid ke set_metadata
                     user_id_val = user.get('user_id') or user.get('id')
                     await set_metadata(meta, user_id_val)
                     
