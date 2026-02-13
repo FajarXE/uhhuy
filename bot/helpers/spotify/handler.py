@@ -15,6 +15,13 @@ import bot.helpers.translations as lang
 
 LOGGER = logging.getLogger("SpotifyHandler")
 
+def make_progress_bar(current, total):
+    """Membuat progress bar visual (▰▰▰▱▱)"""
+    percentage = current / total
+    filled_length = int(10 * percentage)
+    bar = "▰" * filled_length + "▱" * (10 - filled_length)
+    return bar
+
 async def start_spotify(link: str, user: dict):
     client = spotify_manager.get_client()
     if not client:
@@ -225,7 +232,24 @@ async def process_album(client, album_id, user):
     for i, track in enumerate(tracks):
         try:
             current_num = i + 1
-            await edit_message(msg, f"⬇️ **Spotify Album:** ({current_num}/{total})\n`{track.name}`")
+            
+            prog_bar = make_progress_bar(current_num, total)
+            
+            display_title = track.name[:25] + "..." if len(track.name) > 25 else track.name
+            
+            status_text = (
+                f"╭─ ᴘʀᴏɢʀᴇss\n"
+                f"│\n"
+                f"├ {prog_bar}\n"
+                f"│\n"
+                f"├ ᴅᴏɴᴇ : {current_num} / {total}\n"
+                f"│\n"
+                f"├ ᴛɪᴛʟᴇ : {display_title}\n"
+                f"│\n"
+                f"╰─ ᴛʏᴘᴇ : Album"
+            )
+            
+            await edit_message(msg, status_text)
             
             download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
             
@@ -372,7 +396,24 @@ async def process_playlist(client, playlist_id, user):
             if not track or not track.id: continue
             
             current_num = i + 1
-            await edit_message(msg, f"⬇️ **Spotify Playlist:** ({current_num}/{total})\n`{track.name}`")
+            
+            prog_bar = make_progress_bar(current_num, total)
+            
+            display_title = track.name[:25] + "..." if len(track.name) > 25 else track.name
+            
+            status_text = (
+                f"╭─ ᴘʀᴏɢʀᴇss\n"
+                f"│\n"
+                f"├ {prog_bar}\n"
+                f"│\n"
+                f"├ ᴅᴏɴᴇ : {current_num} / {total}\n"
+                f"│\n"
+                f"├ ᴛɪᴛʟᴇ : {display_title}\n"
+                f"│\n"
+                f"╰─ ᴛʏᴘᴇ : Playlist"
+            )
+            
+            await edit_message(msg, status_text)
             
             download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
             
