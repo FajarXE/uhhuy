@@ -406,9 +406,9 @@ async def process_playlist(client, playlist_id, user):
                 f"**│**\n"
                 f"**├** {prog_bar}\n"
                 f"**│**\n"
-                f"**├** ᴅᴏɴᴇ :** {current_num} / {total}\n"
+                f"**├ ᴅᴏɴᴇ :** {current_num} / {total}\n"
                 f"**│**\n"
-                f"**├** ᴛɪᴛʟᴇ :** {display_title}\n"
+                f"**├ ᴛɪᴛʟᴇ :** {display_title}\n"
                 f"**│**\n"
                 f"**╰─ ᴛʏᴘᴇ :** Playlist"
             )
