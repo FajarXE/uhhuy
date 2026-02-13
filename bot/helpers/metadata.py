@@ -501,10 +501,11 @@ async def set_mp3(data, handle, dur_ms=0):
     handle.tags.add(TCOP(encoding=3, text=data['copyright']))
     
     # [MODIFIKASI] Label / Publisher
-    # Mengecek key 'label' juga selain 'publisher'
+    # Kita tambahkan TXXX:LABEL agar eksplisit
     pub = data.get('publisher') or data.get('label') or data.get('organization') or ''
     if pub:
-        handle.tags.add(TPUB(encoding=3, text=pub))
+        handle.tags.add(TPUB(encoding=3, text=pub)) # Standar ID3 Publisher
+        handle.tags.add(TXXX(encoding=3, desc='LABEL', text=pub)) # [ADDED] Label Tag
 
     handle.tags.add(TRCK(encoding=3, text=track_pos)) 
     if disc_pos: 
@@ -515,13 +516,13 @@ async def set_mp3(data, handle, dur_ms=0):
     if data.get('release_date'): handle.tags.add(TDRL(encoding=3, text=data['release_date']))
     if data.get('subgenre'): handle.tags.add(TXXX(encoding=3, desc='SUBGENRE', text=data['subgenre']))
     
-    # [MODIFIKASI] Producer (User Defined Text)
+    # [MODIFIKASI] Producer
     if data.get('producer'):
         handle.tags.add(TXXX(encoding=3, desc='PRODUCER', text=data['producer']))
 
     handle.tags.add(TSRC(encoding=3, text=data['isrc']))
     
-    # [MODIFIKASI] UPC / BARCODE / EAN (User Defined Text)
+    # [MODIFIKASI] UPC / BARCODE / EAN
     if data.get('upc'):
         handle.tags.add(TXXX(encoding=3, desc='UPC', text=data['upc']))
         handle.tags.add(TXXX(encoding=3, desc='BARCODE', text=data['upc']))
