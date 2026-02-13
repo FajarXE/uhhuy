@@ -592,10 +592,8 @@ async def set_vorbis(data, handle, dur_ms=0):
         handle.tags['COMPOSER'] = data['composer']
     
     # --- 3. Lirik (SOLUSI LIRIK HILANG) ---
-    # Kita tulis ke dua field agar terbaca di berbagai player
     if data.get('lyrics'): 
         handle.tags['LYRICS'] = data['lyrics']           # Standar Vorbis
-        handle.tags['UNSYNCEDLYRICS'] = data['lyrics']   # Kompatibilitas Player lain
 
     # --- 4. Copyright & Publisher ---
     cpr = data.get('copyright') or ''
