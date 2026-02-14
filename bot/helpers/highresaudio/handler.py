@@ -28,6 +28,25 @@ from bot.logger import LOGGER
 
 
 async def start_highresaudio(url: str, user: dict):
+    # --- [MODIFIKASI] RE-LOGIN OTOMATIS ---
+    # Sebelum memproses link, kita paksa client untuk login ulang 
+    # agar mendapatkan sesi baru (mencegah error 404/expired session).
+    try:
+        user_id = user.get('user_id')
+        client = highresaudio_manager.get_client(user_id)
+        
+        if client:
+            # Jalankan re_login di thread terpisah agar tidak memblokir bot
+            # Fungsi re_login() harus sudah ada di api.py (sesuai instruksi sebelumnya)
+            if hasattr(client, 're_login'):
+                await asyncio.to_thread(client.re_login)
+            else:
+                LOGGER.warning(f"HighResAudio: Client {user_id} tidak memiliki method 're_login'.")
+    except Exception as e:
+        LOGGER.error(f"HighResAudio: Gagal menyegarkan sesi (Re-login): {e}")
+        # Kita lanjut saja, siapa tahu sesi masih valid.
+    # --------------------------------------
+
     try:
         media_type, item_id, extra_kwargs = custom_url_parse(url)
         if media_type == 'album':
