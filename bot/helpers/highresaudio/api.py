@@ -20,8 +20,6 @@ class HighResAudioApi:
         
         # --- KONFIGURASI PROXY ---
         if self.proxy:
-            # Requests mendukung format dict untuk proxies
-            # Format proxy harus valid (http://, https://, socks5://, socks5h://)
             self.s.proxies = {
                 'http': self.proxy,
                 'https': self.proxy
@@ -44,11 +42,17 @@ class HighResAudioApi:
         })
         
         self.user_data_string = None 
-        self.email = None # Simpan email untuk identifikasi
+        # Variable untuk menyimpan kredensial agar bisa re-login
+        self.username = None 
+        self.password = None
 
     def auth(self, username: str, password: str) -> dict:
         LOGGER.info(f"HighResAudio: Mencoba login untuk {username} (Proxy: {'Ya' if self.proxy else 'Tidak'})...")
-        self.email = username
+        
+        # Simpan kredensial di memory untuk keperluan auto-relogin nanti
+        self.username = username
+        self.password = password
+
         try:
             r = self.s.get(f'{self.API_URL}user/login', params={
                 'password': password,
@@ -73,6 +77,17 @@ class HighResAudioApi:
             LOGGER.error(f"HighResAudio: Error saat login: {e}")
             raise self.exception(f"Error login HighResAudio: {e}")
 
+    def re_login(self):
+        """
+        Fungsi untuk memaksa login ulang menggunakan kredensial yang tersimpan.
+        Dipanggil saat sesi dianggap kedaluwarsa atau sebelum memulai unduhan baru.
+        """
+        if self.username and self.password:
+            LOGGER.info(f"HighResAudio: Menyegarkan sesi (Re-Login) otomatis untuk {self.username}...")
+            return self.auth(self.username, self.password)
+        else:
+            LOGGER.warning("HighResAudio: Gagal melakukan re-login, kredensial tidak ditemukan di memori.")
+
     def get_album_id_from_url(self, url: str) -> str:
         try:
             r = self.s.get(url, timeout=30)
@@ -92,7 +107,11 @@ class HighResAudioApi:
 
     def get_album_metadata(self, album_id: str) -> dict:
         if not self.user_data_string:
-            raise self.exception("Klien tidak login (user_data tidak ada).")
+            # Coba re-login jika data user kosong
+            if self.username and self.password:
+                self.re_login()
+            else:
+                raise self.exception("Klien tidak login (user_data tidak ada).")
             
         try:
             r = self.s.get(f'{self.API_URL}vault/album/', params={
