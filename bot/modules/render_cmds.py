@@ -22,9 +22,7 @@ async def render_dashboard(client, message):
         return await msg.edit(f"❌ Error: {err}")
     
     buttons = []
-    # Render API mengembalikan List saat request banyak service
     for item in data:
-        # Di endpoint list, data dibungkus dalam key 'service'
         svc = item.get('service', item) 
         status_icon = "🟢" if svc['suspended'] == 'not_suspended' else "🔴"
         buttons.append([InlineKeyboardButton(
@@ -122,13 +120,13 @@ async def render_callbacks(client: Client, query: CallbackQuery):
 
     # 5. EDIT ENV VAR (INPUT HANDLER)
     elif action == "setenv":
-        # ForceReply agar user mudah membalas
         await query.message.reply(
             f"✍️ <b>Edit Env Var untuk {svc_id}</b>\n\n"
-            "Balas pesan ini dengan format:\n"
+            "Silakan kirim variabel Anda (Bisa banyak baris sekaligus).\n"
+            "Format per baris:\n"
             "<code>KEY = VALUE</code>\n\n"
-            "Contoh:\n<code>MAX_WORKERS = 4</code>\n"
-            "Atau untuk HAPUS:\n<code>KEY = DELETE</code>",
+            "Contoh Bulk:\n"
+            "<code>EMAIL = tes@tes.com\nPASS = 12345\nPROXY = socks5://...</code>",
             reply_markup=ForceReply(selective=True)
         )
 
@@ -164,40 +162,46 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-# --- HANDLER REPLY (PERBAIKAN UTAMA) ---
+# --- HANDLER REPLY (SUPPORT BULK UPDATE) ---
 @Client.on_message(filters.reply & admin_only)
 async def env_update_handler(client, message):
-    # Cek apakah pesan yang dibalas mengandung teks kunci dari Bot
     reply_msg = message.reply_to_message
     if not reply_msg or not reply_msg.text:
         return
-        
     if "Edit Env Var untuk" not in reply_msg.text:
         return
 
     try:
-        # Ambil Service ID dari teks pesan bot
         svc_id = reply_msg.text.split("untuk ")[1].split("\n")[0].strip()
         
-        user_input = message.text.strip()
-        if "=" not in user_input:
-            return await message.reply("❌ Format salah. Gunakan: `KEY = VALUE`")
+        # Pisahkan pesan berdasarkan baris (New Line)
+        lines = message.text.strip().split('\n')
+        if not lines: return
+
+        progress_msg = await message.reply(f"🔄 Memproses {len(lines)} variabel...")
+        report = []
         
-        key, value = [x.strip() for x in user_input.split("=", 1)]
-        
-        msg = await message.reply(f"🔄 Mengupdate <b>{key}</b> ke Render...")
-        
-        if value.upper() == "DELETE":
-            res, err = await delete_env_var(svc_id, key)
-            action_txt = "Dihapus"
-        else:
-            res, err = await update_env_var(svc_id, key, value)
-            action_txt = "Diupdate"
+        for line in lines:
+            if "=" not in line: 
+                continue # Skip baris kosong/salah format
             
-        if err:
-            await msg.edit(f"❌ Gagal: {err}")
-        else:
-            await msg.edit(f"✅ <b>{key}</b> berhasil {action_txt}!")
+            key, value = [x.strip() for x in line.split("=", 1)]
+            
+            if value.upper() == "DELETE":
+                res, err = await delete_env_var(svc_id, key)
+                status = "🗑 Dihapus"
+            else:
+                res, err = await update_env_var(svc_id, key, value)
+                status = "✅ Diupdate"
+            
+            if err:
+                report.append(f"❌ <b>{key}</b>: Gagal ({err})")
+            else:
+                report.append(f"{status}: <b>{key}</b>")
+        
+        # Gabungkan laporan
+        final_report = "\n".join(report)
+        await progress_msg.edit(f"<b>Laporan Bulk Update:</b>\n\n{final_report}")
             
     except Exception as e:
         await message.reply(f"❌ Error processing: {e}")
