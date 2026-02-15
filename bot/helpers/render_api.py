@@ -18,6 +18,7 @@ async def _request(method, endpoint, json=None):
             async with session.request(method, f"{RENDER_URL}{endpoint}", headers=headers, json=json) as resp:
                 if resp.status == 204:
                     return True, None
+                
                 try:
                     data = await resp.json()
                 except:
@@ -58,17 +59,21 @@ async def get_last_deploy(service_id):
 async def cancel_deploy(service_id, deploy_id):
     return await _request("POST", f"/services/{service_id}/deploys/{deploy_id}/cancel")
 
-# --- ENV VARS ---
+# --- ENV VARS (BAGIAN YANG DIPERBAIKI) ---
+
 async def get_env_vars(service_id):
     return await _request("GET", f"/services/{service_id}/env-vars")
 
 async def update_env_var(service_id, key, value):
-    payload = [{"key": key, "value": value}]
-    return await _request("PUT", f"/services/{service_id}/env-vars", json=payload)
+    # PERBAIKAN: Menggunakan endpoint spesifik per-Key agar tidak menghapus yang lain
+    # Endpoint: PUT /services/{serviceId}/env-vars/{envVarKey}
+    payload = {"value": value}
+    return await _request("PUT", f"/services/{service_id}/env-vars/{key}", json=payload)
 
 async def delete_env_var(service_id, key):
+    # Endpoint: DELETE /services/{serviceId}/env-vars/{envVarKey}
     return await _request("DELETE", f"/services/{service_id}/env-vars/{key}")
 
 async def update_full_env(service_id, env_list):
-    # env_list format: [{"key": "A", "value": "B"}, ...]
+    # Hati-hati: Fungsi ini memang bertujuan me-replace SEMUA variabel (Bulk Update)
     return await _request("PUT", f"/services/{service_id}/env-vars", json=env_list)
