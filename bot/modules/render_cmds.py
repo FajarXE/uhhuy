@@ -52,10 +52,7 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         svc_data, _ = await get_service(svc_id)
         if not svc_data: return await query.answer("Gagal memuat data service", show_alert=True)
         
-        # [FIX] Render API Single Service mengembalikan object langsung (tanpa key 'service')
-        # Kita gunakan .get('service', svc_data) untuk jaga-jaga jika formatnya berubah
         svc = svc_data.get('service', svc_data)
-        
         details = svc.get('serviceDetails', {})
         
         info = (
@@ -125,6 +122,7 @@ async def render_callbacks(client: Client, query: CallbackQuery):
 
     # 5. EDIT ENV VAR (INPUT HANDLER)
     elif action == "setenv":
+        # ForceReply agar user mudah membalas
         await query.message.reply(
             f"✍️ <b>Edit Env Var untuk {svc_id}</b>\n\n"
             "Balas pesan ini dengan format:\n"
@@ -146,8 +144,6 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         
         await asyncio.sleep(1) 
         new_data, _ = await get_service(svc_id)
-        
-        # [FIX] Gunakan logika yang sama untuk unwrap data
         new_svc = new_data.get('service', new_data)
         
         await query.edit_message_text(
@@ -168,12 +164,20 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-# --- HANDLER REPLY ---
-@Client.on_message(filters.reply & admin_only & filters.regex(r"Edit Env Var untuk"))
+# --- HANDLER REPLY (PERBAIKAN UTAMA) ---
+@Client.on_message(filters.reply & admin_only)
 async def env_update_handler(client, message):
+    # Cek apakah pesan yang dibalas mengandung teks kunci dari Bot
+    reply_msg = message.reply_to_message
+    if not reply_msg or not reply_msg.text:
+        return
+        
+    if "Edit Env Var untuk" not in reply_msg.text:
+        return
+
     try:
-        reply_to = message.reply_to_message.text
-        svc_id = reply_to.split("untuk ")[1].split("\n")[0].strip()
+        # Ambil Service ID dari teks pesan bot
+        svc_id = reply_msg.text.split("untuk ")[1].split("\n")[0].strip()
         
         user_input = message.text.strip()
         if "=" not in user_input:
@@ -181,7 +185,7 @@ async def env_update_handler(client, message):
         
         key, value = [x.strip() for x in user_input.split("=", 1)]
         
-        msg = await message.reply("🔄 Memproses...")
+        msg = await message.reply(f"🔄 Mengupdate <b>{key}</b> ke Render...")
         
         if value.upper() == "DELETE":
             res, err = await delete_env_var(svc_id, key)
