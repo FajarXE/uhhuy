@@ -50,8 +50,6 @@ async def monitor_deployment(client, chat_id, service_id, deploy_id, status_msg)
 # --- COMMAND: LOGOUT ---
 @Client.on_message(filters.command("logout") & admin_only)
 async def logout_command(client, message):
-    # Penjelasan: Karena ini bot pribadi (Personal Mode) yang kuncinya ada di Config,
-    # kita tidak bisa "menghapus" kunci itu tanpa mematikan bot.
     await message.reply(
         "🔒 **Info Keamanan**\n\n"
         "Anda saat ini login menggunakan **Mode Config (Environment Variable)**.\n"
@@ -60,6 +58,33 @@ async def logout_command(client, message):
         "1. Buka Dashboard Render\n"
         "2. Hapus variabel `RENDER_API_KEY`\n"
         "3. Bot akan otomatis restart dan kehilangan akses."
+    )
+
+# --- COMMAND: DELETE SERVICE (NEW) ---
+@Client.on_message(filters.command("deleteservice") & admin_only)
+async def delete_service_menu(client, message):
+    msg = await message.reply("⚠️ **ZONE BAHAYA** ⚠️\n\nMemuat daftar layanan untuk dihapus...", quote=True)
+    data, err = await get_services()
+    
+    if err:
+        return await msg.edit(f"❌ Error: {err}")
+    
+    buttons = []
+    for item in data:
+        svc = item.get('service', item)
+        # Gunakan callback 'rnd_askdel_' untuk memicu konfirmasi
+        buttons.append([InlineKeyboardButton(
+            f"🗑 {svc['name']}", 
+            callback_data=f"rnd_askdel_{svc['id']}"
+        )])
+    
+    buttons.append([InlineKeyboardButton("❌ Batalkan", callback_data="rnd_close")])
+    
+    await msg.edit(
+        "🗑 **PENGHAPUSAN LAYANAN**\n\n"
+        "Pilih layanan yang ingin Anda **HAPUS PERMANEN**.\n"
+        "Tindakan ini tidak dapat dibatalkan.",
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
 
 # --- MENU UTAMA ---
@@ -152,7 +177,7 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             )
             asyncio.create_task(monitor_deployment(client, query.message.chat.id, svc_id, deploy_id, status_msg))
 
-    # 3. DEPLOY INFO (+ FITUR CANCEL)
+    # 3. DEPLOY INFO (+ CANCEL)
     elif action == "dinfo":
         deploy, err = await get_last_deploy(svc_id)
         if err: return await query.answer(err, show_alert=True)
@@ -169,29 +194,23 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             f"Finished: <code>{deploy.get('finishedAt', 'Running...')}</code>"
         )
         
-        # Tombol Kembali Standar
         buttons = [[InlineKeyboardButton("🔙 Kembali", callback_data=f"rnd_view_{svc_id}")]]
         
-        # [FITUR BARU] Cek apakah status masih berjalan, jika ya tambahkan tombol Cancel
         if status in ["build_in_progress", "pre_deploy_in_progress", "live_in_progress", "created"]:
             buttons.insert(0, [InlineKeyboardButton("⛔ BATALKAN DEPLOY", callback_data=f"rnd_cancel_{svc_id}_{deploy_id}")])
             
         await query.answer(f"Status: {status}", show_alert=False)
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-    # 4. CANCEL DEPLOY (ACTION)
+    # 4. CANCEL DEPLOY
     elif action == "cancel":
-        deploy_id = data[3] # Ambil ID deploy dari callback
+        deploy_id = data[3]
         await query.answer("Mengirim perintah pembatalan...", show_alert=True)
-        
         res, err = await cancel_deploy(svc_id, deploy_id)
-        
         if err:
             await query.message.reply(f"❌ Gagal Membatalkan: {err}")
         else:
             await query.message.reply(f"🛑 <b>Deploy Dibatalkan!</b>\nID: `{deploy_id}` berhasil dihentikan.")
-            # Refresh tampilan info
-            await render_callbacks(client, query) # Panggil ulang logic dinfo? atau biarkan user klik manual
 
     # 5. VIEW ENV VARS
     elif action == "env":
@@ -201,21 +220,16 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         text = f"<b>🔑 Environment Variables ({svc_id})</b>\n\n"
         for item in envs:
             text += f"• <b>{item['envVar']['key']}</b>: <code>{item['envVar']['value']}</code>\n"
-        
-        if len(text) > 4000:
-            text = text[:4000] + "\n...(truncated)"
-            
+        if len(text) > 4000: text = text[:4000] + "\n...(truncated)"
         await query.message.reply(text)
 
     # 6. EDIT ENV VAR
     elif action == "setenv":
         await query.message.reply(
             f"✍️ <b>Edit Env Var untuk {svc_id}</b>\n\n"
-            "Silakan kirim variabel Anda (Bisa banyak baris sekaligus).\n"
-            "Format per baris:\n"
-            "<code>KEY = VALUE</code>\n\n"
-            "Contoh Bulk:\n"
-            "<code>EMAIL = tes@tes.com\nPASS = 12345\nPROXY = socks5://...</code>",
+            "Silakan kirim variabel Anda (Bisa banyak baris).\n"
+            "Format: <code>KEY = VALUE</code>\n"
+            "Hapus: <code>KEY = DELETE</code>",
             reply_markup=ForceReply(selective=True)
         )
 
@@ -228,11 +242,9 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         else:
             await resume_service(svc_id)
             await query.answer("Service Resumed ▶️")
-        
         await asyncio.sleep(1) 
         new_data, _ = await get_service(svc_id)
         new_svc = new_data.get('service', new_data)
-        
         await query.edit_message_text(
             f"Status Berubah! Sekarang: <code>{new_svc['suspended']}</code>",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Kembali", callback_data=f"rnd_view_{svc_id}")]])
@@ -246,36 +258,56 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             svc = item.get('service', item)
             status_icon = "🟢" if svc['suspended'] == 'not_suspended' else "🔴"
             buttons.append([InlineKeyboardButton(f"{status_icon} {svc['name']}", callback_data=f"rnd_view_{svc['id']}")])
-        
         buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")])
-
         await query.edit_message_text(
             "<b>🎛 Render Control Panel</b>\n\nPilih layanan untuk dikelola:",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
+    # 9. ASK DELETE (KONFIRMASI HAPUS)
+    elif action == "askdel":
+        # Ambil nama service dulu untuk konfirmasi
+        svc_data, _ = await get_service(svc_id)
+        svc_name = svc_data.get('service', svc_data).get('name', 'Unknown')
+        
+        await query.edit_message_text(
+            f"⚠️ **PERINGATAN KERAS** ⚠️\n\n"
+            f"Anda akan menghapus layanan:\n"
+            f"📛 **{svc_name}** (`{svc_id}`)\n\n"
+            f"Tindakan ini **PERMANEN** dan tidak bisa dikembalikan. Semua data dan database di dalamnya akan hilang.\n\n"
+            f"Apakah Anda yakin?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ YA, HAPUS PERMANEN", callback_data=f"rnd_dodel_{svc_id}")],
+                [InlineKeyboardButton("❌ TIDAK, BATALKAN", callback_data="rnd_close")]
+            ])
+        )
+
+    # 10. DO DELETE (EKSEKUSI HAPUS)
+    elif action == "dodel":
+        await query.answer("Menghapus layanan...", show_alert=True)
+        res, err = await delete_service(svc_id)
+        
+        if err:
+            await query.message.reply(f"❌ Gagal Menghapus: {err}")
+        else:
+            await query.message.edit_text(f"🗑 **Layanan Berhasil Dihapus.**\n\nID: `{svc_id}` telah dimusnahkan.")
+
 # --- HANDLER REPLY (BULK UPDATE) ---
 @Client.on_message(filters.reply & admin_only)
 async def env_update_handler(client, message):
     reply_msg = message.reply_to_message
-    if not reply_msg or not reply_msg.text:
-        return
-    if "Edit Env Var untuk" not in reply_msg.text:
-        return
+    if not reply_msg or not reply_msg.text: return
+    if "Edit Env Var untuk" not in reply_msg.text: return
 
     try:
         svc_id = reply_msg.text.split("untuk ")[1].split("\n")[0].strip()
-        
         lines = message.text.strip().split('\n')
         if not lines: return
 
         progress_msg = await message.reply(f"🔄 Memproses {len(lines)} variabel...")
         report = []
-        
         for line in lines:
-            if "=" not in line: 
-                continue 
-            
+            if "=" not in line: continue
             key, value = [x.strip() for x in line.split("=", 1)]
             
             if value.upper() == "DELETE":
@@ -285,10 +317,8 @@ async def env_update_handler(client, message):
                 res, err = await update_env_var(svc_id, key, value)
                 status = "✅ Diupdate"
             
-            if err:
-                report.append(f"❌ <b>{key}</b>: Gagal ({err})")
-            else:
-                report.append(f"{status}: <b>{key}</b>")
+            if err: report.append(f"❌ <b>{key}</b>: Gagal ({err})")
+            else: report.append(f"{status}: <b>{key}</b>")
         
         final_report = "\n".join(report)
         await progress_msg.edit(f"<b>Laporan Bulk Update:</b>\n\n{final_report}")
