@@ -12,6 +12,50 @@ import asyncio
 admin_ids = list(Config.ADMINS)
 admin_only = filters.user(admin_ids)
 
+# --- FUNGSI MONITOR DEPLOY (BACKGROUND TASK) ---
+async def monitor_deployment(client, chat_id, service_id, deploy_id, status_msg):
+    """
+    Fungsi ini berjalan di background untuk mengecek status deploy
+    setiap 15 detik sampai selesai atau timeout (20 menit).
+    """
+    timeout = 1200  # 20 menit batas waktu
+    elapsed = 0
+    
+    while elapsed < timeout:
+        await asyncio.sleep(15) # Cek setiap 15 detik
+        elapsed += 15
+        
+        # Ambil status deploy terakhir
+        deploy, err = await get_last_deploy(service_id)
+        if err or not deploy:
+            continue
+
+        # Cek apakah ID deploy cocok (takutnya ada deploy baru lain)
+        current_status = deploy['status']
+        
+        # Jika status masih loading, update pesan sesekali (opsional, biar tidak spam)
+        # Kita hanya update jika status berubah drastis atau selesai
+        
+        if current_status == "live":
+            await client.send_message(
+                chat_id,
+                f"✅ **DEPLOY SELESAI!**\n\nService: `{service_id}`\nStatus: **LIVE** 🟢\nCommit: `{deploy.get('commit', {}).get('message', 'N/A')}`",
+                reply_to_message_id=status_msg.id
+            )
+            return # Keluar dari loop
+            
+        elif current_status in ["build_failed", "update_failed", "canceled"]:
+            await client.send_message(
+                chat_id,
+                f"❌ **DEPLOY GAGAL!**\n\nService: `{service_id}`\nStatus: `{current_status}` 🔴",
+                reply_to_message_id=status_msg.id
+            )
+            return # Keluar dari loop
+            
+    # Jika timeout
+    await client.send_message(chat_id, f"⚠️ Monitoring Deploy `{deploy_id}` berhenti (Timeout 20 menit). Silakan cek manual.")
+
+
 # --- MENU UTAMA ---
 @Client.on_message(filters.command(["render", "services"]) & admin_only)
 async def render_dashboard(client, message):
@@ -22,13 +66,18 @@ async def render_dashboard(client, message):
         return await msg.edit(f"❌ Error: {err}")
     
     buttons = []
+    # Render API mengembalikan List saat request banyak service
     for item in data:
+        # Di endpoint list, data dibungkus dalam key 'service'
         svc = item.get('service', item) 
         status_icon = "🟢" if svc['suspended'] == 'not_suspended' else "🔴"
         buttons.append([InlineKeyboardButton(
             f"{status_icon} {svc['name']}", 
             callback_data=f"rnd_view_{svc['id']}"
         )])
+    
+    # [FITUR 1] Menambahkan Tombol Close di bawah daftar service
+    buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")])
     
     await msg.edit(
         "<b>🎛 Render Control Panel</b>\n\nPilih layanan untuk dikelola:",
@@ -43,6 +92,12 @@ async def render_callbacks(client: Client, query: CallbackQuery):
 
     data = query.data.split("_")
     action = data[1]
+    
+    # Handle Close secepatnya
+    if action == "close":
+        await query.message.delete()
+        return
+
     svc_id = data[2] if len(data) > 2 else None
 
     # 1. VIEW SERVICE DETAILS
@@ -79,14 +134,24 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         ]
         await query.edit_message_text(info, reply_markup=InlineKeyboardMarkup(buttons))
 
-    # 2. TRIGGER DEPLOY
+    # 2. TRIGGER DEPLOY (DENGAN MONITORING)
     elif action == "deploy":
         await query.answer("Mengirim perintah deploy...", show_alert=True)
         res, err = await trigger_deploy(svc_id)
+        
         if err:
-            await query.message.reply(f"❌ Gagal: {err}")
+            await query.message.reply(f"❌ Gagal Deploy: {err}")
         else:
-            await query.message.reply(f"🚀 <b>Deploy Dimulai!</b>\nID: <code>{res['id']}</code>")
+            deploy_id = res['id']
+            # Kirim pesan konfirmasi awal
+            status_msg = await query.message.reply(
+                f"🚀 <b>Deploy Dimulai!</b>\n"
+                f"ID: <code>{deploy_id}</code>\n\n"
+                f"⏳ <i>Bot akan memberi tahu Anda saat deploy selesai...</i>"
+            )
+            
+            # [FITUR 2] Jalankan monitoring di background
+            asyncio.create_task(monitor_deployment(client, query.message.chat.id, svc_id, deploy_id, status_msg))
 
     # 3. DEPLOY INFO
     elif action == "dinfo":
@@ -120,6 +185,7 @@ async def render_callbacks(client: Client, query: CallbackQuery):
 
     # 5. EDIT ENV VAR (INPUT HANDLER)
     elif action == "setenv":
+        # ForceReply agar user mudah membalas
         await query.message.reply(
             f"✍️ <b>Edit Env Var untuk {svc_id}</b>\n\n"
             "Silakan kirim variabel Anda (Bisa banyak baris sekaligus).\n"
@@ -157,24 +223,30 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             svc = item.get('service', item)
             status_icon = "🟢" if svc['suspended'] == 'not_suspended' else "🔴"
             buttons.append([InlineKeyboardButton(f"{status_icon} {svc['name']}", callback_data=f"rnd_view_{svc['id']}")])
+        
+        # Tambahkan tombol close juga di sini saat kembali
+        buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")])
+
         await query.edit_message_text(
-            "<b>🎛 Render Control Panel</b>\n\nPilih layanan:",
+            "<b>🎛 Render Control Panel</b>\n\nPilih layanan untuk dikelola:",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-# --- HANDLER REPLY (SUPPORT BULK UPDATE) ---
+# --- HANDLER REPLY (BULK UPDATE) ---
 @Client.on_message(filters.reply & admin_only)
 async def env_update_handler(client, message):
+    # Cek apakah pesan yang dibalas mengandung teks kunci dari Bot
     reply_msg = message.reply_to_message
     if not reply_msg or not reply_msg.text:
         return
+        
     if "Edit Env Var untuk" not in reply_msg.text:
         return
 
     try:
+        # Ambil Service ID dari teks pesan bot
         svc_id = reply_msg.text.split("untuk ")[1].split("\n")[0].strip()
         
-        # Pisahkan pesan berdasarkan baris (New Line)
         lines = message.text.strip().split('\n')
         if not lines: return
 
@@ -183,7 +255,7 @@ async def env_update_handler(client, message):
         
         for line in lines:
             if "=" not in line: 
-                continue # Skip baris kosong/salah format
+                continue 
             
             key, value = [x.strip() for x in line.split("=", 1)]
             
@@ -199,7 +271,6 @@ async def env_update_handler(client, message):
             else:
                 report.append(f"{status}: <b>{key}</b>")
         
-        # Gabungkan laporan
         final_report = "\n".join(report)
         await progress_msg.edit(f"<b>Laporan Bulk Update:</b>\n\n{final_report}")
             
