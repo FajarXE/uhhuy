@@ -8,8 +8,11 @@ from bot.helpers.render_api import (
 )
 import asyncio
 
-# Pastikan hanya ADMIN yang bisa akses
-admin_only = filters.user(Config.ADMINS)
+# --- PERBAIKAN DI SINI ---
+# Kita ubah set() menjadi list() agar diterima oleh Pyrogram
+admin_ids = list(Config.ADMINS)
+admin_only = filters.user(admin_ids)
+# -------------------------
 
 # --- MENU UTAMA ---
 @Client.on_message(filters.command(["render", "services"]) & admin_only)
@@ -37,6 +40,10 @@ async def render_dashboard(client, message):
 # --- CALLBACK HANDLER (LOGIKA TOMBOL) ---
 @Client.on_callback_query(filters.regex(r"^rnd_"))
 async def render_callbacks(client: Client, query: CallbackQuery):
+    # Cek apakah user adalah admin sebelum memproses callback
+    if query.from_user.id not in Config.ADMINS:
+        return await query.answer("❌ Akses Ditolak!", show_alert=True)
+
     data = query.data.split("_")
     action = data[1]
     svc_id = data[2] if len(data) > 2 else None
@@ -44,6 +51,8 @@ async def render_callbacks(client: Client, query: CallbackQuery):
     # 1. VIEW SERVICE DETAILS
     if action == "view":
         svc_data, _ = await get_service(svc_id)
+        if not svc_data: return await query.answer("Gagal memuat data service", show_alert=True)
+        
         svc = svc_data['service']
         details = svc.get('serviceDetails', {})
         
@@ -107,7 +116,6 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         for item in envs:
             text += f"• <b>{item['envVar']['key']}</b>: <code>{item['envVar']['value']}</code>\n"
         
-        # Split text jika terlalu panjang (limit Telegram)
         if len(text) > 4000:
             text = text[:4000] + "\n...(truncated)"
             
@@ -123,8 +131,6 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             "Atau untuk HAPUS:\n<code>KEY = DELETE</code>",
             reply_markup=ForceReply(selective=True)
         )
-        # Kita menyimpan ID service di text pesan agar bisa diparsing nanti
-        # (Lihat handler 'env_update_handler' di bawah)
 
     # 6. POWER (SUSPEND/RESUME)
     elif action == "power":
@@ -136,13 +142,10 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             await resume_service(svc_id)
             await query.answer("Service Resumed ▶️")
         
-        # Refresh view
-        await asyncio.sleep(1) # Tunggu sebentar agar API render update
+        await asyncio.sleep(1) 
         new_data, _ = await get_service(svc_id)
         new_svc = new_data['service']
         
-        # Re-render buttons (copy logic from 'view')
-        # (Agar kode ringkas, tombol back saja yang ditampilkan)
         await query.edit_message_text(
             f"Status Berubah! Sekarang: <code>{new_svc['suspended']}</code>",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Kembali", callback_data=f"rnd_view_{svc_id}")]])
@@ -150,7 +153,6 @@ async def render_callbacks(client: Client, query: CallbackQuery):
 
     # 7. BACK BUTTON
     elif action == "back":
-        # Panggil ulang fungsi list
         data, _ = await get_services()
         buttons = []
         for item in data:
@@ -165,10 +167,8 @@ async def render_callbacks(client: Client, query: CallbackQuery):
 # --- HANDLER UNTUK REPLY PESAN (EDIT ENV) ---
 @Client.on_message(filters.reply & admin_only & filters.regex(r"Edit Env Var untuk"))
 async def env_update_handler(client, message):
-    # Parsing Service ID dari pesan asli bot
     try:
         reply_to = message.reply_to_message.text
-        # Asumsi format pesan: "Edit Env Var untuk srv-xxxx..."
         svc_id = reply_to.split("untuk ")[1].split("\n")[0].strip()
         
         user_input = message.text.strip()
@@ -193,4 +193,3 @@ async def env_update_handler(client, message):
             
     except Exception as e:
         await message.reply(f"❌ Error processing: {e}")
-
