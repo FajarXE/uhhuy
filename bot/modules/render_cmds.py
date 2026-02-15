@@ -8,11 +8,9 @@ from bot.helpers.render_api import (
 )
 import asyncio
 
-# --- PERBAIKAN DI SINI ---
-# Kita ubah set() menjadi list() agar diterima oleh Pyrogram
+# Pastikan Admin ID berupa List
 admin_ids = list(Config.ADMINS)
 admin_only = filters.user(admin_ids)
-# -------------------------
 
 # --- MENU UTAMA ---
 @Client.on_message(filters.command(["render", "services"]) & admin_only)
@@ -24,8 +22,10 @@ async def render_dashboard(client, message):
         return await msg.edit(f"❌ Error: {err}")
     
     buttons = []
+    # Render API mengembalikan List saat request banyak service
     for item in data:
-        svc = item['service']
+        # Di endpoint list, data dibungkus dalam key 'service'
+        svc = item.get('service', item) 
         status_icon = "🟢" if svc['suspended'] == 'not_suspended' else "🔴"
         buttons.append([InlineKeyboardButton(
             f"{status_icon} {svc['name']}", 
@@ -37,10 +37,9 @@ async def render_dashboard(client, message):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# --- CALLBACK HANDLER (LOGIKA TOMBOL) ---
+# --- CALLBACK HANDLER ---
 @Client.on_callback_query(filters.regex(r"^rnd_"))
 async def render_callbacks(client: Client, query: CallbackQuery):
-    # Cek apakah user adalah admin sebelum memproses callback
     if query.from_user.id not in Config.ADMINS:
         return await query.answer("❌ Akses Ditolak!", show_alert=True)
 
@@ -53,7 +52,10 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         svc_data, _ = await get_service(svc_id)
         if not svc_data: return await query.answer("Gagal memuat data service", show_alert=True)
         
-        svc = svc_data['service']
+        # [FIX] Render API Single Service mengembalikan object langsung (tanpa key 'service')
+        # Kita gunakan .get('service', svc_data) untuk jaga-jaga jika formatnya berubah
+        svc = svc_data.get('service', svc_data)
+        
         details = svc.get('serviceDetails', {})
         
         info = (
@@ -62,7 +64,7 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             f"Status: <code>{svc['suspended']}</code>\n"
             f"Region: <code>{details.get('region', '-')}</code>\n"
             f"Branch: <code>{svc.get('branch', 'main')}</code>\n"
-            f"Updated: <code>{svc['updatedAt'][:10]}</code>"
+            f"Updated: <code>{svc.get('updatedAt', 'N/A')[:10]}</code>"
         )
         
         buttons = [
@@ -144,7 +146,9 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         
         await asyncio.sleep(1) 
         new_data, _ = await get_service(svc_id)
-        new_svc = new_data['service']
+        
+        # [FIX] Gunakan logika yang sama untuk unwrap data
+        new_svc = new_data.get('service', new_data)
         
         await query.edit_message_text(
             f"Status Berubah! Sekarang: <code>{new_svc['suspended']}</code>",
@@ -156,7 +160,7 @@ async def render_callbacks(client: Client, query: CallbackQuery):
         data, _ = await get_services()
         buttons = []
         for item in data:
-            svc = item['service']
+            svc = item.get('service', item)
             status_icon = "🟢" if svc['suspended'] == 'not_suspended' else "🔴"
             buttons.append([InlineKeyboardButton(f"{status_icon} {svc['name']}", callback_data=f"rnd_view_{svc['id']}")])
         await query.edit_message_text(
@@ -164,7 +168,7 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-# --- HANDLER UNTUK REPLY PESAN (EDIT ENV) ---
+# --- HANDLER REPLY ---
 @Client.on_message(filters.reply & admin_only & filters.regex(r"Edit Env Var untuk"))
 async def env_update_handler(client, message):
     try:
