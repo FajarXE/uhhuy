@@ -435,6 +435,14 @@ class Config:
     SPOTIFY_CREDENTIALS_JSON = getenv("SPOTIFY_CREDENTIALS_JSON", None)
 #--------------------
 # --- BATAS TAMBAHAN ---
+
+#--------------------
+# RENDER MANAGEMENT
+#--------------------
+    # API Key dari Dashboard Render -> Account Settings -> API Keys
+    RENDER_API_KEY = getenv("RENDER_API_KEY", None)
+#--------------------
+# --- BATAS TAMBAHAN ---
     
 # CONCURRENT
 #--------------------
