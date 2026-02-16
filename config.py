@@ -32,6 +32,13 @@ class Config:
 
 #--------------------
 
+# CHANNEL SETTINGS
+
+#--------------------
+    COPY_CHANNEL_ID = int(getenv("COPY_CHANNEL_ID", "0"))
+    DIRECT_TO_CHANNEL = getenv("DIRECT_TO_CHANNEL", "False").lower() == "true"
+#--------------------
+
 # BOT WORKING DIRECTORY
 
 #--------------------
