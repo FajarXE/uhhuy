@@ -95,31 +95,24 @@ def get_real_timezone():
     except: pass
     return time.tzname[0]
 
-# --- MONGODB HELPER (FIXED DATABASE NAME) ---
+# --- MONGODB HELPER ---
 async def get_mongo_stats(client_bot=None):
     try:
         mongo_client = None
+        should_close = False # Flag untuk menandai apakah kita membuka koneksi baru
         
         # 1. Coba ambil koneksi dari bot utama (Priority)
-        # Di async_pymongo bot Anda, strukturnya: bot.mongo.db (Client)
-        # Kita coba akses client raw-nya
         if client_bot and hasattr(client_bot, 'mongodb'):
-            # Mencoba menebak struktur attribute database di bot Anda
-            # Biasanya client_bot.mongodb adalah instance class MongoDB di mongo_async.py
-            # Dan di dalamnya ada self.db (yang merupakan AsyncClient)
             if hasattr(client_bot.mongodb, 'db'):
                 mongo_client = client_bot.mongodb.db
         
         # 2. Fallback: Buka koneksi baru jika tidak ketemu
-        should_close = False
         if not mongo_client:
             # LOGGER.info("Stats: Membuka koneksi Mongo baru (Fallback)...")
             mongo_client = AsyncClient(Config.DATABASE_URL)
             should_close = True
         
-        # [PERBAIKAN UTAMA DI SINI]
-        # Jangan pakai .get_database() tanpa argumen jika URL tidak ada nama DB.
-        # Kita pakai Config.BOT_USERNAME sesuai dengan 'mongo_async.py'.
+        # Pilih Database (Agar tidak error 'No default database')
         db = mongo_client[Config.BOT_USERNAME]
         
         # 3. Jalankan command dengan TIMEOUT 5 detik
@@ -132,7 +125,9 @@ async def get_mongo_stats(client_bot=None):
         
         # Tutup jika kita membuka koneksi baru
         if should_close:
-            try: mongo_client.close()
+            try: 
+                # [PERBAIKAN UTAMA: Tambahkan await]
+                await mongo_client.close()
             except: pass
             
         return cols, docs, size_mb
