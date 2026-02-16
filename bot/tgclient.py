@@ -30,6 +30,10 @@ class Bot(Client):
             plugins=plugins,
             workdir=Config.WORK_DIR,
             workers=100,
+            # --- PENGATURAN RENDER ---
+            ipv6=False,          # Wajib untuk fix Connection Reset di Render
+            sleep_threshold=30,  # Agar bot tidak crash saat kena FloodWait
+            # -------------------------
             mongodb=dict(connection=AsyncClient(Config.DATABASE_URL), remove_peers=True)
         )
 
@@ -37,19 +41,22 @@ class Bot(Client):
         await super().start()
         LOGGER.info("BOT : Started Successfully")
 
-        # --- FITUR BARU: Notifikasi Startup / Deploy Selesai ---
+        # --- FITUR: Notifikasi Startup ---
         try:
             # Kirim pesan ke Admin pertama bahwa bot sudah hidup kembali
             if Config.ADMINS:
                 admin_id = list(Config.ADMINS)[0]
-                await self.send_message(
-                    admin_id,
-                    "✅ **Deploy Selesai / Bot Restart!**\n\n"
-                    "Layanan bot sudah kembali **Online** dan siap digunakan."
-                )
+                try:
+                    await self.send_message(
+                        admin_id,
+                        "✅ **Deploy Selesai / Bot Restart!**\n\n"
+                        "Layanan bot sudah kembali **Online** dan siap digunakan."
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             LOGGER.warning(f"Gagal mengirim notif startup: {e}")
-        # -------------------------------------------------------
+        # ---------------------------------
 
     async def stop(self, block=False):
         try:
