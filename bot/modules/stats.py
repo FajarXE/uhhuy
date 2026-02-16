@@ -5,9 +5,7 @@ import shutil
 import psutil
 import platform
 import subprocess
-import socket
-from datetime import datetime
-from pyrogram import Client, filters, __version__ as pyro_ver
+from pyrogram import Client, filters
 from config import Config
 
 # Simpan waktu start bot
@@ -46,8 +44,7 @@ def sizeof_fmt(num, suffix='B'):
     return "%.1f %s%s" % (num, 'Yi', suffix)
 
 def make_progress_bar(percentage):
-    # Membuat bar dengan panjang 12 blok
-    # ◙ = Terisi, ◘ = Kosong
+    # Membuat bar visual
     filled = int(percentage / 100 * 12)
     bar = "◙" * filled + "◘" * (12 - filled)
     return f"[{bar}]"
@@ -73,47 +70,34 @@ def get_cpu_model():
 
 def get_packages_count():
     try:
-        # Coba hitung paket untuk Debian/Ubuntu (dpkg)
         return subprocess.check_output("dpkg -l | grep -c ^ii", shell=True).decode().strip()
     except:
-        try:
-            # Fallback untuk Alpine (apk)
-            return subprocess.check_output("apk info | wc -l", shell=True).decode().strip()
-        except:
-            return "N/A"
+        return "N/A"
 
-def get_git_info():
+def get_host_info():
+    # 1. Cek apakah ini Render (Render set env var khusus)
+    if os.environ.get("RENDER"):
+        return "Render (Cloud Container)"
+    
+    # 2. Cek Virtualisasi Fisik
     try:
-        commit_date = subprocess.check_output(["git", "log", "-1", "--format=%cd", "--date=short"]).decode().strip()
-        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode().strip()
-        last_commit = subprocess.check_output(["git", "log", "-1", "--format=%s"]).decode().strip()
-        author = subprocess.check_output(["git", "log", "-1", "--format=%an"]).decode().strip()
-        short_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
-        
-        # Hitung hari yang lalu
-        commit_dt = datetime.strptime(commit_date, "%Y-%m-%d")
-        days_ago = (datetime.now() - commit_dt).days
-        
-        return {
-            "date": f"{commit_date} From {days_ago} days ago",
-            "branch": branch,
-            "hash": short_hash,
-            "changelog": f"{last_commit} By {author}"
-        }
-    except:
-        return {
-            "date": "N/A", "branch": "main", "hash": "Unknown", "changelog": "No git info"
-        }
+        if os.path.exists("/sys/devices/virtual/dmi/id/product_name"):
+            with open("/sys/devices/virtual/dmi/id/product_name", "r") as f:
+                return f.read().strip()
+    except: pass
+    
+    # 3. Fallback ke Hostname
+    return platform.node()
 
 def get_timezone():
     try:
-        # Coba baca timezone sistem
+        # Baca Timezone asli sistem
         if os.path.exists("/etc/timezone"):
             with open("/etc/timezone") as f:
                 return f.read().strip()
-        return time.tzname[0]
-    except:
-        return "UTC"
+    except: pass
+    # Fallback ke kode waktu (misal UTC)
+    return time.tzname[0]
 
 # --- MAIN COMMAND ---
 
@@ -126,12 +110,13 @@ async def stats_handler(client, message):
     os_name = get_distro_name()
     kernel = uname.release
     arch = uname.machine
-    host_name = "KVM Virtual Machine" # Render biasanya KVM
     
-    # Shell
+    # [PERBAIKAN] Host & Timezone Dinamis
+    host_name = get_host_info()
+    timezone = get_timezone()
+    
+    # Shell & Packages
     shell = os.environ.get("SHELL", "/bin/bash").split("/")[-1]
-    
-    # Packages
     packages = get_packages_count()
     
     # Uptime
@@ -174,18 +159,8 @@ async def stats_handler(client, message):
     download = sizeof_fmt(net_io.bytes_recv)
     total_bw = sizeof_fmt(net_io.bytes_sent + net_io.bytes_recv)
     
-    # Git Info
-    git = get_git_info()
-    timezone = get_timezone()
-    
-    # Modif Since (Ambil waktu file bot.py diedit)
-    try:
-        modif_time = os.path.getmtime("bot.py")
-        modif_str = datetime.fromtimestamp(modif_time).strftime("%A, %d %B %Y")
-    except:
-        modif_str = "N/A"
-
-    # --- 3. Construct Message ---
+    # --- 3. Construct Message (Updated) ---
+    # Bagian Git, Locale, Display, dll sudah dihapus sesuai permintaan
     
     final_text = f"""
 <code>OS: {os_name} {arch}
@@ -198,14 +173,7 @@ CPU: {cpu_model} ({cpu_count})
 Memory: {mem_used} / {mem_total} ({mem_percent}%)
 Swap: {swap_total}
 Disk (/): {disk_used} / {disk_total} ({disk_percent}%) - overlay
-Locale: en_US.UTF-8
-Display (QEMU Monitor): Headless
 
-Commit Date: {git['date']}
-With Branch: {git['branch']}
-MODIF SINCE: {modif_str}
-Bot Version: 2.3.0-{git['hash']}
-CHANGELOGS : {git['changelog']}
 SERVER AREA: {timezone}
 BOT UPTIME : {bot_uptime}
 
