@@ -6,9 +6,6 @@ import time
 from pyrogram import Client, filters
 from config import Config
 
-# Filter Admin
-admin_only = filters.user(list(Config.ADMINS))
-
 # --- CLASS PEREDAM OUTPUT ---
 class SuppressOutput:
     def __enter__(self):
@@ -24,7 +21,8 @@ class SuppressOutput:
         sys.stderr = self._original_stderr
 
 # --- HANDLER ---
-@Client.on_message(filters.command(["speedtest", "speed"]) & admin_only)
+# [PERUBAHAN] Menghapus '& admin_only' agar semua user bisa akses
+@Client.on_message(filters.command(["speedtest", "speed"]))
 async def speedtest_handler(client, message):
     m = await message.reply_text("🚀 **Menjalankan Speedtest...**\nMohon tunggu...", quote=True)
     
@@ -72,7 +70,6 @@ def run_speedtest():
         res = s.results.dict()
         
         # 1. Konversi ke MB/s (Megabyte/s)
-        # 1 Byte = 8 bits, 1 MB = 1024*1024 Bytes
         d_mbyte = (res["download"] / 8) / 1024 / 1024
         u_mbyte = (res["upload"] / 8) / 1024 / 1024
         
@@ -80,7 +77,6 @@ def run_speedtest():
         res['upload_mbyte'] = f"{u_mbyte:.2f} MB/s"
 
         # 2. Konversi ke Gbps (Gigabit/s)
-        # 1 Gbps = 1.000.000.000 bits
         d_gbps = res["download"] / 1_000_000_000
         u_gbps = res["upload"] / 1_000_000_000
 
