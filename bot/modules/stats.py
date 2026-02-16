@@ -5,12 +5,9 @@ import shutil
 import psutil
 import platform
 import subprocess
-import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from pymongo import MongoClient # Kita gunakan driver standar agar stabil
 from config import Config
-from bot.logger import LOGGER
 
 # Simpan waktu start bot
 BOT_START_TIME = time.time()
@@ -95,49 +92,13 @@ def get_real_timezone():
     except: pass
     return time.tzname[0]
 
-# --- MONGODB HELPER (SYNC METHOD WITH THREADING) ---
-def _get_mongo_stats_sync():
+# --- CORE LOGIC (GENERATOR TEXT) ---
+def generate_stats_text():
     """
-    Fungsi ini berjalan secara synchronous di thread terpisah.
-    Lebih aman untuk koneksi sesaat dibanding async_pymongo.
+    Fungsi ini dipisahkan agar bisa dipanggil oleh Command dan Tombol Refresh
+    tanpa menulis ulang kode yang sama.
     """
-    client = None
-    try:
-        # Gunakan timeout 3 detik agar tidak loading selamanya
-        client = MongoClient(Config.DATABASE_URL, serverSelectionTimeoutMS=3000)
-        
-        # Pakai Config.BOT_USERNAME sebagai nama database
-        db_name = Config.BOT_USERNAME
-        db = client[db_name]
-        
-        # Jalankan perintah stats
-        stats = db.command("dbstats")
-        
-        cols = stats.get('collections', 0)
-        docs = stats.get('objects', 0)
-        size_bytes = stats.get('storageSize', 0) 
-        size_mb = size_bytes / (1024 * 1024)
-        
-        client.close()
-        return cols, docs, size_mb, None # None = No Error
-        
-    except Exception as e:
-        if client:
-            client.close()
-        return 0, 0, 0, str(e)
-
-async def get_mongo_stats():
-    loop = asyncio.get_running_loop()
-    # Jalankan fungsi sync di executor agar tidak memblokir bot
-    return await loop.run_in_executor(None, _get_mongo_stats_sync)
-
-# --- MAIN COMMAND ---
-
-@Client.on_message(filters.command(["stats", "status"]))
-async def stats_handler(client, message):
-    msg = await message.reply("🔄 **Mengumpulkan Data...**", quote=True)
-    
-    # --- 1. System Info ---
+    # 1. System Info
     uname = platform.uname()
     os_name = get_distro_name()
     kernel = uname.release
@@ -152,7 +113,7 @@ async def stats_handler(client, message):
     os_uptime = get_readable_time(int(time.time() - boot_time_timestamp))
     bot_uptime = get_readable_time(int(time.time() - BOT_START_TIME))
     
-    # --- 2. Resources ---
+    # 2. Resources
     cpu_model = get_cpu_model()
     cpu_count = psutil.cpu_count(logical=True)
     cpu_usage = psutil.cpu_percent()
@@ -181,7 +142,7 @@ async def stats_handler(client, message):
     download = sizeof_fmt(net_io.bytes_recv)
     total_bw = sizeof_fmt(net_io.bytes_sent + net_io.bytes_recv)
     
-    final_text = f"""
+    text = f"""
 <code>OS: {os_name} {arch}
 Host: {host_name}
 Kernel: {kernel}
@@ -222,40 +183,46 @@ Upload    : {upload}
 All BW    : {total_bw}
 </code>
 """
+    return text
+
+# --- MAIN COMMAND ---
+
+@Client.on_message(filters.command(["stats", "status"]))
+async def stats_handler(client, message):
+    msg = await message.reply("🔄 **Mengumpulkan Data...**", quote=True)
+    
+    # Ambil text dari fungsi generator
+    final_text = generate_stats_text()
+    
+    # Tombol Refresh
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 MongoDB Stats", callback_data="stats_mongo")],
+        [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh")],
         [InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")]
     ])
     
     await msg.edit(final_text, reply_markup=buttons)
 
-# --- CALLBACK: MONGODB STATS ---
-@Client.on_callback_query(filters.regex("^stats_mongo$"))
-async def mongo_stats_callback(client, query: CallbackQuery):
-    await query.answer("🔄 Mengambil data MongoDB...", show_alert=False)
+# --- CALLBACK: REFRESH STATS ---
+@Client.on_callback_query(filters.regex("^stats_refresh$"))
+async def refresh_stats_callback(client, query: CallbackQuery):
+    # Ambil data terbaru
+    new_text = generate_stats_text()
+    
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh")],
+        [InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")]
+    ])
     
     try:
-        # Panggil fungsi wrapper async
-        cols, docs, size_mb, error_msg = await get_mongo_stats()
-        
-        if error_msg:
-            # Tampilkan error spesifik jika ada (misal Timeout)
-            LOGGER.error(f"Mongo Stats Error: {error_msg}")
-            await query.answer(f"⚠️ Gagal Connect DB:\n{error_msg[:100]}", show_alert=True)
-            return
-
-        text = (
-            f"Total Collection : {cols}\n"
-            f"Total Documents  : {docs}\n"
-            f"Used Storage     : {size_mb:.2f} MB\n"
-            f"Host Storage     : Atlas Storage"
+        # Edit pesan dengan data baru
+        await query.edit_message_text(
+            new_text, 
+            reply_markup=buttons
         )
-        
-        await query.answer(text, show_alert=True)
-        
-    except Exception as e:
-        LOGGER.error(f"Callback Stats Error: {e}")
-        await query.answer(f"Error System: {e}", show_alert=True)
+        await query.answer("✅ Data Diperbarui!")
+    except Exception:
+        # Menghindari error jika tombol ditekan terlalu cepat (konten belum berubah)
+        await query.answer("✅ Data sudah paling update!")
 
 # --- CALLBACK: CLOSE ---
 @Client.on_callback_query(filters.regex("^rnd_close$"))
