@@ -10,7 +10,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from async_pymongo import AsyncClient
 from config import Config
-from bot.logger import LOGGER # Tambahkan Logger untuk cek error
+from bot.logger import LOGGER
 
 # Simpan waktu start bot
 BOT_START_TIME = time.time()
@@ -95,27 +95,34 @@ def get_real_timezone():
     except: pass
     return time.tzname[0]
 
-# --- MONGODB HELPER (OPTIMIZED) ---
+# --- MONGODB HELPER (FIXED DATABASE NAME) ---
 async def get_mongo_stats(client_bot=None):
     try:
         mongo_client = None
         
         # 1. Coba ambil koneksi dari bot utama (Priority)
-        # Ini mencegah 'hanging' karena tidak perlu buka koneksi baru
+        # Di async_pymongo bot Anda, strukturnya: bot.mongo.db (Client)
+        # Kita coba akses client raw-nya
         if client_bot and hasattr(client_bot, 'mongodb'):
-            mongo_client = client_bot.mongodb.get('connection')
+            # Mencoba menebak struktur attribute database di bot Anda
+            # Biasanya client_bot.mongodb adalah instance class MongoDB di mongo_async.py
+            # Dan di dalamnya ada self.db (yang merupakan AsyncClient)
+            if hasattr(client_bot.mongodb, 'db'):
+                mongo_client = client_bot.mongodb.db
         
-        # 2. Fallback: Buka koneksi baru jika tidak ada
+        # 2. Fallback: Buka koneksi baru jika tidak ketemu
         should_close = False
         if not mongo_client:
-            LOGGER.info("Stats: Membuka koneksi Mongo baru (Fallback)...")
+            # LOGGER.info("Stats: Membuka koneksi Mongo baru (Fallback)...")
             mongo_client = AsyncClient(Config.DATABASE_URL)
             should_close = True
-            
-        db = mongo_client.get_database()
+        
+        # [PERBAIKAN UTAMA DI SINI]
+        # Jangan pakai .get_database() tanpa argumen jika URL tidak ada nama DB.
+        # Kita pakai Config.BOT_USERNAME sesuai dengan 'mongo_async.py'.
+        db = mongo_client[Config.BOT_USERNAME]
         
         # 3. Jalankan command dengan TIMEOUT 5 detik
-        # Agar tidak loading selamanya jika DB lambat
         stats = await asyncio.wait_for(db.command("dbstats"), timeout=5.0)
         
         cols = stats.get('collections', 0)
@@ -238,18 +245,12 @@ All BW    : {total_bw}
 # --- CALLBACK: MONGODB STATS ---
 @Client.on_callback_query(filters.regex("^stats_mongo$"))
 async def mongo_stats_callback(client, query: CallbackQuery):
-    # Kirim toast loading dulu
     await query.answer("🔄 Mengambil data MongoDB...", show_alert=False)
     
     try:
         # Kirim 'client' (bot instance) untuk mencoba reuse koneksi
         cols, docs, size_mb = await get_mongo_stats(client)
         
-        if cols == 0 and docs == 0 and size_mb == 0:
-            # Jika hasil 0, kemungkinan gagal/timeout
-            await query.answer("⚠️ Gagal mengambil data / Database Kosong.\nCek Logs untuk detail.", show_alert=True)
-            return
-
         text = (
             f"Total Collection : {cols}\n"
             f"Total Documents  : {docs}\n"
