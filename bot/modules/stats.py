@@ -95,13 +95,14 @@ def get_real_timezone():
     except: pass
     return time.tzname[0]
 
-# --- MONGODB HELPER ---
+# --- MONGODB HELPER (FIXED) ---
 async def get_mongo_stats(client_bot=None):
     try:
         mongo_client = None
-        should_close = False # Flag untuk menandai apakah kita membuka koneksi baru
+        should_close = False 
         
-        # 1. Coba ambil koneksi dari bot utama (Priority)
+        # 1. Coba REUSE koneksi dari bot utama (Priority)
+        # Struktur di mongo_async.py Anda: self.db = AsyncClient(...)
         if client_bot and hasattr(client_bot, 'mongodb'):
             if hasattr(client_bot.mongodb, 'db'):
                 mongo_client = client_bot.mongodb.db
@@ -112,7 +113,7 @@ async def get_mongo_stats(client_bot=None):
             mongo_client = AsyncClient(Config.DATABASE_URL)
             should_close = True
         
-        # Pilih Database (Agar tidak error 'No default database')
+        # Pilih Database Spesifik (Sesuai mongo_async.py Anda)
         db = mongo_client[Config.BOT_USERNAME]
         
         # 3. Jalankan command dengan TIMEOUT 5 detik
@@ -123,12 +124,13 @@ async def get_mongo_stats(client_bot=None):
         size_bytes = stats.get('storageSize', 0) 
         size_mb = size_bytes / (1024 * 1024)
         
-        # Tutup jika kita membuka koneksi baru
+        # 4. Tutup Koneksi (JIKA KITA YANG MEMBUKA BARU)
         if should_close:
             try: 
                 # [PERBAIKAN UTAMA: Tambahkan await]
                 await mongo_client.close()
-            except: pass
+            except Exception as e: 
+                LOGGER.error(f"Error closing mongo: {e}")
             
         return cols, docs, size_mb
         
