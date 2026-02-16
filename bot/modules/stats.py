@@ -44,7 +44,7 @@ def sizeof_fmt(num, suffix='B'):
     return "%.1f %s%s" % (num, 'Yi', suffix)
 
 def make_progress_bar(percentage):
-    # Membuat bar visual
+    # Membuat bar visual [◙◙◙◘....]
     filled = int(percentage / 100 * 12)
     bar = "◙" * filled + "◘" * (12 - filled)
     return f"[{bar}]"
@@ -75,7 +75,7 @@ def get_packages_count():
         return "N/A"
 
 def get_host_info():
-    # 1. Cek apakah ini Render (Render set env var khusus)
+    # 1. Cek apakah ini Render
     if os.environ.get("RENDER"):
         return "Render (Cloud Container)"
     
@@ -89,14 +89,24 @@ def get_host_info():
     # 3. Fallback ke Hostname
     return platform.node()
 
-def get_timezone():
+def get_real_timezone():
     try:
-        # Baca Timezone asli sistem
+        # Cara 1: Cek symlink /etc/localtime (Paling akurat untuk Linux modern)
+        # Ini akan menghasilkan output seperti "Asia/Jakarta" atau "Etc/UTC"
+        if os.path.islink("/etc/localtime"):
+            return os.readlink("/etc/localtime").replace("/usr/share/zoneinfo/", "")
+        
+        # Cara 2: Cek isi file /etc/timezone
         if os.path.exists("/etc/timezone"):
-            with open("/etc/timezone") as f:
+            with open("/etc/timezone", "r") as f:
                 return f.read().strip()
-    except: pass
-    # Fallback ke kode waktu (misal UTC)
+                
+        # Cara 3: Cek output command date
+        return subprocess.check_output("date +%Z", shell=True).decode().strip()
+    except:
+        pass
+    
+    # Fallback terakhir: Menggunakan modul time python (Biasanya UTC/GMT)
     return time.tzname[0]
 
 # --- MAIN COMMAND ---
@@ -111,11 +121,11 @@ async def stats_handler(client, message):
     kernel = uname.release
     arch = uname.machine
     
-    # [PERBAIKAN] Host & Timezone Dinamis
     host_name = get_host_info()
-    timezone = get_timezone()
     
-    # Shell & Packages
+    # [FIX] Timezone Dinamis (Sesuai Aslinya)
+    timezone = get_real_timezone()
+    
     shell = os.environ.get("SHELL", "/bin/bash").split("/")[-1]
     packages = get_packages_count()
     
@@ -159,8 +169,7 @@ async def stats_handler(client, message):
     download = sizeof_fmt(net_io.bytes_recv)
     total_bw = sizeof_fmt(net_io.bytes_sent + net_io.bytes_recv)
     
-    # --- 3. Construct Message (Updated) ---
-    # Bagian Git, Locale, Display, dll sudah dihapus sesuai permintaan
+    # --- 3. Construct Message ---
     
     final_text = f"""
 <code>OS: {os_name} {arch}
