@@ -11,9 +11,6 @@ from config import Config
 # Simpan waktu start bot
 BOT_START_TIME = time.time()
 
-# Filter Admin
-admin_only = filters.user(list(Config.ADMINS))
-
 # --- HELPER FUNCTIONS ---
 
 def get_readable_time(seconds: int) -> str:
@@ -44,7 +41,6 @@ def sizeof_fmt(num, suffix='B'):
     return "%.1f %s%s" % (num, 'Yi', suffix)
 
 def make_progress_bar(percentage):
-    # Membuat bar visual [◙◙◙◘....]
     filled = int(percentage / 100 * 12)
     bar = "◙" * filled + "◘" * (12 - filled)
     return f"[{bar}]"
@@ -75,43 +71,30 @@ def get_packages_count():
         return "N/A"
 
 def get_host_info():
-    # 1. Cek apakah ini Render
     if os.environ.get("RENDER"):
         return "Render (Cloud Container)"
-    
-    # 2. Cek Virtualisasi Fisik
     try:
         if os.path.exists("/sys/devices/virtual/dmi/id/product_name"):
             with open("/sys/devices/virtual/dmi/id/product_name", "r") as f:
                 return f.read().strip()
     except: pass
-    
-    # 3. Fallback ke Hostname
     return platform.node()
 
 def get_real_timezone():
     try:
-        # Cara 1: Cek symlink /etc/localtime (Paling akurat untuk Linux modern)
-        # Ini akan menghasilkan output seperti "Asia/Jakarta" atau "Etc/UTC"
         if os.path.islink("/etc/localtime"):
             return os.readlink("/etc/localtime").replace("/usr/share/zoneinfo/", "")
-        
-        # Cara 2: Cek isi file /etc/timezone
         if os.path.exists("/etc/timezone"):
             with open("/etc/timezone", "r") as f:
                 return f.read().strip()
-                
-        # Cara 3: Cek output command date
         return subprocess.check_output("date +%Z", shell=True).decode().strip()
-    except:
-        pass
-    
-    # Fallback terakhir: Menggunakan modul time python (Biasanya UTC/GMT)
+    except: pass
     return time.tzname[0]
 
 # --- MAIN COMMAND ---
 
-@Client.on_message(filters.command(["stats", "status"]) & admin_only)
+# [PERUBAHAN] Menghapus '& admin_only' agar semua user bisa akses
+@Client.on_message(filters.command(["stats", "status"]))
 async def stats_handler(client, message):
     msg = await message.reply("🔄 **Mengumpulkan Data...**", quote=True)
     
@@ -120,12 +103,8 @@ async def stats_handler(client, message):
     os_name = get_distro_name()
     kernel = uname.release
     arch = uname.machine
-    
     host_name = get_host_info()
-    
-    # [FIX] Timezone Dinamis (Sesuai Aslinya)
     timezone = get_real_timezone()
-    
     shell = os.environ.get("SHELL", "/bin/bash").split("/")[-1]
     packages = get_packages_count()
     
@@ -135,7 +114,6 @@ async def stats_handler(client, message):
     bot_uptime = get_readable_time(int(time.time() - BOT_START_TIME))
     
     # --- 2. Resources ---
-    
     # CPU
     cpu_model = get_cpu_model()
     cpu_count = psutil.cpu_count(logical=True)
@@ -168,8 +146,6 @@ async def stats_handler(client, message):
     upload = sizeof_fmt(net_io.bytes_sent)
     download = sizeof_fmt(net_io.bytes_recv)
     total_bw = sizeof_fmt(net_io.bytes_sent + net_io.bytes_recv)
-    
-    # --- 3. Construct Message ---
     
     final_text = f"""
 <code>OS: {os_name} {arch}
