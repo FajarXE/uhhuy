@@ -6,6 +6,8 @@ import psutil
 import platform
 import subprocess
 from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from async_pymongo import AsyncClient  # <--- GANTI INI
 from config import Config
 
 # Simpan waktu start bot
@@ -91,9 +93,30 @@ def get_real_timezone():
     except: pass
     return time.tzname[0]
 
+# --- MONGODB HELPER (ASYNC_PYMONGO) ---
+async def get_mongo_stats():
+    try:
+        # Menggunakan AsyncClient dari async_pymongo
+        client = AsyncClient(Config.DATABASE_URL)
+        # Ambil database default dari URL
+        db = client.get_database()
+        
+        # Jalankan perintah dbStats
+        stats = await db.command("dbstats")
+        
+        # Hitung data
+        cols = stats.get('collections', 0)
+        docs = stats.get('objects', 0)
+        size_bytes = stats.get('storageSize', 0) 
+        size_mb = size_bytes / (1024 * 1024)
+        
+        return cols, docs, size_mb
+    except Exception as e:
+        # Jika error (misal koneksi gagal), kembalikan 0
+        return 0, 0, 0
+
 # --- MAIN COMMAND ---
 
-# [PERUBAHAN] Menghapus '& admin_only' agar semua user bisa akses
 @Client.on_message(filters.command(["stats", "status"]))
 async def stats_handler(client, message):
     msg = await message.reply("🔄 **Mengumpulkan Data...**", quote=True)
@@ -114,13 +137,11 @@ async def stats_handler(client, message):
     bot_uptime = get_readable_time(int(time.time() - BOT_START_TIME))
     
     # --- 2. Resources ---
-    # CPU
     cpu_model = get_cpu_model()
     cpu_count = psutil.cpu_count(logical=True)
     cpu_usage = psutil.cpu_percent()
     cpu_bar = make_progress_bar(cpu_usage)
     
-    # Memory
     mem = psutil.virtual_memory()
     mem_used = sizeof_fmt(mem.used)
     mem_total = sizeof_fmt(mem.total)
@@ -128,12 +149,10 @@ async def stats_handler(client, message):
     mem_free = sizeof_fmt(mem.available)
     mem_bar = make_progress_bar(mem_percent)
     
-    # Swap
     swap = psutil.swap_memory()
     swap_total = sizeof_fmt(swap.total) if swap.total > 0 else "Not Set"
     swap_used = sizeof_fmt(swap.used) if swap.total > 0 else "Not Set"
     
-    # Disk
     total, used, free = shutil.disk_usage(".")
     disk_used = sizeof_fmt(used)
     disk_total = sizeof_fmt(total)
@@ -141,7 +160,6 @@ async def stats_handler(client, message):
     disk_percent = int((used / total) * 100)
     disk_bar = make_progress_bar(disk_percent)
     
-    # Bandwidth
     net_io = psutil.net_io_counters()
     upload = sizeof_fmt(net_io.bytes_sent)
     download = sizeof_fmt(net_io.bytes_recv)
@@ -188,4 +206,35 @@ Upload    : {upload}
 All BW    : {total_bw}
 </code>
 """
-    await msg.edit(final_text)
+    # Tombol MongoDB Stats
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 MongoDB Stats", callback_data="stats_mongo")],
+        [InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")]
+    ])
+    
+    await msg.edit(final_text, reply_markup=buttons)
+
+# --- CALLBACK: MONGODB STATS ---
+@Client.on_callback_query(filters.regex("^stats_mongo$"))
+async def mongo_stats_callback(client, query: CallbackQuery):
+    await query.answer("🔄 Mengambil data MongoDB...", show_alert=False)
+    
+    try:
+        cols, docs, size_mb = await get_mongo_stats()
+        
+        text = (
+            f"Total Collection : {cols}\n"
+            f"Total Documents  : {docs}\n"
+            f"Used Storage     : {size_mb:.2f} MB\n"
+            f"Host Storage     : Atlas Storage"
+        )
+        
+        await query.answer(text, show_alert=True)
+        
+    except Exception as e:
+        await query.answer(f"Gagal mengambil stats: {e}", show_alert=True)
+
+# --- CALLBACK: CLOSE ---
+@Client.on_callback_query(filters.regex("^rnd_close$"))
+async def close_callback(client, query: CallbackQuery):
+    await query.message.delete()
