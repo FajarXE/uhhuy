@@ -5,10 +5,12 @@ import shutil
 import psutil
 import platform
 import subprocess
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from async_pymongo import AsyncClient  # <--- GANTI INI
+from async_pymongo import AsyncClient
 from config import Config
+from bot.logger import LOGGER # Tambahkan Logger untuk cek error
 
 # Simpan waktu start bot
 BOT_START_TIME = time.time()
@@ -93,26 +95,46 @@ def get_real_timezone():
     except: pass
     return time.tzname[0]
 
-# --- MONGODB HELPER (ASYNC_PYMONGO) ---
-async def get_mongo_stats():
+# --- MONGODB HELPER (OPTIMIZED) ---
+async def get_mongo_stats(client_bot=None):
     try:
-        # Menggunakan AsyncClient dari async_pymongo
-        client = AsyncClient(Config.DATABASE_URL)
-        # Ambil database default dari URL
-        db = client.get_database()
+        mongo_client = None
         
-        # Jalankan perintah dbStats
-        stats = await db.command("dbstats")
+        # 1. Coba ambil koneksi dari bot utama (Priority)
+        # Ini mencegah 'hanging' karena tidak perlu buka koneksi baru
+        if client_bot and hasattr(client_bot, 'mongodb'):
+            mongo_client = client_bot.mongodb.get('connection')
         
-        # Hitung data
+        # 2. Fallback: Buka koneksi baru jika tidak ada
+        should_close = False
+        if not mongo_client:
+            LOGGER.info("Stats: Membuka koneksi Mongo baru (Fallback)...")
+            mongo_client = AsyncClient(Config.DATABASE_URL)
+            should_close = True
+            
+        db = mongo_client.get_database()
+        
+        # 3. Jalankan command dengan TIMEOUT 5 detik
+        # Agar tidak loading selamanya jika DB lambat
+        stats = await asyncio.wait_for(db.command("dbstats"), timeout=5.0)
+        
         cols = stats.get('collections', 0)
         docs = stats.get('objects', 0)
         size_bytes = stats.get('storageSize', 0) 
         size_mb = size_bytes / (1024 * 1024)
         
+        # Tutup jika kita membuka koneksi baru
+        if should_close:
+            try: mongo_client.close()
+            except: pass
+            
         return cols, docs, size_mb
+        
+    except asyncio.TimeoutError:
+        LOGGER.error("Mongo Stats Timeout: Database terlalu lama merespon.")
+        return 0, 0, 0
     except Exception as e:
-        # Jika error (misal koneksi gagal), kembalikan 0
+        LOGGER.error(f"Mongo Stats Error: {e}")
         return 0, 0, 0
 
 # --- MAIN COMMAND ---
@@ -206,7 +228,6 @@ Upload    : {upload}
 All BW    : {total_bw}
 </code>
 """
-    # Tombol MongoDB Stats
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 MongoDB Stats", callback_data="stats_mongo")],
         [InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")]
@@ -217,11 +238,18 @@ All BW    : {total_bw}
 # --- CALLBACK: MONGODB STATS ---
 @Client.on_callback_query(filters.regex("^stats_mongo$"))
 async def mongo_stats_callback(client, query: CallbackQuery):
+    # Kirim toast loading dulu
     await query.answer("🔄 Mengambil data MongoDB...", show_alert=False)
     
     try:
-        cols, docs, size_mb = await get_mongo_stats()
+        # Kirim 'client' (bot instance) untuk mencoba reuse koneksi
+        cols, docs, size_mb = await get_mongo_stats(client)
         
+        if cols == 0 and docs == 0 and size_mb == 0:
+            # Jika hasil 0, kemungkinan gagal/timeout
+            await query.answer("⚠️ Gagal mengambil data / Database Kosong.\nCek Logs untuk detail.", show_alert=True)
+            return
+
         text = (
             f"Total Collection : {cols}\n"
             f"Total Documents  : {docs}\n"
@@ -232,7 +260,8 @@ async def mongo_stats_callback(client, query: CallbackQuery):
         await query.answer(text, show_alert=True)
         
     except Exception as e:
-        await query.answer(f"Gagal mengambil stats: {e}", show_alert=True)
+        LOGGER.error(f"Callback Stats Error: {e}")
+        await query.answer(f"Error System: {e}", show_alert=True)
 
 # --- CALLBACK: CLOSE ---
 @Client.on_callback_query(filters.regex("^rnd_close$"))
