@@ -8,7 +8,7 @@ import subprocess
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from async_pymongo import AsyncClient
+from pymongo import MongoClient # Kita gunakan driver standar agar stabil
 from config import Config
 from bot.logger import LOGGER
 
@@ -95,51 +95,41 @@ def get_real_timezone():
     except: pass
     return time.tzname[0]
 
-# --- MONGODB HELPER (FIXED) ---
-async def get_mongo_stats(client_bot=None):
+# --- MONGODB HELPER (SYNC METHOD WITH THREADING) ---
+def _get_mongo_stats_sync():
+    """
+    Fungsi ini berjalan secara synchronous di thread terpisah.
+    Lebih aman untuk koneksi sesaat dibanding async_pymongo.
+    """
+    client = None
     try:
-        mongo_client = None
-        should_close = False 
+        # Gunakan timeout 3 detik agar tidak loading selamanya
+        client = MongoClient(Config.DATABASE_URL, serverSelectionTimeoutMS=3000)
         
-        # 1. Coba REUSE koneksi dari bot utama (Priority)
-        # Struktur di mongo_async.py Anda: self.db = AsyncClient(...)
-        if client_bot and hasattr(client_bot, 'mongodb'):
-            if hasattr(client_bot.mongodb, 'db'):
-                mongo_client = client_bot.mongodb.db
+        # Pakai Config.BOT_USERNAME sebagai nama database
+        db_name = Config.BOT_USERNAME
+        db = client[db_name]
         
-        # 2. Fallback: Buka koneksi baru jika tidak ketemu
-        if not mongo_client:
-            # LOGGER.info("Stats: Membuka koneksi Mongo baru (Fallback)...")
-            mongo_client = AsyncClient(Config.DATABASE_URL)
-            should_close = True
-        
-        # Pilih Database Spesifik (Sesuai mongo_async.py Anda)
-        db = mongo_client[Config.BOT_USERNAME]
-        
-        # 3. Jalankan command dengan TIMEOUT 5 detik
-        stats = await asyncio.wait_for(db.command("dbstats"), timeout=5.0)
+        # Jalankan perintah stats
+        stats = db.command("dbstats")
         
         cols = stats.get('collections', 0)
         docs = stats.get('objects', 0)
         size_bytes = stats.get('storageSize', 0) 
         size_mb = size_bytes / (1024 * 1024)
         
-        # 4. Tutup Koneksi (JIKA KITA YANG MEMBUKA BARU)
-        if should_close:
-            try: 
-                # [PERBAIKAN UTAMA: Tambahkan await]
-                await mongo_client.close()
-            except Exception as e: 
-                LOGGER.error(f"Error closing mongo: {e}")
-            
-        return cols, docs, size_mb
+        client.close()
+        return cols, docs, size_mb, None # None = No Error
         
-    except asyncio.TimeoutError:
-        LOGGER.error("Mongo Stats Timeout: Database terlalu lama merespon.")
-        return 0, 0, 0
     except Exception as e:
-        LOGGER.error(f"Mongo Stats Error: {e}")
-        return 0, 0, 0
+        if client:
+            client.close()
+        return 0, 0, 0, str(e)
+
+async def get_mongo_stats():
+    loop = asyncio.get_running_loop()
+    # Jalankan fungsi sync di executor agar tidak memblokir bot
+    return await loop.run_in_executor(None, _get_mongo_stats_sync)
 
 # --- MAIN COMMAND ---
 
@@ -245,9 +235,15 @@ async def mongo_stats_callback(client, query: CallbackQuery):
     await query.answer("🔄 Mengambil data MongoDB...", show_alert=False)
     
     try:
-        # Kirim 'client' (bot instance) untuk mencoba reuse koneksi
-        cols, docs, size_mb = await get_mongo_stats(client)
+        # Panggil fungsi wrapper async
+        cols, docs, size_mb, error_msg = await get_mongo_stats()
         
+        if error_msg:
+            # Tampilkan error spesifik jika ada (misal Timeout)
+            LOGGER.error(f"Mongo Stats Error: {error_msg}")
+            await query.answer(f"⚠️ Gagal Connect DB:\n{error_msg[:100]}", show_alert=True)
+            return
+
         text = (
             f"Total Collection : {cols}\n"
             f"Total Documents  : {docs}\n"
