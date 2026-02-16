@@ -33,7 +33,7 @@ async def speedtest_handler(client, message):
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, run_speedtest)
         
-        # Format Text Output sesuai permintaan
+        # Format Text Output dengan Gbps
         output_text = (
             "**📊 Speedtest Results**\n"
             "━━━━━━━━━━━━━━━━━━\n"
@@ -42,8 +42,8 @@ async def speedtest_handler(client, message):
             f"**Region:** {result['server']['country']}, {result['server']['cc']}\n"
             f"**IP:** {result['ip_masked']}\n\n"
             
-            f"**Download:** `{result['download_mbyte']}`\n"
-            f"**Upload:** `{result['upload_mbyte']}`\n"
+            f"**Download:** `{result['download_mbyte']}` ({result['download_gbps']})\n"
+            f"**Upload:** `{result['upload_mbyte']}` ({result['upload_gbps']})\n"
             f"**Ping:** `{result['ping']} ms`\n\n"
             
             f"**Executed Time:** `{result['exec_time']} sec`"
@@ -60,7 +60,7 @@ async def speedtest_handler(client, message):
         await m.edit(f"❌ **Speedtest Gagal:**\n`{e}`")
 
 def run_speedtest():
-    start_time = time.time()  # Mulai hitung waktu
+    start_time = time.time()
     
     with SuppressOutput():
         s = speedtest.Speedtest(secure=True)
@@ -72,17 +72,24 @@ def run_speedtest():
         res = s.results.dict()
         
         # 1. Konversi ke MB/s (Megabyte/s)
-        # Note: Speedtest memberikan bits. 1 Byte = 8 bits.
+        # 1 Byte = 8 bits, 1 MB = 1024*1024 Bytes
         d_mbyte = (res["download"] / 8) / 1024 / 1024
         u_mbyte = (res["upload"] / 8) / 1024 / 1024
         
         res['download_mbyte'] = f"{d_mbyte:.2f} MB/s"
         res['upload_mbyte'] = f"{u_mbyte:.2f} MB/s"
+
+        # 2. Konversi ke Gbps (Gigabit/s)
+        # 1 Gbps = 1.000.000.000 bits
+        d_gbps = res["download"] / 1_000_000_000
+        u_gbps = res["upload"] / 1_000_000_000
+
+        res['download_gbps'] = f"{d_gbps:.2f} Gbps"
+        res['upload_gbps'] = f"{u_gbps:.2f} Gbps"
         
-        # 2. Masking IP (Sensor IP)
+        # 3. Masking IP
         real_ip = res['client']['ip']
         try:
-            # Ambil 2 segmen pertama, sisanya sensor
             parts = real_ip.split('.')
             if len(parts) >= 2:
                 masked_ip = f"{parts[0]}.{parts[1]}xxxxxx"
@@ -93,7 +100,7 @@ def run_speedtest():
         
         res['ip_masked'] = masked_ip
         
-        # 3. Hitung Waktu Eksekusi
+        # 4. Hitung Waktu Eksekusi
         end_time = time.time()
         exec_duration = end_time - start_time
         res['exec_time'] = f"{exec_duration:.2f}"
