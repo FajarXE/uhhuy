@@ -41,16 +41,64 @@ def sizeof_fmt(num, suffix='B'):
         num /= 1024.0
     return "%.1f %s%s" % (num, 'Yi', suffix)
 
-def get_os_info():
+def get_cpu_model():
+    """Membaca detail model CPU langsung dari /proc/cpuinfo"""
     try:
-        if os.path.exists("/etc/os-release"):
-            with open("/etc/os-release") as f:
-                for line in f:
-                    if line.startswith("PRETTY_NAME="):
-                        return line.split("=")[1].strip().strip('"')
+        command = "cat /proc/cpuinfo | grep 'model name' | uniq | cut -d: -f2"
+        # Coba cara standar (Intel/AMD)
+        output = subprocess.check_output(command, shell=True).decode().strip()
+        
+        # Jika kosong (biasanya di ARM/Aarch64 kuncinya 'Model' atau 'Processor')
+        if not output:
+             command_arm = "cat /proc/cpuinfo | grep 'Model' | uniq | cut -d: -f2"
+             output = subprocess.check_output(command_arm, shell=True).decode().strip()
+        
+        # Jika masih kosong, coba ambil Hardware
+        if not output:
+             command_hw = "cat /proc/cpuinfo | grep 'Hardware' | uniq | cut -d: -f2"
+             output = subprocess.check_output(command_hw, shell=True).decode().strip()
+             
+        if output:
+            return output
     except:
         pass
-    return platform.system() + " " + platform.release()
+    
+    # Fallback jika gagal baca file
+    return platform.processor() or "Unknown CPU"
+
+def get_host_info():
+    """Mendeteksi Virtualisasi Host (KVM/Docker/dll)"""
+    try:
+        # Cara paling akurat di Linux: membaca DMI product name
+        if os.path.exists("/sys/devices/virtual/dmi/id/product_name"):
+            with open("/sys/devices/virtual/dmi/id/product_name", "r") as f:
+                return f.read().strip()
+        elif os.path.exists("/sys/class/dmi/id/product_name"):
+            with open("/sys/class/dmi/id/product_name", "r") as f:
+                return f.read().strip()
+    except:
+        pass
+    
+    # Fallback ke platform
+    return "Render / Linux Container"
+
+def get_gpu_info():
+    """Mendeteksi GPU menggunakan lspci"""
+    try:
+        # Mencari device VGA atau 3D controller
+        command = "lspci | grep -i 'vga\\|3d' | cut -d: -f3"
+        output = subprocess.check_output(command, shell=True).decode().strip()
+        if output:
+            return output
+    except:
+        pass
+    return "N/A (Headless/No GPU Access)"
+
+def get_distro_name():
+    try:
+        return subprocess.check_output("cat /etc/*release | grep ^PRETTY_NAME | cut -d= -f2", shell=True).decode().strip().replace('"', '')
+    except:
+        return platform.system()
 
 @Client.on_message(filters.command(["stats", "status"]) & admin_only)
 async def stats_handler(client, message):
@@ -58,11 +106,14 @@ async def stats_handler(client, message):
     
     # 1. System Info
     uname = platform.uname()
-    os_name = get_os_info()
+    os_name = get_distro_name()
     kernel = uname.release
     arch = uname.machine
     
-    # 2. Uptime Calculation
+    # [PERBAIKAN HOST]
+    host_name = get_host_info()
+    
+    # 2. Uptime
     boot_time_timestamp = psutil.boot_time()
     os_uptime_seconds = int(time.time() - boot_time_timestamp)
     os_uptime = get_readable_time(os_uptime_seconds)
@@ -70,45 +121,48 @@ async def stats_handler(client, message):
     bot_uptime_seconds = int(time.time() - BOT_START_TIME)
     bot_uptime = get_readable_time(bot_uptime_seconds)
     
-    # 3. CPU Info
+    # 3. CPU Info [PERBAIKAN CPU]
+    cpu_model = get_cpu_model()
     cpu_count = psutil.cpu_count(logical=True)
-    cpu_freq = psutil.cpu_freq()
-    cpu_freq_str = f"{cpu_freq.current:.2f}Mhz" if cpu_freq else "N/A"
     cpu_usage = psutil.cpu_percent()
     
-    # 4. Memory (RAM)
+    # 4. GPU Info [PERBAIKAN GPU]
+    gpu_info = get_gpu_info()
+    
+    # 5. Memory (RAM)
     mem = psutil.virtual_memory()
     mem_used = sizeof_fmt(mem.used)
     mem_total = sizeof_fmt(mem.total)
     mem_percent = mem.percent
     
-    # 5. Disk Usage
+    # 6. Disk Usage
     total, used, free = shutil.disk_usage(".")
     disk_used = sizeof_fmt(used)
     disk_total = sizeof_fmt(total)
-    disk_free = sizeof_fmt(free)
     disk_percent = int((used / total) * 100)
     
-    # 6. Bot Process Usage
+    # 7. Bot Process Usage
     process = psutil.Process(os.getpid())
     bot_ram_usage = sizeof_fmt(process.memory_info().rss)
     
-    # 7. Network Stats (Total since boot)
+    # 8. Network Stats
     net_io = psutil.net_io_counters()
     upload = sizeof_fmt(net_io.bytes_sent)
     download = sizeof_fmt(net_io.bytes_recv)
 
-    # 8. Python & Lib Versions
+    # 9. Versions
     py_ver = sys.version.split()[0]
     
-    # Menyusun Text (Format Neofetch-like)
     stats_text = f"""
 <code>
 OS: {os_name} {arch}
-Host: Render / VPS
+Host: {host_name}
 Kernel: {kernel}
 Uptime: {os_uptime}
-CPU: {uname.processor} ({cpu_count} Core) @ {cpu_usage}%
+
+CPU: {cpu_model} ({cpu_count} Core) @ {cpu_usage}%
+GPU: {gpu_info}
+
 Memory: {mem_used} / {mem_total} ({mem_percent}%)
 Swap: Disabled
 Disk (/): {disk_used} / {disk_total} ({disk_percent}%)
@@ -116,9 +170,6 @@ Disk (/): {disk_used} / {disk_total} ({disk_percent}%)
 OS Uptime: {os_uptime}
 Bot Uptime: {bot_uptime}
 Bot Usage: {bot_ram_usage}
-
-Total Space: {disk_total}
-Free Space: {disk_free}
 
 Download: {download}
 Upload: {upload}
