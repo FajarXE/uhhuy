@@ -1,11 +1,9 @@
-# [GANTI SELURUH FILE: bot/helpers/message.py]
-
 import os
 import asyncio
 import time
 import math
 import traceback 
-import aiohttp # Perlu import ini untuk catch error
+import aiohttp 
 
 from pyrogram.types import Message
 from pyrogram.errors import MessageNotModified, FloodWait, MessageIdInvalid, RPCError
@@ -14,7 +12,7 @@ from pyrogram.errors import MessageNotModified, FloodWait, MessageIdInvalid, RPC
 from bot.tgclient import aio
 from bot.settings import bot_set
 from bot.logger import LOGGER
-
+from config import Config # Butuh Config untuk COPY_CHANNEL_ID
 
 current_user = []
 
@@ -30,6 +28,23 @@ user_details = {
     'override' : None 
 }
 
+# --- FITUR BARU: COPY TO CHANNEL ---
+async def copy_to_channel(client, message: Message):
+    """
+    Menyalin pesan yang dikirim bot ke Channel yang dikonfigurasi.
+    """
+    # Pastikan ID Channel ada dan Valid (Bukan 0)
+    copy_target = Config.COPY_CHANNEL_ID
+    if not copy_target or copy_target == 0:
+        return
+
+    try:
+        # Gunakan client yang sama dengan pengirim pesan
+        await message.copy(copy_target)
+    except Exception as e:
+        LOGGER.error(f"Gagal menyalin pesan ke channel {copy_target}: {e}")
+
+# -----------------------------------
 
 async def fetch_user_details(msg: Message, reply=False) -> dict:
     details = user_details.copy()
@@ -92,49 +107,67 @@ async def send_message(user, item, itype='text',
   ):
     if not isinstance(user, dict):
         user = await fetch_user_details(user)
-    chat_id = chat_id if chat_id else user['chat_id']
+    
+    # [LOGIKA DIRECT TO CHANNEL]
+    # Tentukan target chat ID
+    target_chat_id = chat_id if chat_id else user['chat_id']
+    original_chat_id = target_chat_id
+    
+    # Jika mode Direct aktif dan Channel ID valid, kirim ke Channel
+    is_direct_mode = Config.DIRECT_TO_CHANNEL and Config.COPY_CHANNEL_ID
+    if is_direct_mode:
+        target_chat_id = Config.COPY_CHANNEL_ID
+    
+    # Tentukan pesan mana yang di-reply
+    reply_to_id = user['r_id']
+    if is_direct_mode:
+        reply_to_id = None # Tidak bisa reply pesan user di channel
+
+    sent_msg = None
 
     try:
         if itype == 'text':
-            msg = await aio.send_message(
-                chat_id=chat_id,
+            sent_msg = await aio.send_message(
+                chat_id=target_chat_id,
                 text=item,
-                reply_to_message_id=user['r_id'],
+                reply_to_message_id=reply_to_id,
                 reply_markup=markup,
                 disable_web_page_preview=True
             )
             
         elif itype == 'doc':
-            # [LOGIKA BARU] Prioritas: Argument 'thumb' -> Meta 'thumbnail' -> Meta 'cover'
+            # Logika Thumb Lama Anda
             thumb_path = thumb 
             if not thumb_path and meta:
                 thumb_path = meta.get('thumbnail') or meta.get('cover')
             
-            # Validasi file ada
             if thumb_path and not os.path.exists(thumb_path):
                 thumb_path = None
-
-            last_update_time = [0] 
-
-            async def progress_callback(current, total):
-                current_time = time.time()
-                if current_time - last_update_time[0] < 5: return
-                last_update_time[0] = current_time
-                percentage = int((current / total) * 100)
-                progress_bar = "{0}{1}".format(
-                    ''.join(["▰" for i in range(math.floor(percentage / 10))]),
-                    ''.join(["▱" for i in range(10 - math.floor(percentage / 10))])
-                )
-                try:
-                    text = (f"**Mengunggah file .zip...**\n`{os.path.basename(item)}`\n\n{progress_bar} {percentage}%")
-                    asyncio.create_task(edit_message(user['bot_msg'], text, antiflood=False))
-                except: pass
             
-            msg = await aio.send_document(
-                chat_id=chat_id,
+            # Progress Callback (Hanya jika kirim ke User, agar tidak spam edit di channel)
+            progress_callback = None
+            if not is_direct_mode:
+                last_update_time = [0] 
+                async def doc_progress(current, total):
+                    current_time = time.time()
+                    if current_time - last_update_time[0] < 5: return
+                    last_update_time[0] = current_time
+                    percentage = int((current / total) * 100)
+                    progress_bar = "{0}{1}".format(
+                        ''.join(["▰" for i in range(math.floor(percentage / 10))]),
+                        ''.join(["▱" for i in range(10 - math.floor(percentage / 10))])
+                    )
+                    try:
+                        text = (f"**Mengunggah file .zip...**\n`{os.path.basename(item)}`\n\n{progress_bar} {percentage}%")
+                        asyncio.create_task(edit_message(user['bot_msg'], text, antiflood=False))
+                    except: pass
+                progress_callback = doc_progress
+            
+            sent_msg = await aio.send_document(
+                chat_id=target_chat_id,
                 document=item,
                 caption=caption,
-                reply_to_message_id=user['r_id'],
+                reply_to_message_id=reply_to_id,
                 thumb=thumb_path,
                 progress=progress_callback
             )
@@ -149,74 +182,74 @@ async def send_message(user, item, itype='text',
             duration = 0
             raw_duration = meta.get('duration')
             if raw_duration:
-                try:
-                    duration = int(float(str(raw_duration)))
-                except:
-                    duration = 0
+                try: duration = int(float(str(raw_duration)))
+                except: duration = 0
 
+            # Progress Callback (Hanya jika kirim ke User)
             progress_callback = None 
-            
-            if meta and not meta.get('batch_mode', False) and user.get('bot_msg'):
+            if not is_direct_mode and meta and not meta.get('batch_mode', False) and user.get('bot_msg'):
                 last_update_time = [0]
-
-                async def internal_progress_callback(current, total):
+                async def audio_progress(current, total):
                     current_time = time.time()
-                    if current_time - last_update_time[0] < 5:
-                        return
+                    if current_time - last_update_time[0] < 5: return
                     last_update_time[0] = current_time
-
                     percentage = int((current / total) * 100)
                     progress_bar = "{0}{1}".format(
                         ''.join(["▰" for i in range(math.floor(percentage / 10))]),
                         ''.join(["▱" for i in range(10 - math.floor(percentage / 10))])
                     )
-                    
                     try:
                         track_num = meta.get('tracknumber', '?')
                         total_tracks = meta.get('totaltracks', '?')
                         title = meta.get('title', 'Unknown Track')
-                        
-                        text = (
-                            f"**Mengunggah...**\n"
-                            f"Lagu {track_num} dari {total_tracks}\n" 
-                            f"`{title}`\n\n"
-                            f"{progress_bar} {percentage}%"
-                        )
-                        # Gunakan create_task agar tidak memblokir proses upload utama
+                        text = (f"**Mengunggah...**\nLagu {track_num} dari {total_tracks}\n`{title}`\n\n{progress_bar} {percentage}%")
                         asyncio.create_task(edit_message(user['bot_msg'], text, antiflood=False))
-                    except Exception:
-                        pass
-                
-                progress_callback = internal_progress_callback 
+                    except Exception: pass
+                progress_callback = audio_progress 
             
-            msg = await aio.send_audio(
-                chat_id=chat_id,
+            sent_msg = await aio.send_audio(
+                chat_id=target_chat_id,
                 audio=item,
                 caption=caption,
                 duration=duration,
                 performer=meta.get('artist'),
                 title=meta.get('title'),
                 thumb=thumb_path, 
-                reply_to_message_id=user['r_id'],
+                reply_to_message_id=reply_to_id,
                 progress=progress_callback
             )
 
         elif itype == 'pic':
-            msg = await aio.send_photo(
-                chat_id=chat_id,
+            sent_msg = await aio.send_photo(
+                chat_id=target_chat_id,
                 photo=item,
                 caption=caption,
-                reply_to_message_id=user['r_id']
+                reply_to_message_id=reply_to_id
             )
+
+        # [LOGIKA COPY TO CHANNEL]
+        # Jika Direct Mode MATI (User sudah terima file),
+        # DAN Channel ID ada, maka COPY file tersebut ke Channel
+        if sent_msg and not is_direct_mode and Config.COPY_CHANNEL_ID:
+            # Hanya copy file media penting (Audio/Doc/Pic)
+            if itype in ['audio', 'doc', 'pic']:
+                 await copy_to_channel(aio, sent_msg)
+        
+        return sent_msg
 
     except FloodWait as e:
         await asyncio.sleep(e.value)
-        return await send_message(user, item, itype, caption, markup, chat_id, meta)
+        return await send_message(user, item, itype, caption, markup, chat_id, meta, thumb)
+        
     except Exception as e:
         LOGGER.error(f"Send Message Error: {e}")
+        # Fallback: Jika gagal kirim ke Channel (misal bot dikick), coba kirim ke User
+        if is_direct_mode and target_chat_id != original_chat_id:
+            LOGGER.info("Fallback: Mengirim ulang ke User karena gagal kirim ke Channel...")
+            # Matikan direct mode sementara untuk pemanggilan rekursif ini
+            Config.DIRECT_TO_CHANNEL = False 
+            return await send_message(user, item, itype, caption, markup, original_chat_id, meta, thumb)
         return None
-
-    return msg
 
 
 # --- FUNGSI EDIT MESSAGE (VERSI ANTI-CRASH) ---
