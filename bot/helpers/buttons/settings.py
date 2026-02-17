@@ -430,24 +430,32 @@ def tidal_auth_buttons(active_clients: list = None):
             country = client.country_code or "??"
             btn_text = f"🗑️ {sub} ({country}) - {uid}"
             
-            # Style: DANGER (Merah) karena ini tombol hapus
+            # Style: DANGER (Merah) untuk tombol hapus
             inline_keyboard.append([
                 InlineKeyboardButton(text=btn_text, callback_data=f"tdRemove_{uid}", style=ButtonStyle.DANGER)
             ])
             
-    # Style: SUCCESS (Hijau) untuk login
+    # 1. Ubah Button LOGIN ACCOUNT menjadi Hijau (SUCCESS)
     inline_keyboard.append(
         [
             InlineKeyboardButton(
-                text="➕ TAMBAH AKUN BARU (TV LOGIN)",
+                text="➕ LOGIN ACCOUNT (TV CODE)", # Teks disesuaikan
                 callback_data='tdLogin',
                 style=ButtonStyle.SUCCESS
             )
         ]
     )
     
-    # Style: PRIMARY (Biru) untuk kembali
-    inline_keyboard.append([InlineKeyboardButton(text="🔙 Back", callback_data="tdP", style=ButtonStyle.PRIMARY)])
+    # 2. Ubah Button Back menjadi Biru (PRIMARY)
+    inline_keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="🔙 Back", 
+                callback_data="tdP", 
+                style=ButtonStyle.PRIMARY
+            )
+        ]
+    )
     
     return InlineKeyboardMarkup(inline_keyboard)
     
