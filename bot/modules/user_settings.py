@@ -730,7 +730,7 @@ async def uset_tidal_login_start(client, query):
             "**TIDAL TV LOGIN**\n\n"
             f"1. Buka link ini: [LOGIN LINK]({auth_url})\n"
             "2. Login dan izinkan akses.\n"
-            "3. Setelah sukses di browser, klik tombol **'✅ I HAVE LOGGED IN'** di bawah."
+            "3. Setelah sukses di browser, klik tombol **'CLICK I HAVE LOGGED IN'** di bawah."
         )
         
         # Simpan temp_client di memory sementara bot (bukan manager) agar bisa diakses saat verify
@@ -738,8 +738,10 @@ async def uset_tidal_login_start(client, query):
         bot_set.user_data.setdefault(query.from_user.id, {})['temp_tidal_auth'] = temp_client
         
         buttons = [
-            [InlineKeyboardButton("✅ I HAVE LOGGED IN", callback_data="utd_login_verify")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="utd_auth_menu")]
+            # Tombol Konfirmasi -> HIJAU (SUCCESS)
+            [InlineKeyboardButton("CLICK I HAVE LOGGED IN", callback_data="utd_login_verify", style=ButtonStyle.SUCCESS)],
+            # Tombol Cancel -> MERAH (DANGER) - Sesuai Permintaan
+            [InlineKeyboardButton("❌ Cancel", callback_data="utd_auth_menu", style=ButtonStyle.DANGER)]
         ]
         await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
         
