@@ -1703,52 +1703,71 @@ async def uset_zip(self, query):
     user_id = query.from_user.id
     users_ = {"user_id": user_id}
     
+    # Pastikan user data ada di memori
+    if user_id not in bot_set.user_data:
+        bot_set.user_data.setdefault(user_id, {})
+    
+    user_dict = bot_set.user_data.get(user_id, {})
+    
     # Toggle Playlist Zip
     if data == "playlist":
-        user_dict = bot_set.user_data.get(user_id, {})
-        playlist_zip = user_dict.get("playlist_zip", False)
-        data_saved = {"PLAYLIST_ZIP".lower(): not playlist_zip}
-        if user_id not in bot_set.user_data:
-            bot_set.user_data.setdefault(user_id, {})
+        # Cek data lama (lower) atau data baru (UPPER)
+        current = user_dict.get("PLAYLIST_ZIP")
+        if current is None:
+            current = user_dict.get("playlist_zip", False)
+            
+        # HAPUS .lower() agar tersimpan sebagai HURUF BESAR
+        new_val = not current
+        data_saved = {"PLAYLIST_ZIP": new_val}
+        
         bot_set.user_data[user_id].update(data_saved)
         await database.save_user_settings(user_id, data_saved)
-        await query.answer(f"Playlist zip: {data_saved['playlist_zip']}")
+        # Tampilkan status True/False di notifikasi
+        await query.answer(f"Playlist zip: {new_val}")
         return await start_user_setting(self, query.message, True, users_)
     
     # Toggle Album Zip
     if data == "album":
-        user_dict = bot_set.user_data.get(user_id, {})
-        album_zip = user_dict.get("album_zip", False)
-        data_saved = {"ALBUM_ZIP".lower(): not album_zip}
-        if user_id not in bot_set.user_data:
-            bot_set.user_data.setdefault(user_id, {})
+        current = user_dict.get("ALBUM_ZIP")
+        if current is None:
+            current = user_dict.get("album_zip", False)
+            
+        new_val = not current
+        data_saved = {"ALBUM_ZIP": new_val}
+        
         bot_set.user_data[user_id].update(data_saved)
         await database.save_user_settings(user_id, data_saved)
-        await query.answer(f"Album zip: {data_saved['album_zip']}")
+        await query.answer(f"Album zip: {new_val}")
         return await start_user_setting(self, query.message, True, users_)
     
     # Toggle Artist Zip
     if data == "artist":
-        user_dict = bot_set.user_data.get(user_id, {})
-        artist_zip = user_dict.get("artist_zip", False)
-        data_saved = {"ARTIST_ZIP".lower(): not artist_zip}
-        if user_id not in bot_set.user_data:
-            bot_set.user_data.setdefault(user_id, {})
+        current = user_dict.get("ARTIST_ZIP")
+        if current is None:
+            current = user_dict.get("artist_zip", False)
+            
+        new_val = not current
+        data_saved = {"ARTIST_ZIP": new_val}
+        
         bot_set.user_data[user_id].update(data_saved)
         await database.save_user_settings(user_id, data_saved)
-        await query.answer(f"Artist zip: {data_saved['artist_zip']}")
+        await query.answer(f"Artist zip: {new_val}")
         return await start_user_setting(self, query.message, True, users_)
     
     # Toggle Art Poster
     if data == "poster":
-        user_dict = bot_set.user_data.get(user_id, {})
-        art_poster = user_dict.get("art_poster", False)
-        data_saved = {"art_poster": not art_poster}
-        if user_id not in bot_set.user_data:
-            bot_set.user_data.setdefault(user_id, {})
+        current = user_dict.get("ART_POSTER")
+        if current is None:
+            # Kode asli anda pakai "art_poster" (kecil), kita handle di sini
+            current = user_dict.get("art_poster", False)
+            
+        new_val = not current
+        # Ubah key jadi HURUF BESAR agar konsisten
+        data_saved = {"ART_POSTER": new_val}
+        
         bot_set.user_data[user_id].update(data_saved)
         await database.save_user_settings(user_id, data_saved)
-        await query.answer(f"Art poster: {data_saved['art_poster']}")
+        await query.answer(f"Art poster: {new_val}")
         return await start_user_setting(self, query.message, True, users_)
 
 
