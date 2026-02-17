@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/uploder.py] - FIXED SETTINGS (ZIP & POSTER)
+# [FILE: bot/helpers/uploder.py] - FIXED PRIORITY SETTINGS
 
 import os
 import asyncio
@@ -12,7 +12,6 @@ from .utils import *
 from bot.logger import LOGGER 
 import bot.helpers.translations as lang
 
-# TAMBAHAN IMPORT PENTING
 from bot.tgclient import aio 
 from ..modules.direct_uploader import DirectUpload
 
@@ -181,20 +180,22 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     
     return None
 
-# --- TASK HANDLERS (FIXED ZIP & POSTER) ---
+# --- TASK HANDLERS (FIXED ZIP & POSTER PRIORITY) ---
 
 async def album_upload(metadata, user):
     user_dict = user.copy()
     user_settings = bot_set.user_data.get(user['user_id'], {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP (Prioritas Uppercase)
-    is_zip = user_settings.get("ALBUM_ZIP")
-    if is_zip is None: is_zip = user_settings.get("album_zip", False)
+    # [FIXED] 1. Cek Settings ZIP (Cek Huruf Kecil/Settings Baru Dulu)
+    is_zip = user_settings.get("album_zip")
+    if is_zip is None: 
+        is_zip = user_settings.get("ALBUM_ZIP", False)
 
-    # 2. Cek Settings POSTER (Prioritas Uppercase)
+    # [FIXED] 2. Cek Settings POSTER (Cek Huruf Kecil/Settings Baru Dulu)
     show_poster = user_settings.get("art_poster")
-    if show_poster is None: show_poster = user_settings.get("ART_POSTER", False)
+    if show_poster is None: 
+        show_poster = user_settings.get("ART_POSTER", False)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
@@ -251,13 +252,15 @@ async def artist_upload(metadata, user):
     user_settings = bot_set.user_data.get(user['user_id'], {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP
-    is_zip = user_settings.get("ARTIST_ZIP")
-    if is_zip is None: is_zip = user_settings.get("artist_zip", False)
+    # [FIXED] 1. Cek Settings ZIP (Priority Lowercase)
+    is_zip = user_settings.get("artist_zip")
+    if is_zip is None: 
+        is_zip = user_settings.get("ARTIST_ZIP", False)
     
-    # 2. Cek Settings POSTER
+    # [FIXED] 2. Cek Settings POSTER (Priority Lowercase)
     show_poster = user_settings.get("art_poster")
-    if show_poster is None: show_poster = user_settings.get("ART_POSTER", False)
+    if show_poster is None: 
+        show_poster = user_settings.get("ART_POSTER", False)
     
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
@@ -307,13 +310,15 @@ async def playlist_upload(metadata, user):
     user_settings = bot_set.user_data.get(user_id, {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP
-    is_zip = user_settings.get("PLAYLIST_ZIP")
-    if is_zip is None: is_zip = user_settings.get("playlist_zip", False)
+    # [FIXED] 1. Cek Settings ZIP (Priority Lowercase)
+    is_zip = user_settings.get("playlist_zip")
+    if is_zip is None: 
+        is_zip = user_settings.get("PLAYLIST_ZIP", False)
 
-    # 2. Cek Settings POSTER
+    # [FIXED] 2. Cek Settings POSTER (Priority Lowercase)
     show_poster = user_settings.get("art_poster")
-    if show_poster is None: show_poster = user_settings.get("ART_POSTER", False)
+    if show_poster is None: 
+        show_poster = user_settings.get("ART_POSTER", False)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
