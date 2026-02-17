@@ -12,10 +12,10 @@ psutil
 psycopg2-binary
 aiohttp-socks
 pycryptodomex
-pyrofork
+kurigram
 python-dotenv
 requests
-tgcrypto-pyrofork
+TgCrypto
 tqdm
 bs4
 pycryptodome
