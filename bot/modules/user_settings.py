@@ -718,7 +718,7 @@ async def uset_tidal_login_start(client, query):
         
         buttons = [
             [InlineKeyboardButton("✅ I HAVE LOGGED IN", callback_data="utd_login_verify")],
-            [InlineKeyboardButton("🔙 Cancel", callback_data="utd_auth_menu")]
+            [InlineKeyboardButton("❌ Cancel", callback_data="utd_auth_menu")]
         ]
         await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
         
