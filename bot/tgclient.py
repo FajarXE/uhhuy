@@ -37,26 +37,13 @@ class Bot(Client):
         await super().start()
         LOGGER.info("BOT : Started Successfully")
 
-        # --- FITUR BARU: Notifikasi Startup / Deploy Selesai ---
-        try:
-            # Kirim pesan ke Admin pertama bahwa bot sudah hidup kembali
-            if Config.ADMINS:
-                admin_id = list(Config.ADMINS)[0]
-                await self.send_message(
-                    admin_id,
-                    "✅ **Deploy Selesai / Bot Restart!**\n\n"
-                    "Layanan bot sudah kembali **Online** dan siap digunakan."
-                )
-        except Exception as e:
-            LOGGER.warning(f"Gagal mengirim notif startup: {e}")
-        # -------------------------------------------------------
-
     async def stop(self, block=False):
         try:
             await super().stop(block)
         except Exception:
             pass
         
+        # --- PERBAIKAN: Pengecekan atribut yang aman ---
         if hasattr(bot_set, 'clients') and bot_set.clients:
             for client in bot_set.clients:
                 try:
