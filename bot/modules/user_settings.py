@@ -816,15 +816,44 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     if not await check_user(msg=m):
         return
     
-    user = await fetch_user_details(m)
-    user_data = users_ if users_ else user
-    user_id = user_data['user_id']
+    # Ambil data user
+    if users_:
+        user_data = users_
+        user_id = user_data.get('user_id')
+    else:
+        user = await fetch_user_details(m)
+        user_data = user
+        user_id = user_data['user_id']
     
-    # Ambil pengaturan ZIP
-    PLAYLIST_ZIP, ALBUM_ZIP, ARTIST_ZIP, ART_POSTER = await asyncio.to_thread(fetch_zip_settings, user_data)
+    # Pastikan data termuat di memori bot
+    if user_id not in bot_set.user_data:
+         bot_set.user_data.setdefault(user_id, {})
     
-    # Ambil Pengaturan Cloud Upload
+    # Ambil data langsung dari memori bot (agar real-time)
     curr_settings = bot_set.user_data.get(user_id, {})
+    
+    # --- PERBAIKAN LOGIKA BACA DATA ZIP ---
+    # Prioritas: Cek Key HURUF BESAR, jika None baru cek huruf kecil
+    
+    # Playlist
+    p_zip = curr_settings.get("PLAYLIST_ZIP")
+    if p_zip is None: p_zip = curr_settings.get("playlist_zip", False)
+    
+    # Album
+    a_zip = curr_settings.get("ALBUM_ZIP")
+    if a_zip is None: a_zip = curr_settings.get("album_zip", False)
+    
+    # Artist
+    ar_zip = curr_settings.get("ARTIST_ZIP")
+    if ar_zip is None: ar_zip = curr_settings.get("artist_zip", False)
+    
+    # Poster
+    po_zip = curr_settings.get("ART_POSTER")
+    if po_zip is None: po_zip = curr_settings.get("art_poster", False)
+    
+    # --- END PERBAIKAN ---
+
+    # Ambil Pengaturan Cloud Upload
     upload_mode = curr_settings.get('upload_mode', 'Telegram')
     
     # Cek status ketersediaan token (Indikator UI)
@@ -833,11 +862,12 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     t_vk = "✅" if curr_settings.get('viking_token') else "❌"
 
     # Template Teks Menu
+    # Gunakan variabel baru (p_zip, a_zip, dst)
     USETTING_TEXT = f"""
 <blockquote>
 <b>📦 ZIP SETTINGS</b>
-PLAYLIST : {PLAYLIST_ZIP} | ALBUM : {ALBUM_ZIP}
-ARTIST : {ARTIST_ZIP} | POSTER : {ART_POSTER}
+PLAYLIST : {p_zip} | ALBUM : {a_zip}
+ARTIST : {ar_zip} | POSTER : {po_zip}
 
 <b>☁️ UPLOAD MODE: {upload_mode}</b>
 Gofile: {t_gf} | Buzz: {t_bh} | Viking: {t_vk}
@@ -846,8 +876,13 @@ Gofile: {t_gf} | Buzz: {t_bh} | Viking: {t_vk}
 Choose Menu option below:
 """
     
+    # Kirim Pesan
+    target_chat = m.chat.id if not edit else m.chat.id # Logic send message biasa
+    
     if not edit:
-        await send_message(user, USETTING_TEXT, markup=usetting_button(user_id))
+        # Perhatikan: parameter pertama send_message biasanya chat_id atau object user
+        # Sesuaikan dengan library wrapper Anda (disini saya pakai m.chat.id untuk aman)
+        await send_message(m, USETTING_TEXT, markup=usetting_button(user_id))
         return
     await edit_message(m, USETTING_TEXT, markup=usetting_button(user_id))
 
