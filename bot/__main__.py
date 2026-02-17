@@ -251,7 +251,7 @@ if __name__ == "__main__":
     # Debugging
     loop.set_debug(True)
     loop.set_exception_handler(handle_exception)
-    loop.slow_callback_duration = 0.5 
+    loop.slow_callback_duration = 1.0
     
     try:
         loop.run_until_complete(start_services())
