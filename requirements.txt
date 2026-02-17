@@ -12,10 +12,10 @@ psutil
 psycopg2-binary
 aiohttp-socks
 pycryptodomex
-kurigram
+git+https://github.com/TelegramPlayground/pyrogram
 python-dotenv
 requests
-TgCrypto
+pytgcrypto
 tqdm
 bs4
 pycryptodome
