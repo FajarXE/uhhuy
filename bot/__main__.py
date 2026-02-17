@@ -6,7 +6,9 @@ import asyncio
 import sys
 import logging
 import traceback
-from pyrogram import idle 
+
+# Hapus import idle dari pyrogram karena tidak thread-safe di Python 3.12
+# from pyrogram import idle 
 
 from bot import Config
 from .tgclient import aio
@@ -71,10 +73,11 @@ def handle_exception(loop, context):
 
     # Log error lain yang benar-benar penting
     logging.error(f"⚠️ EXCEPTION TIDAK TERTANGANI: {msg}")
-    logging.error(f"⚠️ SUMBER: {context.get('source_traceback', 'Tidak diketahui')}")
-    logging.error(f"⚠️ FUTURE: {context.get('future', 'Tidak diketahui')}")
     
     if "exception" in context:
+        # Jangan print traceback jika errornya adalah RuntimeError thread-safe yang sudah kita tangani
+        if "Non-thread-safe operation" in str(context["exception"]):
+            return
         traceback.print_exception(type(context["exception"]), context["exception"], context["exception"].__traceback__)
 # ---------------------------------
 
@@ -130,7 +133,6 @@ async def login_single_client(creds: dict):
     creds_copy = creds.copy()
     account_id = creds_copy.pop("id", "Unknown")
     
-    # Jalankan inisialisasi client di thread agar tidak memblokir loop jika berat
     try:
         client = await asyncio.to_thread(QoClient, **creds_copy)
         await client.login()
@@ -138,7 +140,6 @@ async def login_single_client(creds: dict):
         logging.info(f"Main: Qobuz #{account_id} LOGIN SUKSES.")
     except Exception as e:
         logging.error(f"Main: Qobuz #{account_id} GAGAL: {e}")
-        # Coba close session jika client sempat terbentuk
         if 'client' in locals() and hasattr(client, 'close_session'):
             await client.close_session()
 
@@ -194,7 +195,27 @@ async def start_services():
     logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
     logging.info(f"------------------------------------------------")
     
-    await idle()
+    # --- [FIX] PENGGANTI IDLE() ---
+    # Kita menggunakan asyncio.Event() untuk menahan bot agar tetap jalan
+    # sampai sinyal stop diterima.
+    stop_event = asyncio.Event()
+    
+    def signal_handler_callback():
+        logging.info("Main: Sinyal Stop Diterima. Memulai shutdown...")
+        stop_event.set()
+
+    # Daftarkan handler sinyal ke event loop (Thread-Safe untuk Python 3.12)
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, signal_handler_callback)
+        except NotImplementedError:
+            # Fallback untuk sistem yang tidak support add_signal_handler (jarang di Linux)
+            logging.warning(f"Sistem tidak mendukung loop.add_signal_handler untuk {sig}")
+
+    # Tunggu sampai event diset (bot berjalan di sini)
+    await stop_event.wait()
+    # ------------------------------
     
     logging.info("Main: Menerima sinyal stop, mematikan layanan...")
     await aio.stop()
@@ -225,15 +246,11 @@ if __name__ == "__main__":
     if not os.path.isdir(Config.DOWNLOAD_BASE_DIR):
         os.makedirs(Config.DOWNLOAD_BASE_DIR)
     
-    # Ambil event loop
     loop = asyncio.get_event_loop()
     
-    # [PENTING] Pengaturan Debugging
+    # Debugging
     loop.set_debug(True)
     loop.set_exception_handler(handle_exception)
-    
-    # [FIX] Naikkan batas toleransi 'slow callback' menjadi 0.5 detik
-    # Ini akan menghilangkan warning jika startup memakan waktu 0.2 - 0.4 detik (normal)
     loop.slow_callback_duration = 0.5 
     
     try:
