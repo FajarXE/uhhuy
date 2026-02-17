@@ -6,6 +6,7 @@ from traceback import format_exc
 
 from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ButtonStyle
 
 from config import Config
 from bot import cmd
@@ -679,17 +680,37 @@ async def uset_tidal_auth_menu(client, query):
         text += f"🏳️ Region: {country} | 💎 Plan: {sub}\n\n"
         text += "Bot akan menggunakan akun ini KHUSUS untuk Anda."
         
-        # Tombol Logout
-        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="utd_logout")])
+        # Tombol Logout (Saya tambahkan warna MERAH/DANGER agar sesuai tema)
+        buttons.append([
+            InlineKeyboardButton(
+                "🚪 LOGOUT SESSION", 
+                callback_data="utd_logout", 
+                style=ButtonStyle.DANGER
+            )
+        ])
     else:
         text += "❌ **Status: NOT LOGGED IN**\n"
         text += "Bot menggunakan akun Global (Shared) untuk Anda.\n"
         text += "Login akun sendiri untuk akses region/konten khusus dan kualitas HiRes pribadi."
         
-        # Tombol Login
-        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT (TV CODE)", callback_data="utd_login_start")])
+        # Tombol Login (Ubah jadi HIJAU / SUCCESS)
+        buttons.append([
+            InlineKeyboardButton(
+                "➕ LOGIN ACCOUNT (TV CODE)", 
+                callback_data="utd_login_start", 
+                style=ButtonStyle.SUCCESS
+            )
+        ])
 
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="uset_tidal")])
+    # Tombol Back (Ubah jadi BIRU / PRIMARY)
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 Back", 
+            callback_data="uset_tidal", 
+            style=ButtonStyle.PRIMARY
+        )
+    ])
+    
     await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
 
 
