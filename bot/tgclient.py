@@ -1,4 +1,4 @@
-# [GANTI FILE: bot/tgclient.py]
+# [FILE: bot/tgclient.py]
 
 from config import Config
 from pyrogram import Client
@@ -29,8 +29,9 @@ class Bot(Client):
             bot_token=Config.TG_BOT_TOKEN,
             plugins=plugins,
             workdir=Config.WORK_DIR,
-            workers=100,
-            mongodb=dict(connection=AsyncClient(Config.DATABASE_URL), remove_peers=True)
+            workers=100
+            # BARIS INI DIHAPUS KARENA KURIGRAM TIDAK MENERIMANYA:
+            # mongodb=dict(connection=AsyncClient(Config.DATABASE_URL), remove_peers=True) 
         )
 
     async def start(self):
