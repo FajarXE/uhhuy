@@ -29,28 +29,26 @@ class Bot(Client):
             bot_token=Config.TG_BOT_TOKEN,
             plugins=plugins,
             workdir=Config.WORK_DIR,
-            workers=100
-            # BARIS INI DIHAPUS KARENA KURIGRAM TIDAK MENERIMANYA:
-            # mongodb=dict(connection=AsyncClient(Config.DATABASE_URL), remove_peers=True) 
+            in_memory=True,
+            ipv6=False,
+            workers=100,
+            sleep_threshold=30
         )
 
     async def start(self):
         await super().start()
         LOGGER.info("BOT : Started Successfully")
 
-        # --- FITUR BARU: Notifikasi Startup / Deploy Selesai ---
         try:
-            # Kirim pesan ke Admin pertama bahwa bot sudah hidup kembali
             if Config.ADMINS:
                 admin_id = list(Config.ADMINS)[0]
                 await self.send_message(
                     admin_id,
-                    "✅ **Deploy Selesai / Bot Restart!**\n\n"
-                    "Layanan bot sudah kembali **Online** dan siap digunakan."
+                    "✅ **Bot Restart (Memory Mode)!**\n\n"
+                    "Database Session dialihkan ke RAM (In-Memory) untuk mencegah crash database."
                 )
         except Exception as e:
             LOGGER.warning(f"Gagal mengirim notif startup: {e}")
-        # -------------------------------------------------------
 
     async def stop(self, block=False):
         try:
