@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/uploder.py] - FIXED SETTINGS (ZIP & POSTER)
+# [FILE: bot/helpers/uploder.py] - FIXED TELEGRAM POSTER
 
 import os
 import asyncio
@@ -12,7 +12,6 @@ from .utils import *
 from bot.logger import LOGGER 
 import bot.helpers.translations as lang
 
-# TAMBAHAN IMPORT PENTING
 from bot.tgclient import aio 
 from ..modules.direct_uploader import DirectUpload
 
@@ -76,7 +75,6 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     try:
         folder_name = metadata.get('title', 'Unknown Album')
 
-        # KASUS A: LIST FILES
         if isinstance(filepath, list):
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], f"📂 Detected {len(filepath)} Split Files. Uploading to {mode}...")
@@ -96,13 +94,11 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                 root_id = await uploader.buzzheavier_get_root(token)
                 parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
                 target_folder = parent_id if parent_id else None
-                
                 uploaded_links = []
                 for index, file_part in enumerate(filepath, 1):
                     await edit_message(user['bot_msg'], f"🚀 Uploading Part {index}/{len(filepath)} to Buzzheavier...")
                     res = await uploader.upload(os.path.basename(file_part), 0, 'buzzheavier', specific_folder_id=target_folder)
                     if res: uploaded_links.append(list(res.values())[0])
-                
                 if target_folder: return f"https://buzzheavier.com/{target_folder}"
                 else: return "\n".join(uploaded_links)
 
@@ -114,48 +110,39 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                     if res: links.append(list(res.values())[0])
                 return "\n".join(links)
 
-        # KASUS B: SINGLE FILE
         elif os.path.isfile(filepath):
             if 'bot_msg' in user: await edit_message(user['bot_msg'], f"🚀 Uploading to {mode}...")
-            
             if mode == 'Buzzheavier':
                 root_id = await uploader.buzzheavier_get_root(token)
                 parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
                 res = await uploader.upload(os.path.basename(filepath), 0, 'buzzheavier', specific_folder_id=parent_id)
                 if res and parent_id: return f"https://buzzheavier.com/{parent_id}"
                 elif res: return list(res.values())[0]
-            
             else:
                 res = await uploader.upload(os.path.basename(filepath), 0, mode.lower())
                 if res: return list(res.values())[0]
 
-        # KASUS C: FOLDER ASLI
         elif os.path.isdir(filepath):
             files = [f for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
-            
             if mode == 'Buzzheavier':
                 if 'bot_msg' in user: await edit_message(user['bot_msg'], f"📂 Uploading Folder to Buzzheavier...")
                 uploader.path = filepath 
                 root_id = await uploader.buzzheavier_get_root(token)
                 parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
                 target_folder = parent_id if parent_id else None
-
                 links = []
                 for index, filename in enumerate(files, 1):
                     await edit_message(user['bot_msg'], f"🚀 Uploading {index}/{len(files)}: `{filename}`")
                     res = await uploader.upload(filename, 0, 'buzzheavier', specific_folder_id=target_folder)
                     if res: links.append(list(res.values())[0])
-                
                 if target_folder: return f"https://buzzheavier.com/{target_folder}"
                 return "\n".join(links)
 
             elif mode == 'Gofile':
                 if 'bot_msg' in user: await edit_message(user['bot_msg'], f"📂 Creating Gofile Folder...")
                 uploader.path = filepath 
-
                 root_id = await uploader.gofile_get_root(token)
                 new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
-                
                 if new_folder:
                     folder_id = new_folder['id']
                     final_link = new_folder['code']
@@ -163,8 +150,7 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                         await edit_message(user['bot_msg'], f"🚀 Uploading {index}/{len(files)}: `{filename}`")
                         await uploader.upload(filename, 0, 'gofile', specific_folder_id=folder_id)
                     return f"https://gofile.io/d/{final_link}"
-                else:
-                    return None
+                else: return None
 
             elif mode == 'Vikingfiles':
                 uploader.path = filepath 
@@ -178,21 +164,20 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     except Exception as e:
         LOGGER.error(f"[DEBUG UPLOADER] Exception di Handler: {e}")
         await send_message(user, f"⚠️ {mode} Error: {e}", 'text')
-    
     return None
 
-# --- TASK HANDLERS (FIXED ZIP & POSTER) ---
+
+# --- TASK HANDLERS (FIXED POSTER & ZIP) ---
 
 async def album_upload(metadata, user):
     user_dict = user.copy()
     user_settings = bot_set.user_data.get(user['user_id'], {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP (Prioritas Uppercase)
+    # Settings Check
     is_zip = user_settings.get("ALBUM_ZIP")
     if is_zip is None: is_zip = user_settings.get("album_zip", False)
-
-    # 2. Cek Settings POSTER (Prioritas Uppercase)
+    
     show_poster = user_settings.get("ART_POSTER")
     if show_poster is None: show_poster = user_settings.get("art_poster", False)
 
@@ -203,12 +188,9 @@ async def album_upload(metadata, user):
         if link:
             caption = create_cloud_caption(metadata)
             caption += f"\n\n🔗 <b>{user_mode.upper()} LINK:</b>\n{link}"
-            
-            # Logic Poster untuk Cloud
             if show_poster and metadata.get('poster_msg'):
                 await edit_message(metadata['poster_msg'], caption)
             else:
-                # Hapus pesan poster lama jika ada, kirim teks bersih
                 if metadata.get('poster_msg'):
                     try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
                     except: pass
@@ -219,8 +201,17 @@ async def album_upload(metadata, user):
         return 
 
     if bot_set.upload_mode == 'Local': await local_upload(metadata, user)
+    
     elif bot_set.upload_mode == 'Telegram':
-        # Logic ZIP Telegram
+        # [FIX] HAPUS POSTER JIKA FALSE (Telegram Mode)
+        if not show_poster and metadata.get('poster_msg'):
+            try:
+                await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
+                # Buat pesan TEXT baru untuk status progress, replace bot_msg
+                user['bot_msg'] = await send_message(user, "🔄 Preparing upload...", 'text')
+                metadata['poster_msg'] = None
+            except: pass
+
         if is_zip and metadata.get('zip_path'):
             zip_files = metadata['zip_path']
             if isinstance(zip_files, str): zip_files = [zip_files] 
@@ -228,20 +219,17 @@ async def album_upload(metadata, user):
                 await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata)
         else: 
             await batch_telegram_upload(metadata, user)
+            
     else:
         # Rclone Mode
         rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
-        
-        # LOGIC POSTER FIX
         if show_poster and metadata.get('poster_msg'):
             try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.ALBUM_TEMPLATE, metadata, user))
             except MessageNotModified: pass
         else:
-            # Jika user matikan poster, hapus pesan "Processing..." yang ada gambarnya
             if metadata.get('poster_msg'):
                 try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
                 except: pass
-            # Kirim pesan simple
             await post_simple_message(user, metadata, rclone_link, index_link)
             
     await cleanup(None, metadata, user_dict)
@@ -251,11 +239,9 @@ async def artist_upload(metadata, user):
     user_settings = bot_set.user_data.get(user['user_id'], {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP
     is_zip = user_settings.get("ARTIST_ZIP")
     if is_zip is None: is_zip = user_settings.get("artist_zip", False)
     
-    # 2. Cek Settings POSTER
     show_poster = user_settings.get("ART_POSTER")
     if show_poster is None: show_poster = user_settings.get("art_poster", False)
     
@@ -266,7 +252,6 @@ async def artist_upload(metadata, user):
         if link:
             caption = create_cloud_caption(metadata)
             caption += f"\n\n🔗 <b>{user_mode.upper()} LINK:</b>\n{link}"
-            
             if show_poster and metadata.get('poster_msg'): 
                 await edit_message(metadata['poster_msg'], caption)
             else:
@@ -281,6 +266,14 @@ async def artist_upload(metadata, user):
     
     if bot_set.upload_mode == 'Local': await local_upload(metadata, user)
     elif bot_set.upload_mode == 'Telegram':
+        # [FIX] HAPUS POSTER JIKA FALSE
+        if not show_poster and metadata.get('poster_msg'):
+            try:
+                await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
+                user['bot_msg'] = await send_message(user, "🔄 Preparing upload...", 'text')
+                metadata['poster_msg'] = None
+            except: pass
+
         if is_zip and metadata.get('zip_path'): 
             zip_files = metadata['zip_path']
             if isinstance(zip_files, str): zip_files = [zip_files]
@@ -289,8 +282,6 @@ async def artist_upload(metadata, user):
             pass 
     else:
         rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
-        
-        # LOGIC POSTER FIX
         if show_poster and metadata.get('poster_msg'):
             try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.ARTIST_TEMPLATE, metadata, user))
             except MessageNotModified: pass
@@ -307,25 +298,19 @@ async def playlist_upload(metadata, user):
     user_settings = bot_set.user_data.get(user_id, {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP
     is_zip = user_settings.get("PLAYLIST_ZIP")
     if is_zip is None: is_zip = user_settings.get("playlist_zip", False)
 
-    # 2. Cek Settings POSTER
     show_poster = user_settings.get("ART_POSTER")
     if show_poster is None: show_poster = user_settings.get("art_poster", False)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
-        if metadata.get('zip_path'): 
-            target = metadata['zip_path'] 
-        
+        if metadata.get('zip_path'): target = metadata['zip_path'] 
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
-        
         if link:
             caption = create_cloud_caption(metadata)
             caption += f"\n\n🔗 <b>{user_mode.upper()} LINK:</b>\n{link}"
-            
             if show_poster and metadata.get('poster_msg'): 
                 await edit_message(metadata['poster_msg'], caption)
             else: 
@@ -335,14 +320,21 @@ async def playlist_upload(metadata, user):
                 await send_message(user, caption, 'text')
         else:
             await send_message(user, f"❌ <b>Upload Failed!</b>\nCould not upload to {user_mode}.", 'text')
-
         await cleanup(None, metadata, user)
         return
 
-    # --- FALLBACK ---
     if bot_set.upload_mode == 'Local': 
         await local_upload(metadata, user)
     elif bot_set.upload_mode == 'Telegram':
+        # [FIX] HAPUS POSTER JIKA FALSE
+        if not show_poster and metadata.get('poster_msg'):
+            try:
+                await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
+                # Ganti dengan pesan teks agar indikator progress berjalan
+                user['bot_msg'] = await send_message(user, "🔄 Preparing upload...", 'text')
+                metadata['poster_msg'] = None
+            except: pass
+
         if is_zip and metadata.get('zip_path'): 
             zip_files = metadata['zip_path']
             if isinstance(zip_files, str): zip_files = [zip_files]
@@ -350,7 +342,6 @@ async def playlist_upload(metadata, user):
         else: 
             await batch_telegram_upload(metadata, user)
     else:
-        # LOGIC POSTER FIX DI SINI
         if bot_set.playlist_sort and not is_zip:
             if bot_set.disable_sort_link: await rclone_upload(user, f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/")
             else:
@@ -361,12 +352,10 @@ async def playlist_upload(metadata, user):
                     except ValueError: pass
         else:
             rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
-            
             if show_poster and metadata.get('poster_msg'):
                 try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.PLAYLIST_TEMPLATE, metadata, user))
                 except MessageNotModified: pass
             else:
-                # Jika Poster False -> Hapus pesan lama, kirim simple message
                 if metadata.get('poster_msg'):
                     try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
                     except: pass
