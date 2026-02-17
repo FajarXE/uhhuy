@@ -193,8 +193,8 @@ async def album_upload(metadata, user):
     if is_zip is None: is_zip = user_settings.get("album_zip", False)
 
     # 2. Cek Settings POSTER (Prioritas Uppercase)
-    show_poster = user_settings.get("ART_POSTER")
-    if show_poster is None: show_poster = user_settings.get("art_poster", False)
+    show_poster = user_settings.get("art_poster")
+    if show_poster is None: show_poster = user_settings.get("ART_POSTER", False)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
@@ -256,8 +256,8 @@ async def artist_upload(metadata, user):
     if is_zip is None: is_zip = user_settings.get("artist_zip", False)
     
     # 2. Cek Settings POSTER
-    show_poster = user_settings.get("ART_POSTER")
-    if show_poster is None: show_poster = user_settings.get("art_poster", False)
+    show_poster = user_settings.get("art_poster")
+    if show_poster is None: show_poster = user_settings.get("ART_POSTER", False)
     
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
@@ -312,8 +312,8 @@ async def playlist_upload(metadata, user):
     if is_zip is None: is_zip = user_settings.get("playlist_zip", False)
 
     # 2. Cek Settings POSTER
-    show_poster = user_settings.get("ART_POSTER")
-    if show_poster is None: show_poster = user_settings.get("art_poster", False)
+    show_poster = user_settings.get("art_poster")
+    if show_poster is None: show_poster = user_settings.get("ART_POSTER", False)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
