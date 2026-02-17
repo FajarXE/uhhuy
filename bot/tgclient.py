@@ -1,5 +1,7 @@
 # [GANTI FILE: bot/tgclient.py]
 
+import os
+import aiohttp
 from config import Config
 from pyrogram import Client
 from async_pymongo import AsyncClient
@@ -30,6 +32,10 @@ class Bot(Client):
             plugins=plugins,
             workdir=Config.WORK_DIR,
             workers=100,
+            # --- PENGATURAN STABILITAS RENDER ---
+            ipv6=False,          # Wajib False di Render untuk cegah Errno 104
+            sleep_threshold=60,  # Tunggu 60s jika kena FloodWait
+            # ------------------------------------
             mongodb=dict(connection=AsyncClient(Config.DATABASE_URL), remove_peers=True)
         )
 
@@ -37,13 +43,54 @@ class Bot(Client):
         await super().start()
         LOGGER.info("BOT : Started Successfully")
 
+        # --- FITUR: Render Deploy Notification ---
+        # Mengambil data status langsung dari Render API
+        if Config.RENDER_API_KEY and Config.ADMINS:
+            try:
+                service_id = os.getenv("RENDER_SERVICE_ID") # Render otomatis mengisi ini
+                
+                if service_id:
+                    headers = {"Authorization": f"Bearer {Config.RENDER_API_KEY}"}
+                    # Ambil deploy terakhir
+                    url = f"https://api.render.com/v1/services/{service_id}/deploys?limit=1"
+                    
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(url, headers=headers) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                # Pastikan data deploy ada
+                                if isinstance(data, list) and len(data) > 0:
+                                    latest = data[0]
+                                    commit_msg = latest.get('commit', {}).get('message', 'No commit info')
+                                    status = latest.get('status', 'unknown')
+                                    
+                                    # Icon Status
+                                    icon = "🟢" if status == "live" else "⚠️"
+                                    
+                                    msg_text = (
+                                        "<b>✅ DEPLOY SELESAI!</b>\n\n"
+                                        f"<b>Service:</b> <code>{service_id}</code>\n"
+                                        f"<b>Status:</b> {status.upper()} {icon}\n"
+                                        f"<b>Commit:</b> <code>{commit_msg}</code>"
+                                    )
+                                    
+                                    # Kirim ke Admin Pertama
+                                    admin_id = list(Config.ADMINS)[0]
+                                    try:
+                                        await self.send_message(admin_id, msg_text)
+                                    except Exception:
+                                        pass
+            except Exception as e:
+                LOGGER.warning(f"Gagal memuat Render Deploy Info: {e}")
+        # -----------------------------------------
+
     async def stop(self, block=False):
         try:
             await super().stop(block)
         except Exception:
             pass
         
-        # --- PERBAIKAN: Pengecekan atribut yang aman ---
+        # Cleanup Session
         if hasattr(bot_set, 'clients') and bot_set.clients:
             for client in bot_set.clients:
                 try:
