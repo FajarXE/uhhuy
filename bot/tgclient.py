@@ -32,39 +32,39 @@ class Bot(Client):
             plugins=plugins,
             workdir=Config.WORK_DIR,
             workers=100,
-            # --- PENGATURAN STABILITAS RENDER ---
-            ipv6=False,          # Wajib False di Render untuk cegah Errno 104
-            sleep_threshold=60,  # Tunggu 60s jika kena FloodWait
-            # ------------------------------------
-            mongodb=dict(connection=AsyncClient(Config.DATABASE_URL), remove_peers=True)
+            # --- PENGATURAN RENDER ---
+            ipv6=False,          # Wajib False di Render
+            sleep_threshold=60,  # Timeout lebih lama
+            # -------------------------
+            # [HAPUS BAGIAN MONGODB DARI SINI]
+            # mongodb=dict(connection=AsyncClient(Config.DATABASE_URL), remove_peers=True) <--- HAPUS INI
         )
+        
+        # [PINDAHKAN KE SINI]
+        # Inisialisasi manual agar bisa dipanggil via bot.mongodb
+        self.mongodb = AsyncClient(Config.DATABASE_URL)
 
     async def start(self):
         await super().start()
         LOGGER.info("BOT : Started Successfully")
 
         # --- FITUR: Render Deploy Notification ---
-        # Mengambil data status langsung dari Render API
         if Config.RENDER_API_KEY and Config.ADMINS:
             try:
-                service_id = os.getenv("RENDER_SERVICE_ID") # Render otomatis mengisi ini
+                service_id = os.getenv("RENDER_SERVICE_ID")
                 
                 if service_id:
                     headers = {"Authorization": f"Bearer {Config.RENDER_API_KEY}"}
-                    # Ambil deploy terakhir
                     url = f"https://api.render.com/v1/services/{service_id}/deploys?limit=1"
                     
                     async with aiohttp.ClientSession() as session:
                         async with session.get(url, headers=headers) as resp:
                             if resp.status == 200:
                                 data = await resp.json()
-                                # Pastikan data deploy ada
                                 if isinstance(data, list) and len(data) > 0:
                                     latest = data[0]
                                     commit_msg = latest.get('commit', {}).get('message', 'No commit info')
                                     status = latest.get('status', 'unknown')
-                                    
-                                    # Icon Status
                                     icon = "🟢" if status == "live" else "⚠️"
                                     
                                     msg_text = (
@@ -74,7 +74,6 @@ class Bot(Client):
                                         f"<b>Commit:</b> <code>{commit_msg}</code>"
                                     )
                                     
-                                    # Kirim ke Admin Pertama
                                     admin_id = list(Config.ADMINS)[0]
                                     try:
                                         await self.send_message(admin_id, msg_text)
