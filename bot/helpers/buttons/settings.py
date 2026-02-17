@@ -504,8 +504,9 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
         except Exception:
             pass
 
+    # --- BAGIAN KUALITAS AUDIO (Tetap seperti sebelumnya) ---
     for quality in qualities.values():
-        # Cek centang untuk warna hijau
+        # Cek centang untuk warna hijau pada pilihan kualitas
         btn_style = ButtonStyle.SUCCESS if "✅" in quality else ButtonStyle.DEFAULT
         
         inline_keyboard.append(
@@ -527,23 +528,31 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
         ]
     )
     
+    # --- LOGIKA WARNA TOMBOL MQA & CONVERT ---
     if usetting:
+        # Logika MQA Fix
         if user_mqa_fix == "ON":
             mqa_text = "✅ MQA Fix: ON"
             mqa_callback = "utdqs_mqa_OFF"
+            mqa_style = ButtonStyle.SUCCESS  # Hijau jika ON
         else:
             mqa_text = "❌ MQA Fix: OFF"
             mqa_callback = "utdqs_mqa_ON"
+            mqa_style = ButtonStyle.DANGER   # Merah jika OFF
         
+        # Logika Convert M4A
         if user_convert_m4a == "ON":
             convert_text = "✅ Convert M4A: ON"
             convert_callback = "utdqs_convert_OFF"
+            convert_style = ButtonStyle.SUCCESS # Hijau jika ON
         else:
             convert_text = "❌ Convert M4A: OFF"
             convert_callback = "utdqs_convert_ON"
+            convert_style = ButtonStyle.DANGER  # Merah jika OFF
             
-        inline_keyboard.append([InlineKeyboardButton(text=mqa_text, callback_data=mqa_callback)])
-        inline_keyboard.append([InlineKeyboardButton(text=convert_text, callback_data=convert_callback)])
+        # Menambahkan tombol dengan Style yang sudah ditentukan
+        inline_keyboard.append([InlineKeyboardButton(text=mqa_text, callback_data=mqa_callback, style=mqa_style)])
+        inline_keyboard.append([InlineKeyboardButton(text=convert_text, callback_data=convert_callback, style=convert_style)])
         
         inline_keyboard.append([InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT", callback_data="utd_auth_menu", style=ButtonStyle.SUCCESS)])
         inline_keyboard.append([InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
