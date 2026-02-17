@@ -457,17 +457,20 @@ def qb_button(qualities: dict, user_id: int = 0):
     usetting = user_id != 0
     
     for quality in qualities.values():
+        # Cek apakah ini kualitas yang terpilih (ada centang)
+        btn_style = ButtonStyle.SUCCESS if "✅" in quality else ButtonStyle.DEFAULT
+        
         inline_keyboard.append(
             [
                 InlineKeyboardButton(
                     text=quality,
-                    callback_data=f"qbQ_{quality.replace('✅', '')}" if not usetting else f"uqbs_{quality.replace('✅', '')}"
+                    callback_data=f"qbQ_{quality.replace('✅', '')}" if not usetting else f"uqbs_{quality.replace('✅', '')}",
+                    style=btn_style
                 )
             ]
         )
         
     if usetting:
-        # Style: SUCCESS (Hijau) untuk menu auth
         inline_keyboard.append(
             [
                 InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.SUCCESS)
@@ -502,11 +505,15 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
             pass
 
     for quality in qualities.values():
+        # Cek centang untuk warna hijau
+        btn_style = ButtonStyle.SUCCESS if "✅" in quality else ButtonStyle.DEFAULT
+        
         inline_keyboard.append(
             [
                 InlineKeyboardButton(
                     text=quality,
-                    callback_data=f"tdSQ_{quality.replace('✅', '')}" if not user_id else f"utdqs_{quality.replace('✅', '')}" 
+                    callback_data=f"tdSQ_{quality.replace('✅', '')}" if not user_id else f"utdqs_{quality.replace('✅', '')}",
+                    style=btn_style 
                 )
             ]
         )
@@ -538,9 +545,7 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
         inline_keyboard.append([InlineKeyboardButton(text=mqa_text, callback_data=mqa_callback)])
         inline_keyboard.append([InlineKeyboardButton(text=convert_text, callback_data=convert_callback)])
         
-        # Style: SUCCESS
         inline_keyboard.append([InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT", callback_data="utd_auth_menu", style=ButtonStyle.SUCCESS)])
-        # Style: PRIMARY
         inline_keyboard.append([InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
         
         return InlineKeyboardMarkup(inline_keyboard)
@@ -580,8 +585,12 @@ def bp_button(quality: dict, user_id: int = None):
     }
     for i, (key, value) in enumerate(quality.items()):
         callback_text = display_text_map.get(key)
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+        
         if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}"))
+            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+            
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
@@ -625,8 +634,12 @@ def bs_button(quality: dict, user_id: int = None):
     }
     for i, (key, value) in enumerate(quality.items()):
         callback_text = display_text_map.get(key)
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+
         if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}"))
+            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+            
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
@@ -655,8 +668,11 @@ def sc_button(quality: dict, user_id: int = None):
     }
     for key, value in quality.items():
         callback_text = display_text_map.get(key)
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+        
         if callback_text:
-            buttons.append([InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}")])
+            buttons.append([InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style)])
 
     if usetting:
         buttons.append(
@@ -721,8 +737,12 @@ def dz_button(quality: dict, user_id: int = None):
     }
     for i, (key, value) in enumerate(quality.items()):
         callback_text = display_text_map.get(key)
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+
         if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}"))
+            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+            
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
@@ -751,8 +771,12 @@ def kk_button(quality: dict, user_id: int = None):
     }
     for i, (key, value) in enumerate(quality.items()):
         callback_text = display_text_map.get(key)
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+
         if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}"))
+            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+            
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
@@ -781,8 +805,12 @@ def np_button(quality: dict, user_id: int = None):
     }
     for i, (key, value) in enumerate(quality.items()):
         callback_text = display_text_map.get(key)
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+
         if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}"))
+            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+            
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
@@ -809,8 +837,12 @@ def id_button(quality: dict, user_id: int = None):
     }
     for i, (key, value) in enumerate(quality.items()):
         callback_text = display_text_map.get(key)
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+
         if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}"))
+            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+            
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
@@ -838,13 +870,25 @@ def bugs_button(quality: dict, user_id: int = None):
         "aac": "AAC 128k"
     }
     
-    row.append(InlineKeyboardButton(quality.get("flac", "FLAC 16-bit"), callback_data=f"{prefix}_{display_text_map['flac']}"))
-    row.append(InlineKeyboardButton(quality.get("aac256", "AAC 320k"), callback_data=f"{prefix}_{display_text_map['aac256']}")) 
+    # Ambil teks tombol
+    txt_flac = quality.get("flac", "FLAC 16-bit")
+    txt_aac256 = quality.get("aac256", "AAC 320k")
+    txt_320k = quality.get("320k", "MP3 320k")
+    txt_aac = quality.get("aac", "AAC 128k")
+
+    # Tentukan style berdasarkan tanda centang
+    style_flac = ButtonStyle.SUCCESS if "✅" in txt_flac else ButtonStyle.DEFAULT
+    style_aac256 = ButtonStyle.SUCCESS if "✅" in txt_aac256 else ButtonStyle.DEFAULT
+    style_320k = ButtonStyle.SUCCESS if "✅" in txt_320k else ButtonStyle.DEFAULT
+    style_aac = ButtonStyle.SUCCESS if "✅" in txt_aac else ButtonStyle.DEFAULT
+
+    row.append(InlineKeyboardButton(txt_flac, callback_data=f"{prefix}_{display_text_map['flac']}", style=style_flac))
+    row.append(InlineKeyboardButton(txt_aac256, callback_data=f"{prefix}_{display_text_map['aac256']}", style=style_aac256)) 
     buttons.append(row)
     row = []
     
-    row.append(InlineKeyboardButton(quality.get("320k", "MP3 320k"), callback_data=f"{prefix}_{display_text_map['320k']}"))
-    row.append(InlineKeyboardButton(quality.get("aac", "AAC 128k"), callback_data=f"{prefix}_{display_text_map['aac']}"))
+    row.append(InlineKeyboardButton(txt_320k, callback_data=f"{prefix}_{display_text_map['320k']}", style=style_320k))
+    row.append(InlineKeyboardButton(txt_aac, callback_data=f"{prefix}_{display_text_map['aac']}", style=style_aac))
     buttons.append(row)
 
     if usetting:
@@ -866,7 +910,10 @@ def mv_button(quality: dict, user_id: int = None):
     row = []
     for i, (key, value) in enumerate(quality.items()):
         raw_key = key 
-        row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{raw_key}"))
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+        
+        row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{raw_key}", style=btn_style))
         
         if len(row) == 2:
             buttons.append(row)
@@ -894,7 +941,10 @@ def lp_button(quality: dict, user_id: int = None):
     
     row = []
     for k, v in quality.items():
-        row.append(InlineKeyboardButton(v, callback_data=f"{prefix}_{k}"))
+        # Style check
+        btn_style = ButtonStyle.SUCCESS if "✅" in v else ButtonStyle.DEFAULT
+        
+        row.append(InlineKeyboardButton(v, callback_data=f"{prefix}_{k}", style=btn_style))
         
         if len(row) == 2:
             buttons.append(row)
@@ -935,7 +985,8 @@ def hra_button(user_id: int = None):
     buttons = []
     usetting = user_id is not None
     
-    buttons.append([InlineKeyboardButton("FLAC (Lossless) ✅", callback_data="ignore")])
+    # Karena ini hardcoded centang (✅), kita langsung beri warna hijau
+    buttons.append([InlineKeyboardButton("FLAC (Lossless) ✅", callback_data="ignore", style=ButtonStyle.SUCCESS)])
     
     if usetting:
         buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_hra_auth", style=ButtonStyle.SUCCESS)])
@@ -957,9 +1008,14 @@ def khi_button(quality: dict, user_id: int = None):
     
     row = []
     if "flac" in quality:
-        row.append(InlineKeyboardButton(quality["flac"], callback_data=f"{prefix}_flac"))
+        txt = quality["flac"]
+        style = ButtonStyle.SUCCESS if "✅" in txt else ButtonStyle.DEFAULT
+        row.append(InlineKeyboardButton(txt, callback_data=f"{prefix}_flac", style=style))
+        
     if "mp3" in quality:
-        row.append(InlineKeyboardButton(quality["mp3"], callback_data=f"{prefix}_mp3"))
+        txt = quality["mp3"]
+        style = ButtonStyle.SUCCESS if "✅" in txt else ButtonStyle.DEFAULT
+        row.append(InlineKeyboardButton(txt, callback_data=f"{prefix}_mp3", style=style))
     
     if row:
         buttons.append(row)
