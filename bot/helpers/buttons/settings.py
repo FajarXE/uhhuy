@@ -6,6 +6,10 @@ from bot.settings import bot_set
 from bot import BOT_QOBUZ_CLIENTS
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+# --- PENAMBAHAN IMPORT UNTUK WARNA TOMBOL ---
+from pyrogram.enums import ButtonStyle
+# --------------------------------------------
+
 try:
     from bot.helpers.qobuz.qopy import qobuz_manager
 except ImportError:
@@ -107,8 +111,10 @@ except ImportError:
 
 
 def fetch_base_buttons():
-    main_button = [[InlineKeyboardButton(text=lang.s.MAIN_MENU_BUTTON, callback_data="main_menu")]]
-    close_button = [[InlineKeyboardButton(text=lang.s.CLOSE_BUTTON, callback_data="close")]]
+    # Style: PRIMARY (Biru) untuk Main Menu
+    main_button = [[InlineKeyboardButton(text=lang.s.MAIN_MENU_BUTTON, callback_data="main_menu", style=ButtonStyle.PRIMARY)]]
+    # Style: DANGER (Merah) untuk Close
+    close_button = [[InlineKeyboardButton(text=lang.s.CLOSE_BUTTON, callback_data="close", style=ButtonStyle.DANGER)]]
     return main_button, close_button
 
 def main_menu():
@@ -168,7 +174,6 @@ def providers_button():
             ]
         )
     
-    # Cek Beatport (Global OR Private)
     if beatport_manager and (getattr(beatport_manager, 'global_clients', []) or getattr(beatport_manager, 'clients', [])):
         inline_keyboard.append(
             [
@@ -179,7 +184,6 @@ def providers_button():
             ]
         )
     
-    # Cek Beatsource (Global OR Private)
     if beatsource_manager and (getattr(beatsource_manager, 'global_clients', []) or getattr(beatsource_manager, 'clients', [])):
         inline_keyboard.append(
             [
@@ -417,47 +421,41 @@ def tidal_buttons():
 def tidal_auth_buttons(active_clients: list = None):
     inline_keyboard = []
     
-    # --- LOGIKA BARU: LOOPING AKUN AKTIF ---
     if active_clients:
-        # Header Info
         inline_keyboard.append([InlineKeyboardButton("🔻 HAPUS AKUN (KLIK DI BAWAH) 🔻", callback_data="ignore")])
         
         for client in active_clients:
-            # Ambil detail akun agar Admin tahu mana yang mau dihapus
             uid = client.user_id
             sub = client.sub_type or "UNK"
             country = client.country_code or "??"
-            
-            # Label Tombol: "🗑️ HIFI (US) - 12345"
             btn_text = f"🗑️ {sub} ({country}) - {uid}"
             
-            # Callback unik: tdRemove_12345
+            # Style: DANGER (Merah) karena ini tombol hapus
             inline_keyboard.append([
-                InlineKeyboardButton(text=btn_text, callback_data=f"tdRemove_{uid}")
+                InlineKeyboardButton(text=btn_text, callback_data=f"tdRemove_{uid}", style=ButtonStyle.DANGER)
             ])
             
-    # --- TOMBOL LOGIN ---
+    # Style: SUCCESS (Hijau) untuk login
     inline_keyboard.append(
         [
             InlineKeyboardButton(
                 text="➕ TAMBAH AKUN BARU (TV LOGIN)",
-                callback_data='tdLogin'
+                callback_data='tdLogin',
+                style=ButtonStyle.SUCCESS
             )
         ]
     )
     
-    # --- TOMBOL KEMBALI ---
-    inline_keyboard.append([InlineKeyboardButton(text="🔙 Back", callback_data="tdP")])
+    # Style: PRIMARY (Biru) untuk kembali
+    inline_keyboard.append([InlineKeyboardButton(text="🔙 Back", callback_data="tdP", style=ButtonStyle.PRIMARY)])
     
     return InlineKeyboardMarkup(inline_keyboard)
     
 
-# qobuz qualities
 def qb_button(qualities: dict, user_id: int = 0):
     inline_keyboard = []
     usetting = user_id != 0
     
-    # Loop tombol kualitas (biarkan kode ini tetap ada)
     for quality in qualities.values():
         inline_keyboard.append(
             [
@@ -468,23 +466,20 @@ def qb_button(qualities: dict, user_id: int = 0):
             ]
         )
         
-    # --- MODIFIKASI DIMULAI DARI SINI ---
     if usetting:
-        # Tambahkan tombol masuk ke menu Private Account
+        # Style: SUCCESS (Hijau) untuk menu auth
         inline_keyboard.append(
             [
-                InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth")
+                InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.SUCCESS)
             ]
         )
         
-        # Tombol Back
         inline_keyboard.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(inline_keyboard)
-    # ------------------------------------
     
     main_button, close_button = fetch_base_buttons()
     inline_keyboard += main_button + close_button
@@ -496,20 +491,16 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
     usetting = user_id != 0
     spatial_to_show = spatial
     
-    # --- VAR UNTUK USER SETTING ---
     user_mqa_fix = "OFF"
     user_convert_m4a = "OFF"
 
-    # Jika User Mode, coba ambil setting tambahan
     if usetting:
         try:
-            # Import lokal untuk mencegah circular import
             from ..tidal.manager import tidal_manager
             _, spatial_to_show, user_mqa_fix, user_convert_m4a = tidal_manager.get_user_quality_settings(user_id)
         except Exception:
             pass
 
-    # 1. Tombol Kualitas (Muncul di Admin & User)
     for quality in qualities.values():
         inline_keyboard.append(
             [
@@ -520,7 +511,6 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
             ]
         )
         
-    # 2. Tombol Spatial (Muncul di Admin & User)
     inline_keyboard.append(
         [
             InlineKeyboardButton(
@@ -530,9 +520,7 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
         ]
     )
     
-    # 3. KONTEN KHUSUS USER (Private Settings)
     if usetting:
-        # Tombol MQA Fix
         if user_mqa_fix == "ON":
             mqa_text = "✅ MQA Fix: ON"
             mqa_callback = "utdqs_mqa_OFF"
@@ -540,7 +528,6 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
             mqa_text = "❌ MQA Fix: OFF"
             mqa_callback = "utdqs_mqa_ON"
         
-        # Tombol Convert M4A
         if user_convert_m4a == "ON":
             convert_text = "✅ Convert M4A: ON"
             convert_callback = "utdqs_convert_OFF"
@@ -551,16 +538,13 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
         inline_keyboard.append([InlineKeyboardButton(text=mqa_text, callback_data=mqa_callback)])
         inline_keyboard.append([InlineKeyboardButton(text=convert_text, callback_data=convert_callback)])
         
-        # Tombol Navigasi User
-        inline_keyboard.append([InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT", callback_data="utd_auth_menu")])
-        inline_keyboard.append([InlineKeyboardButton(text="Back", callback_data="uset_back")])
+        # Style: SUCCESS
+        inline_keyboard.append([InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT", callback_data="utd_auth_menu", style=ButtonStyle.SUCCESS)])
+        # Style: PRIMARY
+        inline_keyboard.append([InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
         
         return InlineKeyboardMarkup(inline_keyboard)
 
-    # 4. KONTEN KHUSUS ADMIN (Global Settings)
-    # [PENTING] Bagian ini yang HILANG di kode lama Anda.
-    # Kita tambahkan tombol standar (Back/Close) untuk Admin.
-    
     main_button, close_button = fetch_base_buttons()
     inline_keyboard += main_button + close_button
     
@@ -575,11 +559,13 @@ def beatport_user_auth_buttons(is_logged_in: bool):
     buttons = []
     
     if is_logged_in:
-        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uset_bp_logout")])
+        # Style: DANGER (Logout)
+        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uset_bp_logout", style=ButtonStyle.DANGER)])
     else:
-        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT", callback_data="uset_bp_instr")])
+        # Style: SUCCESS (Login)
+        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT", callback_data="uset_bp_instr", style=ButtonStyle.SUCCESS)])
         
-    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_beatport")])
+    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_beatport", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
 def bp_button(quality: dict, user_id: int = None):
@@ -600,11 +586,10 @@ def bp_button(quality: dict, user_id: int = None):
             buttons.append(row)
             row = []
     if usetting:
-        # Tombol Private Account Beatport
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bp_auth")])
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bp_auth", style=ButtonStyle.SUCCESS)])
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -621,11 +606,11 @@ def beatsource_user_auth_buttons(is_logged_in: bool):
     buttons = []
     
     if is_logged_in:
-        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uset_bs_logout")])
+        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uset_bs_logout", style=ButtonStyle.DANGER)])
     else:
-        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT", callback_data="uset_bs_instr")])
+        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT", callback_data="uset_bs_instr", style=ButtonStyle.SUCCESS)])
         
-    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_beatsource")])
+    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_beatsource", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
 def bs_button(quality: dict, user_id: int = None):
@@ -646,11 +631,10 @@ def bs_button(quality: dict, user_id: int = None):
             buttons.append(row)
             row = []
     if usetting:
-        # Tombol Private Account Beatsource
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bs_auth")])
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bs_auth", style=ButtonStyle.SUCCESS)])
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -677,7 +661,7 @@ def sc_button(quality: dict, user_id: int = None):
     if usetting:
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -687,41 +671,26 @@ def sc_button(quality: dict, user_id: int = None):
     return InlineKeyboardMarkup(buttons)
 
 
-# [TAMBAHKAN FUNGSI INI DI bot/helpers/buttons/settings.py]
 def qb_user_auth_buttons(accounts_list: list):
-    """
-    Menampilkan daftar tombol akun yang tersimpan.
-    Setiap akun memiliki tombol hapus (Trash Icon).
-    """
     buttons = []
     
-    # Header Statis jika ada akun
     if accounts_list:
         buttons.append([InlineKeyboardButton("🔻 KLIK UNTUK MENGHAPUS 🔻", callback_data="ignore")])
-        
-        # Loop daftar akun dan buat tombol HAPUS untuk masing-masing
         for acc in accounts_list:
             label = acc.get('label', 'Unknown')
             q_uid = acc.get('user_id', '0')
-            
-            # Teks tombol: "🗑️ Label (ID)"
             btn_text = f"🗑️ {label} ({q_uid})"
-            
-            # Callback: "uset_qb_rm_" + ID Akun (sesuai regex di user_settings.py)
             callback = f"uset_qb_rm_{q_uid}"
+            # Style: DANGER
+            buttons.append([InlineKeyboardButton(btn_text, callback_data=callback, style=ButtonStyle.DANGER)])
             
-            buttons.append([InlineKeyboardButton(btn_text, callback_data=callback)])
-            
-    # Tombol Tambah Akun (Selalu muncul)
-    buttons.append([InlineKeyboardButton("➕ TAMBAH AKUN LAIN", callback_data="uset_qb_instr")])
-        
-    # Tombol Kembali ke menu kualitas
-    buttons.append([InlineKeyboardButton("🔙 KEMBALI", callback_data="uset_qobuz")])
+    # Style: SUCCESS
+    buttons.append([InlineKeyboardButton("➕ TAMBAH AKUN LAIN", callback_data="uset_qb_instr", style=ButtonStyle.SUCCESS)])
+    # Style: PRIMARY
+    buttons.append([InlineKeyboardButton("🔙 KEMBALI", callback_data="uset_qobuz", style=ButtonStyle.PRIMARY)])
     
     return InlineKeyboardMarkup(buttons)
 
-
-# [TAMBAHKAN DI bot/helpers/buttons/settings.py]
 
 def deezer_user_auth_buttons(accounts_list: list):
     buttons = []
@@ -732,14 +701,14 @@ def deezer_user_auth_buttons(accounts_list: list):
             uid = acc.get('user_id', '0')
             btn_text = f"🗑️ {label} ({uid})"
             callback = f"uset_dz_rm_{uid}"
-            buttons.append([InlineKeyboardButton(btn_text, callback_data=callback)])
+            # Style: DANGER
+            buttons.append([InlineKeyboardButton(btn_text, callback_data=callback, style=ButtonStyle.DANGER)])
             
-    buttons.append([InlineKeyboardButton("➕ TAMBAH AKUN LAIN", callback_data="uset_dz_instr")])
-    buttons.append([InlineKeyboardButton("🔙 KEMBALI", callback_data="uset_deezer")])
+    buttons.append([InlineKeyboardButton("➕ TAMBAH AKUN LAIN", callback_data="uset_dz_instr", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton("🔙 KEMBALI", callback_data="uset_deezer", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
 
-# Deezer Button
 def dz_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
@@ -758,19 +727,16 @@ def dz_button(quality: dict, user_id: int = None):
             buttons.append(row)
             row = []
     
-    # --- MODIFIKASI: Tombol Private Account ---
     if usetting:
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_dz_auth")])
-        buttons.append([InlineKeyboardButton(text="Back", callback_data="uset_back")])
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_dz_auth", style=ButtonStyle.SUCCESS)])
+        buttons.append([InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
         return InlineKeyboardMarkup(buttons)
-    # ------------------------------------------
 
     main_button, close_button = fetch_base_buttons()
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
 
-# KKBox Button
 def kk_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
@@ -793,7 +759,7 @@ def kk_button(quality: dict, user_id: int = None):
     if usetting:
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -801,7 +767,6 @@ def kk_button(quality: dict, user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
-# Napster Button
 def np_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
@@ -824,7 +789,7 @@ def np_button(quality: dict, user_id: int = None):
     if usetting:
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -832,7 +797,6 @@ def np_button(quality: dict, user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
-# Idagio Button
 def id_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
@@ -853,7 +817,7 @@ def id_button(quality: dict, user_id: int = None):
     if usetting:
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -861,7 +825,6 @@ def id_button(quality: dict, user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
-# Bugs Button
 def bugs_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
@@ -887,7 +850,7 @@ def bugs_button(quality: dict, user_id: int = None):
     if usetting:
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -895,11 +858,9 @@ def bugs_button(quality: dict, user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
-# Moov Button
 def mv_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
-    # Prefix 'mvQ' untuk admin/global, 'umvs' untuk user setting
     prefix = "mvQ" if not usetting else f"umvs"
     
     row = []
@@ -917,7 +878,7 @@ def mv_button(quality: dict, user_id: int = None):
     if usetting:
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -926,7 +887,6 @@ def mv_button(quality: dict, user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
-# LivePhish Button
 def lp_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
@@ -946,7 +906,7 @@ def lp_button(quality: dict, user_id: int = None):
     if usetting:
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -954,6 +914,7 @@ def lp_button(quality: dict, user_id: int = None):
     main_button, close_button = fetch_base_buttons()
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
+
 
 # ==========================================
 # HIGHRESAUDIO BUTTONS (PRIVATE ACCOUNT)
@@ -963,26 +924,24 @@ def highresaudio_user_auth_buttons(is_logged_in: bool):
     buttons = []
     
     if is_logged_in:
-        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uset_hra_logout")])
+        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uset_hra_logout", style=ButtonStyle.DANGER)])
     else:
-        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT", callback_data="uset_hra_instr")])
+        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT", callback_data="uset_hra_instr", style=ButtonStyle.SUCCESS)])
         
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="uset_highresaudio")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="uset_highresaudio", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
 def hra_button(user_id: int = None):
     buttons = []
     usetting = user_id is not None
     
-    # HRA Kualitasnya Statis (FLAC), jadi kita buat info saja
     buttons.append([InlineKeyboardButton("FLAC (Lossless) ✅", callback_data="ignore")])
     
     if usetting:
-        # Tombol Private Account HRA
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_hra_auth")])
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_hra_auth", style=ButtonStyle.SUCCESS)])
         buttons.append(
             [
-                InlineKeyboardButton(text="Back", callback_data="uset_back")
+                InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
@@ -991,13 +950,11 @@ def hra_button(user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
-# Khinsider Button
 def khi_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
     prefix = "khiQ" if not usetting else f"ukhis"
     
-    # HANYA FLAC DAN MP3 SEPERTI YANG DIMINTA
     row = []
     if "flac" in quality:
         row.append(InlineKeyboardButton(quality["flac"], callback_data=f"{prefix}_flac"))
@@ -1008,7 +965,7 @@ def khi_button(quality: dict, user_id: int = None):
         buttons.append(row)
 
     if usetting:
-        buttons.append([InlineKeyboardButton(text="Back", callback_data="uset_back")])
+        buttons.append([InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
         return InlineKeyboardMarkup(buttons)
         
     main_button, close_button = fetch_base_buttons()
@@ -1016,18 +973,18 @@ def khi_button(quality: dict, user_id: int = None):
     return InlineKeyboardMarkup(buttons)
 
 
-# Lyrics Button
 def lyrics_button(user_settings: dict, user_id):
     buttons = []
     
-    # 1. Status ON/OFF
     status = user_settings.get('lyrics_status', False)
     status_text = "✅ Status: ON" if status else "❌ Status: OFF"
     status_cb = "uset_ly_off" if status else "uset_ly_on"
-    buttons.append([InlineKeyboardButton(text=status_text, callback_data=status_cb)])
+    
+    # Beri warna merah jika OFF, hijau jika ON
+    status_style = ButtonStyle.SUCCESS if status else ButtonStyle.DANGER
+    buttons.append([InlineKeyboardButton(text=status_text, callback_data=status_cb, style=status_style)])
 
     if status:
-        # 2. Provider (LRCLib / Musixmatch / Genius)
         prov = user_settings.get('lyrics_provider', 'lrclib')
         row_prov = []
         row_prov.append(InlineKeyboardButton(text=f"{'✅ ' if prov=='lrclib' else ''}LRCLib", callback_data="uset_ly_p_lrclib"))
@@ -1035,14 +992,13 @@ def lyrics_button(user_settings: dict, user_id):
         row_prov.append(InlineKeyboardButton(text=f"{'✅ ' if prov=='genius' else ''}Genius", callback_data="uset_ly_p_genius"))
         buttons.append(row_prov)
         
-        # 3. Type (Synced / Plain)
         l_type = user_settings.get('lyrics_type', 'plain')
         row_type = []
         row_type.append(InlineKeyboardButton(text=f"{'✅ ' if l_type=='plain' else ''}Plain (Text)", callback_data="uset_ly_t_plain"))
         row_type.append(InlineKeyboardButton(text=f"{'✅ ' if l_type=='synced' else ''}Synced (LRC)", callback_data="uset_ly_t_synced"))
         buttons.append(row_type)
 
-    buttons.append([InlineKeyboardButton(text="Back", callback_data="uset_back")])
+    buttons.append([InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -1061,12 +1017,10 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     if show_qobuz:
         buttons.append([InlineKeyboardButton(text=f"Qobuz Quality", callback_data=f"uset_qobuz")])
     
-    # Cek Beatport (Global OR Private Session)
     if beatport_manager:
         if getattr(beatport_manager, 'global_clients', []) or beatport_manager.has_private_session(user_id):
             buttons.append([InlineKeyboardButton(text=f"Beatport Quality", callback_data=f"uset_beatport")])
 
-    # Cek Beatsource (Global OR Private Session)
     if beatsource_manager:
         if getattr(beatsource_manager, 'global_clients', []) or beatsource_manager.has_private_session(user_id):
             buttons.append([InlineKeyboardButton(text=f"Beatsource Quality", callback_data=f"uset_beatsource")])
@@ -1108,15 +1062,15 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     if khinsider_manager:
         buttons.append([InlineKeyboardButton(text=f"Khinsider Quality", callback_data=f"uset_khinsider")])
 
-    # --- BUTTON SWITCH UPLOAD MODE ---
     buttons.append([InlineKeyboardButton(text="🔁 Switch Upload Mode", callback_data="uset_upload_mode")])
-    # ---------------------------------
 
     buttons.append([InlineKeyboardButton(text="LYRICS SETTINGS", callback_data="uset_lyrics")])
     
     buttons.append([InlineKeyboardButton(text="PLAYLIST_ZIP", callback_data="zip_playlist")])
     buttons.append([InlineKeyboardButton(text="ALBUM_ZIP", callback_data="zip_album")])
     buttons.append([InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster")])
-    buttons.append([InlineKeyboardButton(text="Close", callback_data="uset_close")])
+    
+    # Style: DANGER
+    buttons.append([InlineKeyboardButton(text="Close", callback_data="uset_close", style=ButtonStyle.DANGER)])
     
     return InlineKeyboardMarkup(buttons)
