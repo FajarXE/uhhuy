@@ -1139,11 +1139,20 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
 
     buttons.append([InlineKeyboardButton(text="LYRICS SETTINGS", callback_data="uset_lyrics")])
     
-    buttons.append([InlineKeyboardButton(text="PLAYLIST_ZIP", callback_data="zip_playlist")])
-    buttons.append([InlineKeyboardButton(text="ALBUM_ZIP", callback_data="zip_album")])
-    buttons.append([InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster")])
+    user_dict = bot_set.user_data.get(user_id, {})
+
+    is_playlist = user_dict.get("PLAYLIST_ZIP", False)
+    style_playlist = ButtonStyle.SUCCESS if is_playlist else ButtonStyle.DANGER
+    buttons.append([InlineKeyboardButton(text="PLAYLIST_ZIP", callback_data="zip_playlist", style=style_playlist)])
+
+    is_album = user_dict.get("ALBUM_ZIP", False)
+    style_album = ButtonStyle.SUCCESS if is_album else ButtonStyle.DANGER
+    buttons.append([InlineKeyboardButton(text="ALBUM_ZIP", callback_data="zip_album", style=style_album)])
+
+    is_poster = user_dict.get("ART_POSTER", False)
+    style_poster = ButtonStyle.SUCCESS if is_poster else ButtonStyle.DANGER
+    buttons.append([InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster", style=style_poster)])
     
-    # Style: DANGER
     buttons.append([InlineKeyboardButton(text="Close", callback_data="uset_close", style=ButtonStyle.DANGER)])
     
     return InlineKeyboardMarkup(buttons)
