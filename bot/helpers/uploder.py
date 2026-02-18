@@ -188,13 +188,9 @@ async def album_upload(metadata, user):
     user_settings = bot_set.user_data.get(user['user_id'], {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP (Prioritas Uppercase)
-    is_zip = user_settings.get("ALBUM_ZIP")
-    if is_zip is None: is_zip = user_settings.get("album_zip", False)
-
-    # 2. Cek Settings POSTER (Prioritas Uppercase)
-    show_poster = user_settings.get("ART_POSTER")
-    if show_poster is None: show_poster = user_settings.get("art_poster", False)
+    # [FIX] Menggunakan kunci lowercase untuk konsistensi dengan user_settings.py
+    is_zip = user_settings.get("album_zip", False)
+    show_poster = user_settings.get("art_poster", False)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
@@ -251,13 +247,9 @@ async def artist_upload(metadata, user):
     user_settings = bot_set.user_data.get(user['user_id'], {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP
-    is_zip = user_settings.get("ARTIST_ZIP")
-    if is_zip is None: is_zip = user_settings.get("artist_zip", False)
-    
-    # 2. Cek Settings POSTER
-    show_poster = user_settings.get("ART_POSTER")
-    if show_poster is None: show_poster = user_settings.get("art_poster", False)
+    # [FIX] Menggunakan kunci lowercase untuk konsistensi
+    is_zip = user_settings.get("artist_zip", False)
+    show_poster = user_settings.get("art_poster", False)
     
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
@@ -307,13 +299,9 @@ async def playlist_upload(metadata, user):
     user_settings = bot_set.user_data.get(user_id, {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # 1. Cek Settings ZIP
-    is_zip = user_settings.get("PLAYLIST_ZIP")
-    if is_zip is None: is_zip = user_settings.get("playlist_zip", False)
-
-    # 2. Cek Settings POSTER
-    show_poster = user_settings.get("ART_POSTER")
-    if show_poster is None: show_poster = user_settings.get("art_poster", False)
+    # [FIX] Menggunakan kunci lowercase untuk konsistensi
+    is_zip = user_settings.get("playlist_zip", False)
+    show_poster = user_settings.get("art_poster", False)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
