@@ -465,14 +465,23 @@ def qb_button(qualities: dict, user_id: int = 0):
     usetting = user_id != 0
     
     for quality in qualities.values():
-        # Cek apakah ini kualitas yang terpilih (ada centang)
-        btn_style = ButtonStyle.SUCCESS if "✅️" in quality else ButtonStyle.DEFAULT
+        # 1. Cek apakah kualitas ini terpilih (mengandung centang)
+        # Kita cek kedua variasi emoji centang untuk keamanan
+        is_selected = "✅" in quality
+        
+        # 2. Tentukan Style: Hijau (Success) jika terpilih, Default jika tidak
+        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
+        
+        # 3. Bersihkan Teks: Hapus emoji centang agar tidak muncul di tombol
+        # Kita replace emoji dengan string kosong, lalu strip() untuk hapus spasi sisa
+        clean_text = quality.replace("✅", "").replace("️", "").strip()
         
         inline_keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=quality,
-                    callback_data=f"qbQ_{quality.replace('✅️', '')}" if not usetting else f"uqbs_{quality.replace('✅️', '')}",
+                    text=clean_text, # Teks tombol BERSIH (tanpa emoji)
+                    # Callback data juga menggunakan teks bersih
+                    callback_data=f"qbQ_{clean_text}" if not usetting else f"uqbs_{clean_text}",
                     style=btn_style
                 )
             ]
@@ -481,12 +490,14 @@ def qb_button(qualities: dict, user_id: int = 0):
     if usetting:
         inline_keyboard.append(
             [
-                InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.PRIMARY)
+                # Saya set SUCCESS (Hijau) agar konsisten dengan menu auth lain
+                InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.SUCCESS)
             ]
         )
         
         inline_keyboard.append(
             [
+                # Saya set PRIMARY (Biru) sesuai request sebelumnya
                 InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
