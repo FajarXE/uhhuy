@@ -1060,17 +1060,55 @@ def lyrics_button(user_settings: dict, user_id):
     if status:
         prov = user_settings.get('lyrics_provider', 'lrclib')
         row_prov = []
-        row_prov.append(InlineKeyboardButton(text=f"{'✅ ' if prov=='lrclib' else ''}LRCLib", callback_data="uset_ly_p_lrclib"))
-        row_prov.append(InlineKeyboardButton(text=f"{'✅ ' if prov=='musixmatch' else ''}Musixmatch", callback_data="uset_ly_p_musixmatch"))
-        row_prov.append(InlineKeyboardButton(text=f"{'✅ ' if prov=='genius' else ''}Genius", callback_data="uset_ly_p_genius"))
+        
+        # --- LOGIKA WARNA PROVIDER ---
+        # Jika dipilih -> Hijau, Jika tidak -> Default
+        
+        style_lrclib = ButtonStyle.SUCCESS if prov == 'lrclib' else ButtonStyle.DEFAULT
+        row_prov.append(InlineKeyboardButton(
+            text=f"{'✅ ' if prov=='lrclib' else ''}LRCLib", 
+            callback_data="uset_ly_p_lrclib", 
+            style=style_lrclib
+        ))
+        
+        style_musix = ButtonStyle.SUCCESS if prov == 'musixmatch' else ButtonStyle.DEFAULT
+        row_prov.append(InlineKeyboardButton(
+            text=f"{'✅ ' if prov=='musixmatch' else ''}Musixmatch", 
+            callback_data="uset_ly_p_musixmatch", 
+            style=style_musix
+        ))
+        
+        style_genius = ButtonStyle.SUCCESS if prov == 'genius' else ButtonStyle.DEFAULT
+        row_prov.append(InlineKeyboardButton(
+            text=f"{'✅ ' if prov=='genius' else ''}Genius", 
+            callback_data="uset_ly_p_genius", 
+            style=style_genius
+        ))
+        
         buttons.append(row_prov)
+        
+        # --- LOGIKA WARNA TIPE LYRICS ---
         
         l_type = user_settings.get('lyrics_type', 'plain')
         row_type = []
-        row_type.append(InlineKeyboardButton(text=f"{'✅ ' if l_type=='plain' else ''}Plain (Text)", callback_data="uset_ly_t_plain"))
-        row_type.append(InlineKeyboardButton(text=f"{'✅ ' if l_type=='synced' else ''}Synced (LRC)", callback_data="uset_ly_t_synced"))
+        
+        style_plain = ButtonStyle.SUCCESS if l_type == 'plain' else ButtonStyle.DEFAULT
+        row_type.append(InlineKeyboardButton(
+            text=f"{'✅ ' if l_type=='plain' else ''}Plain (Text)", 
+            callback_data="uset_ly_t_plain", 
+            style=style_plain
+        ))
+        
+        style_synced = ButtonStyle.SUCCESS if l_type == 'synced' else ButtonStyle.DEFAULT
+        row_type.append(InlineKeyboardButton(
+            text=f"{'✅ ' if l_type=='synced' else ''}Synced (LRC)", 
+            callback_data="uset_ly_t_synced", 
+            style=style_synced
+        ))
+        
         buttons.append(row_type)
 
+    # Tombol Back Biru
     buttons.append([InlineKeyboardButton(text="Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
