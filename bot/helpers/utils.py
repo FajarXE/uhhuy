@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/utils.py] - AGGRESSIVE FETCH & DEBUG
+# [FILE: bot/helpers/utils.py]
 
 import os
 import math
@@ -28,6 +28,10 @@ from .message import send_message, edit_message
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
 
 async def download_file(url, path, retries=3, timeout=30):
+    """
+    Mengunduh file menggunakan requests (sync) yang dibungkus to_thread
+    untuk menghindari bug SSL shutdown pada aiohttp.
+    """
     if not url: return "URL is empty"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
@@ -151,9 +155,6 @@ async def zip_handler(folderpath):
             if part.isdigit() and len(part) > 5:
                 u_id = int(part)
                 u_data = bot_set.user_data.get(u_id, {})
-                if not u_data:
-                     # Coba string jika int gagal
-                     u_data = bot_set.user_data.get(str(u_id), {})
                 if u_data.get('upload_mode'):
                     user_mode = u_data['upload_mode']
                 break
@@ -248,64 +249,29 @@ async def move_sorted_playlist(metadata, user) -> str:
             shutil.move(folder, destination_folder)
         return destination_folder
 
+    # Jalankan di thread terpisah agar tidak lag
     return await asyncio.to_thread(_sync_move)
 
-# --- [FIX UTAMA: FETCH ZIP SETTINGS ROBUST] ---
-def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, bool]:
-    # 1. Pastikan user_id valid
-    raw_id = users.get("user_id")
-    if not raw_id:
-        return (False, False, False, False)
-        
-    user_id = int(raw_id)
-    
-    # 2. Coba ambil data user dari Memory (Cek Int dan String Key)
-    mem_data = bot_set.user_data.get(user_id)
-    if not mem_data:
-        mem_data = bot_set.user_data.get(str(user_id), {})
-    
-    # DEBUG: Intip isi memori untuk user ini
-    # LOGGER.info(f"[DEBUG UTILS] ID: {user_id} | Type: {type(user_id)} | MEM: {mem_data}")
-
-    # 3. Fungsi cek Key (Lowercase & Uppercase)
-    def check(key_base):
-        # Cek lowercase di User Memory
-        if key_base.lower() in mem_data:
-            return bool(mem_data[key_base.lower()])
-        # Cek Uppercase di User Memory (Jaga-jaga legacy)
-        if key_base.upper() in mem_data:
-            return bool(mem_data[key_base.upper()])
-        
-        # Cek Global Default (bot_set)
-        if hasattr(bot_set, key_base.lower()):
-            return bool(getattr(bot_set, key_base.lower()))
-            
-        return False
-
-    pl_zip = check("playlist_zip")
-    al_zip = check("album_zip")
-    ar_zip = check("artist_zip")
-    poster = check("art_poster")
-
-    return (pl_zip, al_zip, ar_zip, poster)
-# ----------------------------------------------
-
+# --- [PERBAIKAN UTAMA: LOGIKA DOWNLOAD POSTER] ---
 async def post_art_poster(user:dict, meta:dict):
     photo = meta.get('cover')
     if not photo: return None
 
+    # Tentukan caption
     if meta['type'] == 'album': caption = await format_string(lang.s.ALBUM_TEMPLATE, meta, user)
     elif meta['type'] == 'artist': caption = await format_string(lang.s.ARTIST_TEMPLATE, meta, user)
     else: caption = await format_string(lang.s.PLAYLIST_TEMPLATE, meta, user)
     
     _, __, ___, art_poster = fetch_zip_settings(user)
     if art_poster:
+        # Cek apakah photo adalah URL
         temp_thumb = None
         if isinstance(photo, str) and photo.startswith('http'):
             temp_thumb = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-poster.jpg"
+            # Download manual pakai requests (bypass aiohttp Pyrogram)
             err = await download_file(photo, temp_thumb)
             if not err:
-                photo = temp_thumb 
+                photo = temp_thumb # Gunakan path lokal
         
         try:
             msg = await send_message(user, photo, 'pic', caption)
@@ -313,12 +279,13 @@ async def post_art_poster(user:dict, meta:dict):
             LOGGER.error(f"Failed to send poster: {e}")
             msg = None
         
+        # Hapus file temp
         if temp_thumb and os.path.exists(temp_thumb):
             try: os.remove(temp_thumb)
             except: pass
             
         return msg
-    return None
+# ------------------------------------------------
 
 async def create_simple_text(meta, user):
     name = meta.get('title', 'N/A')
@@ -363,4 +330,12 @@ async def cleanup(user=None, metadata=None, user_dict: dict=None):
             try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
             except: pass
 
+    # Jalankan cleanup di thread background
     await asyncio.to_thread(_sync_cleanup)
+
+def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, bool]:
+    user_dict = bot_set.user_data.get(users.get("user_id", 0), {})
+    return (user_dict.get("playlist_zip", bot_set.playlist_zip),
+            user_dict.get("album_zip", bot_set.album_zip),
+            user_dict.get("artist_zip", bot_set.artist_zip),
+            user_dict.get("art_poster", bot_set.art_poster))
