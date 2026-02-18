@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/utils.py]
+# [FILE: bot/helpers/utils.py] - FIXED NONE VALUE & ADDED DEBUG
 
 import os
 import math
@@ -249,29 +249,51 @@ async def move_sorted_playlist(metadata, user) -> str:
             shutil.move(folder, destination_folder)
         return destination_folder
 
-    # Jalankan di thread terpisah agar tidak lag
     return await asyncio.to_thread(_sync_move)
 
-# --- [PERBAIKAN UTAMA: LOGIKA DOWNLOAD POSTER] ---
+# --- [PERBAIKAN UTAMA: FETCH ZIP SETTINGS] ---
+def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, bool]:
+    user_id = users.get("user_id", 0)
+    user_dict = bot_set.user_data.get(user_id, {})
+    
+    # Debug: Cek apa isi user_dict sebenarnya
+    # LOGGER.info(f"[FETCH DEBUG] ID: {user_id} | RAW Data: {user_dict}")
+
+    def get_bool(key, global_default):
+        val = user_dict.get(key)
+        # Jika val ada (True/False), kembalikan val.
+        if val is not None:
+            return bool(val)
+        # Jika tidak ada di user, cek global default.
+        if global_default is not None:
+            return bool(global_default)
+        # Jika semua None, default False
+        return False
+
+    pl_zip = get_bool("playlist_zip", getattr(bot_set, 'playlist_zip', False))
+    al_zip = get_bool("album_zip", getattr(bot_set, 'album_zip', False))
+    ar_zip = get_bool("artist_zip", getattr(bot_set, 'artist_zip', False))
+    poster = get_bool("art_poster", getattr(bot_set, 'art_poster', False))
+
+    return (pl_zip, al_zip, ar_zip, poster)
+# ----------------------------------------------
+
 async def post_art_poster(user:dict, meta:dict):
     photo = meta.get('cover')
     if not photo: return None
 
-    # Tentukan caption
     if meta['type'] == 'album': caption = await format_string(lang.s.ALBUM_TEMPLATE, meta, user)
     elif meta['type'] == 'artist': caption = await format_string(lang.s.ARTIST_TEMPLATE, meta, user)
     else: caption = await format_string(lang.s.PLAYLIST_TEMPLATE, meta, user)
     
     _, __, ___, art_poster = fetch_zip_settings(user)
     if art_poster:
-        # Cek apakah photo adalah URL
         temp_thumb = None
         if isinstance(photo, str) and photo.startswith('http'):
             temp_thumb = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-poster.jpg"
-            # Download manual pakai requests (bypass aiohttp Pyrogram)
             err = await download_file(photo, temp_thumb)
             if not err:
-                photo = temp_thumb # Gunakan path lokal
+                photo = temp_thumb 
         
         try:
             msg = await send_message(user, photo, 'pic', caption)
@@ -279,13 +301,12 @@ async def post_art_poster(user:dict, meta:dict):
             LOGGER.error(f"Failed to send poster: {e}")
             msg = None
         
-        # Hapus file temp
         if temp_thumb and os.path.exists(temp_thumb):
             try: os.remove(temp_thumb)
             except: pass
             
         return msg
-# ------------------------------------------------
+    return None
 
 async def create_simple_text(meta, user):
     name = meta.get('title', 'N/A')
@@ -330,12 +351,4 @@ async def cleanup(user=None, metadata=None, user_dict: dict=None):
             try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
             except: pass
 
-    # Jalankan cleanup di thread background
     await asyncio.to_thread(_sync_cleanup)
-
-def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, bool]:
-    user_dict = bot_set.user_data.get(users.get("user_id", 0), {})
-    return (user_dict.get("playlist_zip", bot_set.playlist_zip),
-            user_dict.get("album_zip", bot_set.album_zip),
-            user_dict.get("artist_zip", bot_set.artist_zip),
-            user_dict.get("art_poster", bot_set.art_poster))
