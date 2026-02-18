@@ -585,7 +585,9 @@ async def uset_qb_instr_handler(client, query):
         "Contoh:\n"
         "<code>/qobuz_login 123456 r5T6y7U8...</code>"
     )
-    buttons = [[InlineKeyboardButton("🔙 Kembali", callback_data="uset_qb_auth")]]
+    style=ButtonStyle.PRIMARY
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_qb_auth", style=ButtonStyle.PRIMARY)]]
+    
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
@@ -664,7 +666,9 @@ async def uset_dz_remove_handler(client, query):
 @Client.on_callback_query(filters.regex("^uset_dz_instr"))
 async def uset_dz_instr_handler(client, query):
     text = "Ketik: <code>/deezer_login arl_anda_disini</code>"
-    buttons = [[InlineKeyboardButton("🔙 Kembali", callback_data="uset_dz_auth")]]
+    style=ButtonStyle.PRIMARY
+    buttons = [[InlineKeyboardButton("🔙 Kembali", callback_data="uset_dz_auth", style=ButtonStyle.PRIMARY)]]
+    
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
