@@ -466,7 +466,7 @@ def qb_button(qualities: dict, user_id: int = 0):
     
     for quality in qualities.values():
         # Cek apakah ini kualitas yang terpilih (ada centang)
-        btn_style = ButtonStyle.SUCCESS if "" in quality else ButtonStyle.DEFAULT
+        btn_style = ButtonStyle.SUCCESS if "✅️" in quality else ButtonStyle.DEFAULT
         
         inline_keyboard.append(
             [
@@ -515,7 +515,7 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
     # --- BAGIAN KUALITAS AUDIO (Tetap seperti sebelumnya) ---
     for quality in qualities.values():
         # Cek centang untuk warna hijau pada pilihan kualitas
-        btn_style = ButtonStyle.SUCCESS if "" in quality else ButtonStyle.DEFAULT
+        btn_style = ButtonStyle.SUCCESS if "✅️" in quality else ButtonStyle.DEFAULT
         
         inline_keyboard.append(
             [
