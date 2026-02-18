@@ -523,16 +523,25 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
         except Exception:
             pass
 
-    # --- BAGIAN KUALITAS AUDIO (Tetap seperti sebelumnya) ---
+    # --- BAGIAN KUALITAS AUDIO (Dimodifikasi) ---
     for quality in qualities.values():
-        # Cek centang untuk warna hijau pada pilihan kualitas
-        btn_style = ButtonStyle.SUCCESS if "✅️" in quality else ButtonStyle.DEFAULT
+        # 1. Cek apakah kualitas ini terpilih (mengandung centang)
+        # Kita cek "✅" untuk menentukan warna hijau
+        is_selected = "✅" in quality
+        
+        # 2. Tentukan Style: Hijau (Success) jika terpilih, Default jika tidak
+        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
+        
+        # 3. Bersihkan Teks: Hapus emoji centang agar tampilan tombol BERSIH
+        # .replace("️", "") digunakan untuk menghapus karakter variasi emoji (VS16) yang kadang tertinggal
+        clean_text = quality.replace("✅", "").replace("️", "").strip()
         
         inline_keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=quality,
-                    callback_data=f"tdSQ_{quality.replace('✅️', '')}" if not user_id else f"utdqs_{quality.replace('✅️', '')}",
+                    text=clean_text, # Teks yang muncul di tombol (Tanpa Emoji)
+                    # Callback data juga menggunakan teks bersih
+                    callback_data=f"tdSQ_{clean_text}" if not user_id else f"utdqs_{clean_text}",
                     style=btn_style 
                 )
             ]
