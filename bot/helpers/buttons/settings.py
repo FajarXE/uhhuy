@@ -948,8 +948,8 @@ def bugs_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
     prefix = "bgQ" if not usetting else f"ubgs"
-    row = []
     
+    # Map teks bersih
     display_text_map = {
         "flac": "FLAC 16-bit",
         "aac256": "AAC 320k",
@@ -957,26 +957,30 @@ def bugs_button(quality: dict, user_id: int = None):
         "aac": "AAC 128k"
     }
     
-    # Ambil teks tombol
-    txt_flac = quality.get("flac", "FLAC 16-bit")
-    txt_aac256 = quality.get("aac256", "AAC 320k")
-    txt_320k = quality.get("320k", "MP3 320k")
-    txt_aac = quality.get("aac", "AAC 128k")
+    # Ambil value asli (yang mungkin ada emoji ✅) untuk pengecekan warna
+    raw_flac = quality.get("flac", "")
+    raw_aac256 = quality.get("aac256", "")
+    raw_320k = quality.get("320k", "")
+    raw_aac = quality.get("aac", "")
 
-    # Tentukan style berdasarkan tanda centang
-    style_flac = ButtonStyle.SUCCESS if "✅" in txt_flac else ButtonStyle.DEFAULT
-    style_aac256 = ButtonStyle.SUCCESS if "✅" in txt_aac256 else ButtonStyle.DEFAULT
-    style_320k = ButtonStyle.SUCCESS if "✅" in txt_320k else ButtonStyle.DEFAULT
-    style_aac = ButtonStyle.SUCCESS if "✅" in txt_aac else ButtonStyle.DEFAULT
+    # Tentukan style berdasarkan tanda centang di value asli
+    style_flac = ButtonStyle.SUCCESS if "✅" in raw_flac else ButtonStyle.DEFAULT
+    style_aac256 = ButtonStyle.SUCCESS if "✅" in raw_aac256 else ButtonStyle.DEFAULT
+    style_320k = ButtonStyle.SUCCESS if "✅" in raw_320k else ButtonStyle.DEFAULT
+    style_aac = ButtonStyle.SUCCESS if "✅" in raw_aac else ButtonStyle.DEFAULT
 
-    row.append(InlineKeyboardButton(txt_flac, callback_data=f"{prefix}_{display_text_map['flac']}", style=style_flac))
-    row.append(InlineKeyboardButton(txt_aac256, callback_data=f"{prefix}_{display_text_map['aac256']}", style=style_aac256)) 
-    buttons.append(row)
-    row = []
+    # Baris 1
+    row1 = []
+    # Gunakan display_text_map[...] untuk text tombol agar BERSIH (tanpa emoji)
+    row1.append(InlineKeyboardButton(text=display_text_map['flac'], callback_data=f"{prefix}_{display_text_map['flac']}", style=style_flac))
+    row1.append(InlineKeyboardButton(text=display_text_map['aac256'], callback_data=f"{prefix}_{display_text_map['aac256']}", style=style_aac256)) 
+    buttons.append(row1)
     
-    row.append(InlineKeyboardButton(txt_320k, callback_data=f"{prefix}_{display_text_map['320k']}", style=style_320k))
-    row.append(InlineKeyboardButton(txt_aac, callback_data=f"{prefix}_{display_text_map['aac']}", style=style_aac))
-    buttons.append(row)
+    # Baris 2
+    row2 = []
+    row2.append(InlineKeyboardButton(text=display_text_map['320k'], callback_data=f"{prefix}_{display_text_map['320k']}", style=style_320k))
+    row2.append(InlineKeyboardButton(text=display_text_map['aac'], callback_data=f"{prefix}_{display_text_map['aac']}", style=style_aac))
+    buttons.append(row2)
 
     if usetting:
         buttons.append(
@@ -985,9 +989,11 @@ def bugs_button(quality: dict, user_id: int = None):
             ]
         )
         return InlineKeyboardMarkup(buttons)
+        
     main_button, close_button = fetch_base_buttons()
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
+
 
 def mv_button(quality: dict, user_id: int = None):
     buttons = []
@@ -1072,10 +1078,12 @@ def hra_button(user_id: int = None):
     buttons = []
     usetting = user_id is not None
     
-    # Karena ini hardcoded centang (✅), kita langsung beri warna hijau
-    buttons.append([InlineKeyboardButton("FLAC (Lossless) ✅", callback_data="ignore", style=ButtonStyle.SUCCESS)])
+    # Text: "FLAC (Lossless)" (Tanpa Emoji)
+    # Style: ButtonStyle.SUCCESS (Tetap Hijau karena ini default/active)
+    buttons.append([InlineKeyboardButton(text="FLAC (Lossless)", callback_data="ignore", style=ButtonStyle.SUCCESS)])
     
     if usetting:
+        # Tombol Private Account & Back (Biru)
         buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_hra_auth", style=ButtonStyle.PRIMARY)])
         buttons.append(
             [
@@ -1095,14 +1103,19 @@ def khi_button(quality: dict, user_id: int = None):
     
     row = []
     if "flac" in quality:
-        txt = quality["flac"]
-        style = ButtonStyle.SUCCESS if "✅" in txt else ButtonStyle.DEFAULT
-        row.append(InlineKeyboardButton(txt, callback_data=f"{prefix}_flac", style=style))
+        # Ambil value asli untuk cek warna
+        raw_txt = quality["flac"]
+        style = ButtonStyle.SUCCESS if "✅" in raw_txt else ButtonStyle.DEFAULT
+        
+        # Gunakan Teks Bersih "FLAC" untuk tombol
+        row.append(InlineKeyboardButton("FLAC", callback_data=f"{prefix}_flac", style=style))
         
     if "mp3" in quality:
-        txt = quality["mp3"]
-        style = ButtonStyle.SUCCESS if "✅" in txt else ButtonStyle.DEFAULT
-        row.append(InlineKeyboardButton(txt, callback_data=f"{prefix}_mp3", style=style))
+        raw_txt = quality["mp3"]
+        style = ButtonStyle.SUCCESS if "✅" in raw_txt else ButtonStyle.DEFAULT
+        
+        # Gunakan Teks Bersih "MP3" untuk tombol
+        row.append(InlineKeyboardButton("MP3", callback_data=f"{prefix}_mp3", style=style))
     
     if row:
         buttons.append(row)
