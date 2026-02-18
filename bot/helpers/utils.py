@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/utils.py] - FIXED NONE VALUE & ADDED DEBUG
+# [FILE: bot/helpers/utils.py] - AGGRESSIVE FETCH & DEBUG
 
 import os
 import math
@@ -28,10 +28,6 @@ from .message import send_message, edit_message
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
 
 async def download_file(url, path, retries=3, timeout=30):
-    """
-    Mengunduh file menggunakan requests (sync) yang dibungkus to_thread
-    untuk menghindari bug SSL shutdown pada aiohttp.
-    """
     if not url: return "URL is empty"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
@@ -155,6 +151,9 @@ async def zip_handler(folderpath):
             if part.isdigit() and len(part) > 5:
                 u_id = int(part)
                 u_data = bot_set.user_data.get(u_id, {})
+                if not u_data:
+                     # Coba string jika int gagal
+                     u_data = bot_set.user_data.get(str(u_id), {})
                 if u_data.get('upload_mode'):
                     user_mode = u_data['upload_mode']
                 break
@@ -251,29 +250,42 @@ async def move_sorted_playlist(metadata, user) -> str:
 
     return await asyncio.to_thread(_sync_move)
 
-# --- [PERBAIKAN UTAMA: FETCH ZIP SETTINGS] ---
+# --- [FIX UTAMA: FETCH ZIP SETTINGS ROBUST] ---
 def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, bool]:
-    user_id = users.get("user_id", 0)
-    user_dict = bot_set.user_data.get(user_id, {})
+    # 1. Pastikan user_id valid
+    raw_id = users.get("user_id")
+    if not raw_id:
+        return (False, False, False, False)
+        
+    user_id = int(raw_id)
     
-    # Debug: Cek apa isi user_dict sebenarnya
-    # LOGGER.info(f"[FETCH DEBUG] ID: {user_id} | RAW Data: {user_dict}")
+    # 2. Coba ambil data user dari Memory (Cek Int dan String Key)
+    mem_data = bot_set.user_data.get(user_id)
+    if not mem_data:
+        mem_data = bot_set.user_data.get(str(user_id), {})
+    
+    # DEBUG: Intip isi memori untuk user ini
+    # LOGGER.info(f"[DEBUG UTILS] ID: {user_id} | Type: {type(user_id)} | MEM: {mem_data}")
 
-    def get_bool(key, global_default):
-        val = user_dict.get(key)
-        # Jika val ada (True/False), kembalikan val.
-        if val is not None:
-            return bool(val)
-        # Jika tidak ada di user, cek global default.
-        if global_default is not None:
-            return bool(global_default)
-        # Jika semua None, default False
+    # 3. Fungsi cek Key (Lowercase & Uppercase)
+    def check(key_base):
+        # Cek lowercase di User Memory
+        if key_base.lower() in mem_data:
+            return bool(mem_data[key_base.lower()])
+        # Cek Uppercase di User Memory (Jaga-jaga legacy)
+        if key_base.upper() in mem_data:
+            return bool(mem_data[key_base.upper()])
+        
+        # Cek Global Default (bot_set)
+        if hasattr(bot_set, key_base.lower()):
+            return bool(getattr(bot_set, key_base.lower()))
+            
         return False
 
-    pl_zip = get_bool("playlist_zip", getattr(bot_set, 'playlist_zip', False))
-    al_zip = get_bool("album_zip", getattr(bot_set, 'album_zip', False))
-    ar_zip = get_bool("artist_zip", getattr(bot_set, 'artist_zip', False))
-    poster = get_bool("art_poster", getattr(bot_set, 'art_poster', False))
+    pl_zip = check("playlist_zip")
+    al_zip = check("album_zip")
+    ar_zip = check("artist_zip")
+    poster = check("art_poster")
 
     return (pl_zip, al_zip, ar_zip, poster)
 # ----------------------------------------------
