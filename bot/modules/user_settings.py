@@ -466,7 +466,10 @@ async def uset_hra_instr_handler(client, query):
         "Contoh:\n"
         "<code>/highresaudio_login myemail@gmail.com rahasia123</code>"
     )
-    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_hra_auth")]]
+    
+    # Tambahkan style=ButtonStyle.PRIMARY agar warna BIRU
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_hra_auth", style=ButtonStyle.PRIMARY)]]
+    
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
