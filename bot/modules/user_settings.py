@@ -412,15 +412,25 @@ async def uset_hra_auth_handler(client, query):
         return
     
     user_id = query.from_user.id
+    
     # Cek apakah user punya sesi (Logika manual karena get_client HRA mengembalikan objek/None)
+    # Pastikan highresaudio_manager sudah diimport dan ada
+    if not highresaudio_manager:
+        return await query.answer("Modul HighResAudio tidak aktif.", show_alert=True)
+
     client_obj = highresaudio_manager.get_client(user_id)
+    
     # Pastikan client yang didapat benar-benar milik user (ada di dict user_clients)
     has_session = user_id in highresaudio_manager.user_clients
     
     text = "🔐 **HIGHRESAUDIO PRIVATE SESSION**\n\n"
     
     if has_session and client_obj:
-        email_masked = client_obj.email
+        # --- PERBAIKAN DI SINI ---
+        # Gunakan getattr untuk mencegah error jika atribut .email tidak ada
+        # Kita coba cari 'email', kalau tidak ada cari 'username', kalau tidak ada pakai 'Unknown User'
+        email_masked = getattr(client_obj, 'email', getattr(client_obj, 'username', 'Unknown User'))
+        
         text += f"✅ **Status: LOGGED IN**\n"
         text += f"👤 Akun: <code>{email_masked}</code>\n"
         text += "Bot menggunakan akun ini khusus untuk Anda."
