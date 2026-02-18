@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/uploder.py] - FIXED SETTINGS (ZIP & POSTER)
+# [FILE: bot/helpers/uploder.py] - FIXED SETTINGS & AUTO-ZIP GENERATION
 
 import os
 import asyncio
@@ -181,16 +181,20 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     
     return None
 
-# --- TASK HANDLERS (FIXED ZIP & POSTER) ---
+# --- TASK HANDLERS (FIXED SETTINGS & AUTO ZIP) ---
 
 async def album_upload(metadata, user):
     user_dict = user.copy()
     user_settings = bot_set.user_data.get(user['user_id'], {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # [FIX] Menggunakan kunci lowercase untuk konsistensi dengan user_settings.py
-    is_zip = user_settings.get("album_zip", False)
-    show_poster = user_settings.get("art_poster", False)
+    # [FIX] Gunakan fetch_zip_settings agar membaca default global + user setting (lowercase)
+    _, is_zip, _, show_poster = fetch_zip_settings(user)
+
+    # [FIX] Auto-Generate ZIP jika setting aktif tapi file zip tidak ada di metadata
+    if is_zip and not metadata.get('zip_path'):
+        if 'bot_msg' in user: await edit_message(user['bot_msg'], "📦 Zipping Album (Force)...")
+        metadata['zip_path'] = await zip_handler(metadata['folderpath'])
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
@@ -200,11 +204,9 @@ async def album_upload(metadata, user):
             caption = create_cloud_caption(metadata)
             caption += f"\n\n🔗 <b>{user_mode.upper()} LINK:</b>\n{link}"
             
-            # Logic Poster untuk Cloud
             if show_poster and metadata.get('poster_msg'):
                 await edit_message(metadata['poster_msg'], caption)
             else:
-                # Hapus pesan poster lama jika ada, kirim teks bersih
                 if metadata.get('poster_msg'):
                     try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
                     except: pass
@@ -216,7 +218,6 @@ async def album_upload(metadata, user):
 
     if bot_set.upload_mode == 'Local': await local_upload(metadata, user)
     elif bot_set.upload_mode == 'Telegram':
-        # Logic ZIP Telegram
         if is_zip and metadata.get('zip_path'):
             zip_files = metadata['zip_path']
             if isinstance(zip_files, str): zip_files = [zip_files] 
@@ -228,16 +229,13 @@ async def album_upload(metadata, user):
         # Rclone Mode
         rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
         
-        # LOGIC POSTER FIX
         if show_poster and metadata.get('poster_msg'):
             try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.ALBUM_TEMPLATE, metadata, user))
             except MessageNotModified: pass
         else:
-            # Jika user matikan poster, hapus pesan "Processing..." yang ada gambarnya
             if metadata.get('poster_msg'):
                 try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
                 except: pass
-            # Kirim pesan simple
             await post_simple_message(user, metadata, rclone_link, index_link)
             
     await cleanup(None, metadata, user_dict)
@@ -247,10 +245,14 @@ async def artist_upload(metadata, user):
     user_settings = bot_set.user_data.get(user['user_id'], {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # [FIX] Menggunakan kunci lowercase untuk konsistensi
-    is_zip = user_settings.get("artist_zip", False)
-    show_poster = user_settings.get("art_poster", False)
+    # [FIX] Gunakan fetch_zip_settings
+    _, _, is_zip, show_poster = fetch_zip_settings(user)
     
+    # [FIX] Auto-Generate ZIP
+    if is_zip and not metadata.get('zip_path'):
+        if 'bot_msg' in user: await edit_message(user['bot_msg'], "📦 Zipping Artist (Force)...")
+        metadata['zip_path'] = await zip_handler(metadata['folderpath'])
+
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path']
@@ -282,7 +284,6 @@ async def artist_upload(metadata, user):
     else:
         rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
         
-        # LOGIC POSTER FIX
         if show_poster and metadata.get('poster_msg'):
             try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.ARTIST_TEMPLATE, metadata, user))
             except MessageNotModified: pass
@@ -299,9 +300,13 @@ async def playlist_upload(metadata, user):
     user_settings = bot_set.user_data.get(user_id, {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # [FIX] Menggunakan kunci lowercase untuk konsistensi
-    is_zip = user_settings.get("playlist_zip", False)
-    show_poster = user_settings.get("art_poster", False)
+    # [FIX] Gunakan fetch_zip_settings
+    is_zip, _, _, show_poster = fetch_zip_settings(user)
+
+    # [FIX] Auto-Generate ZIP
+    if is_zip and not metadata.get('zip_path'):
+        if 'bot_msg' in user: await edit_message(user['bot_msg'], "📦 Zipping Playlist (Force)...")
+        metadata['zip_path'] = await zip_handler(metadata['folderpath'])
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
@@ -338,7 +343,6 @@ async def playlist_upload(metadata, user):
         else: 
             await batch_telegram_upload(metadata, user)
     else:
-        # LOGIC POSTER FIX DI SINI
         if bot_set.playlist_sort and not is_zip:
             if bot_set.disable_sort_link: await rclone_upload(user, f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/")
             else:
@@ -354,7 +358,6 @@ async def playlist_upload(metadata, user):
                 try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.PLAYLIST_TEMPLATE, metadata, user))
                 except MessageNotModified: pass
             else:
-                # Jika Poster False -> Hapus pesan lama, kirim simple message
                 if metadata.get('poster_msg'):
                     try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
                     except: pass
