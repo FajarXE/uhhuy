@@ -1050,7 +1050,7 @@ def lyrics_button(user_settings: dict, user_id):
     buttons = []
     
     status = user_settings.get('lyrics_status', False)
-    status_text = "✅ Status: ON" if status else "❌ Status: OFF"
+    status_text = "Status: ON" if status else "Status: OFF"
     status_cb = "uset_ly_off" if status else "uset_ly_on"
     
     # Beri warna merah jika OFF, hijau jika ON
@@ -1066,21 +1066,21 @@ def lyrics_button(user_settings: dict, user_id):
         
         style_lrclib = ButtonStyle.SUCCESS if prov == 'lrclib' else ButtonStyle.DEFAULT
         row_prov.append(InlineKeyboardButton(
-            text=f"{'✅ ' if prov=='lrclib' else ''}LRCLib", 
+            text=f"{'' if prov=='lrclib' else ''}LRCLib", 
             callback_data="uset_ly_p_lrclib", 
             style=style_lrclib
         ))
         
         style_musix = ButtonStyle.SUCCESS if prov == 'musixmatch' else ButtonStyle.DEFAULT
         row_prov.append(InlineKeyboardButton(
-            text=f"{'✅ ' if prov=='musixmatch' else ''}Musixmatch", 
+            text=f"{'' if prov=='musixmatch' else ''}Musixmatch", 
             callback_data="uset_ly_p_musixmatch", 
             style=style_musix
         ))
         
         style_genius = ButtonStyle.SUCCESS if prov == 'genius' else ButtonStyle.DEFAULT
         row_prov.append(InlineKeyboardButton(
-            text=f"{'✅ ' if prov=='genius' else ''}Genius", 
+            text=f"{'' if prov=='genius' else ''}Genius", 
             callback_data="uset_ly_p_genius", 
             style=style_genius
         ))
@@ -1094,14 +1094,14 @@ def lyrics_button(user_settings: dict, user_id):
         
         style_plain = ButtonStyle.SUCCESS if l_type == 'plain' else ButtonStyle.DEFAULT
         row_type.append(InlineKeyboardButton(
-            text=f"{'✅ ' if l_type=='plain' else ''}Plain (Text)", 
+            text=f"{'' if l_type=='plain' else ''}Plain (Text)", 
             callback_data="uset_ly_t_plain", 
             style=style_plain
         ))
         
         style_synced = ButtonStyle.SUCCESS if l_type == 'synced' else ButtonStyle.DEFAULT
         row_type.append(InlineKeyboardButton(
-            text=f"{'✅ ' if l_type=='synced' else ''}Synced (LRC)", 
+            text=f"{'' if l_type=='synced' else ''}Synced (LRC)", 
             callback_data="uset_ly_t_synced", 
             style=style_synced
         ))
