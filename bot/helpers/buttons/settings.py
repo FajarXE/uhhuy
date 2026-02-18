@@ -849,6 +849,7 @@ def kk_button(quality: dict, user_id: int = None):
     usetting = user_id is not None
     prefix = "kkbQ" if not usetting else f"ukks"
     row = []
+    
     display_text_map = {
         "128k": "MP3 128k",
         "192k": "MP3 192k",
@@ -856,17 +857,27 @@ def kk_button(quality: dict, user_id: int = None):
         "hifi": "FLAC 16-bit",
         "hires": "FLAC 24-bit"
     }
+    
     for i, (key, value) in enumerate(quality.items()):
-        callback_text = display_text_map.get(key)
-        # Style check
-        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+        # Ambil teks bersih dari map
+        clean_text = display_text_map.get(key)
+        
+        # 1. Cek Warna: Gunakan value asli (yang mungkin ada emoji ✅)
+        is_selected = "✅" in value
+        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
 
-        if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+        if clean_text:
+            # 2. Buat Tombol: Gunakan clean_text sebagai label tombol (Tanpa Emoji)
+            row.append(InlineKeyboardButton(
+                text=clean_text, 
+                callback_data=f"{prefix}_{clean_text}", 
+                style=btn_style
+            ))
             
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
+            
     if usetting:
         buttons.append(
             [
@@ -874,6 +885,7 @@ def kk_button(quality: dict, user_id: int = None):
             ]
         )
         return InlineKeyboardMarkup(buttons)
+        
     main_button, close_button = fetch_base_buttons()
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
@@ -883,6 +895,7 @@ def np_button(quality: dict, user_id: int = None):
     usetting = user_id is not None
     prefix = "npQ" if not usetting else f"unps"
     row = []
+    
     display_text_map = {
         "FLAC": "FLAC (HiRes/Lossless)",
         "MP3_320": "AAC 320k",
@@ -890,24 +903,40 @@ def np_button(quality: dict, user_id: int = None):
         "MP3_128": "AAC 128k",
         "MP3_64": "HE-AAC 64k"
     }
+    
     for i, (key, value) in enumerate(quality.items()):
-        callback_text = display_text_map.get(key)
-        # Style check
-        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+        # Ambil teks bersih dari map
+        clean_text = display_text_map.get(key)
+        
+        # 1. Cek Warna: Gunakan value asli (yang mungkin ada emoji ✅)
+        is_selected = "✅" in value
+        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
 
-        if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+        if clean_text:
+            # 2. Buat Tombol: 
+            # text=clean_text -> Agar tampilan tombol bersih (Tanpa Emoji)
+            row.append(InlineKeyboardButton(
+                text=clean_text, 
+                callback_data=f"{prefix}_{clean_text}", 
+                style=btn_style
+            ))
             
+        # Logika baris (max 2 tombol per baris)
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
+            
     if usetting:
+        # Jika Anda ingin menambahkan tombol Auth Napster (Opsional, sesuaikan kebutuhan)
+        # buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_nap_auth", style=ButtonStyle.PRIMARY)])
+        
         buttons.append(
             [
                 InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
         return InlineKeyboardMarkup(buttons)
+        
     main_button, close_button = fetch_base_buttons()
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
@@ -917,22 +946,35 @@ def id_button(quality: dict, user_id: int = None):
     usetting = user_id is not None
     prefix = "idQ" if not usetting else f"uids"
     row = []
+    
     display_text_map = {
         "FLAC": "FLAC",
         "MP3_320": "AAC 320k",
         "MP3_160": "AAC 160k"
     }
+    
     for i, (key, value) in enumerate(quality.items()):
-        callback_text = display_text_map.get(key)
-        # Style check
-        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+        # Ini adalah teks bersih (Tanpa Emoji)
+        clean_text = display_text_map.get(key)
+        
+        # 1. Cek Warna: Gunakan value asli (yang mungkin ada emoji ✅)
+        is_selected = "✅" in value
+        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
 
-        if callback_text:
-            row.append(InlineKeyboardButton(value, callback_data=f"{prefix}_{callback_text}", style=btn_style))
+        if clean_text:
+            # 2. Buat Tombol:
+            # text=clean_text -> Agar tampilan tombol bersih
+            # callback_data -> Tetap menggunakan clean_text sesuai pola
+            row.append(InlineKeyboardButton(
+                text=clean_text, 
+                callback_data=f"{prefix}_{clean_text}", 
+                style=btn_style
+            ))
             
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
+            
     if usetting:
         buttons.append(
             [
@@ -940,6 +982,7 @@ def id_button(quality: dict, user_id: int = None):
             ]
         )
         return InlineKeyboardMarkup(buttons)
+        
     main_button, close_button = fetch_base_buttons()
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
