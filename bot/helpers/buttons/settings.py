@@ -481,7 +481,7 @@ def qb_button(qualities: dict, user_id: int = 0):
     if usetting:
         inline_keyboard.append(
             [
-                InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.SUCCESS)
+                InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.PRIMARY)
             ]
         )
         
@@ -562,7 +562,7 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
         inline_keyboard.append([InlineKeyboardButton(text=mqa_text, callback_data=mqa_callback, style=mqa_style)])
         inline_keyboard.append([InlineKeyboardButton(text=convert_text, callback_data=convert_callback, style=convert_style)])
         
-        inline_keyboard.append([InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT", callback_data="utd_auth_menu", style=ButtonStyle.SUCCESS)])
+        inline_keyboard.append([InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="utd_auth_menu", style=ButtonStyle.PRIMARY)])
         inline_keyboard.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
         
         return InlineKeyboardMarkup(inline_keyboard)
@@ -612,7 +612,7 @@ def bp_button(quality: dict, user_id: int = None):
             buttons.append(row)
             row = []
     if usetting:
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bp_auth", style=ButtonStyle.SUCCESS)])
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bp_auth", style=ButtonStyle.PRIMARY)])
         buttons.append(
             [
                 InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
@@ -661,7 +661,7 @@ def bs_button(quality: dict, user_id: int = None):
             buttons.append(row)
             row = []
     if usetting:
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bs_auth", style=ButtonStyle.SUCCESS)])
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bs_auth", style=ButtonStyle.PRIMARY)])
         buttons.append(
             [
                 InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
@@ -765,7 +765,7 @@ def dz_button(quality: dict, user_id: int = None):
             row = []
     
     if usetting:
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_dz_auth", style=ButtonStyle.SUCCESS)])
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_dz_auth", style=ButtonStyle.PRIMARY)])
         buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
         return InlineKeyboardMarkup(buttons)
 
@@ -1006,7 +1006,7 @@ def hra_button(user_id: int = None):
     buttons.append([InlineKeyboardButton("FLAC (Lossless) ✅", callback_data="ignore", style=ButtonStyle.SUCCESS)])
     
     if usetting:
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_hra_auth", style=ButtonStyle.SUCCESS)])
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_hra_auth", style=ButtonStyle.PRIMARY)])
         buttons.append(
             [
                 InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
