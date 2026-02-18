@@ -472,7 +472,7 @@ def qb_button(qualities: dict, user_id: int = 0):
             [
                 InlineKeyboardButton(
                     text=quality,
-                    callback_data=f"qbQ_{quality.replace('', '')}" if not usetting else f"uqbs_{quality.replace('', '')}",
+                    callback_data=f"qbQ_{quality.replace('✅️', '')}" if not usetting else f"uqbs_{quality.replace('✅️', '')}",
                     style=btn_style
                 )
             ]
@@ -521,7 +521,7 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
             [
                 InlineKeyboardButton(
                     text=quality,
-                    callback_data=f"tdSQ_{quality.replace('', '')}" if not user_id else f"utdqs_{quality.replace('', '')}",
+                    callback_data=f"tdSQ_{quality.replace('✅️', '')}" if not user_id else f"utdqs_{quality.replace('✅️', '')}",
                     style=btn_style 
                 )
             ]
