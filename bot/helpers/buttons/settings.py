@@ -450,7 +450,7 @@ def tidal_auth_buttons(active_clients: list = None):
     inline_keyboard.append(
         [
             InlineKeyboardButton(
-                text="🔙 Back", 
+                text="🔙 Back to Quality", 
                 callback_data="tdP", 
                 style=ButtonStyle.PRIMARY
             )
@@ -540,21 +540,21 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
     if usetting:
         # Logika MQA Fix
         if user_mqa_fix == "ON":
-            mqa_text = "✅ MQA Fix: ON"
+            mqa_text = "MQA Fix: ON"
             mqa_callback = "utdqs_mqa_OFF"
             mqa_style = ButtonStyle.SUCCESS  # Hijau jika ON
         else:
-            mqa_text = "❌ MQA Fix: OFF"
+            mqa_text = "MQA Fix: OFF"
             mqa_callback = "utdqs_mqa_ON"
             mqa_style = ButtonStyle.DANGER   # Merah jika OFF
         
         # Logika Convert M4A
         if user_convert_m4a == "ON":
-            convert_text = "✅ Convert M4A: ON"
+            convert_text = "Convert M4A: ON"
             convert_callback = "utdqs_convert_OFF"
             convert_style = ButtonStyle.SUCCESS # Hijau jika ON
         else:
-            convert_text = "❌ Convert M4A: OFF"
+            convert_text = "Convert M4A: OFF"
             convert_callback = "utdqs_convert_ON"
             convert_style = ButtonStyle.DANGER  # Merah jika OFF
             
@@ -708,7 +708,7 @@ def qb_user_auth_buttons(accounts_list: list):
     buttons = []
     
     if accounts_list:
-        buttons.append([InlineKeyboardButton("🔻 KLIK UNTUK MENGHAPUS 🔻", callback_data="ignore")])
+        buttons.append([InlineKeyboardButton("🔻 CLICK BELOW TO DELETE 🔻", callback_data="ignore")])
         for acc in accounts_list:
             label = acc.get('label', 'Unknown')
             q_uid = acc.get('user_id', '0')
@@ -718,9 +718,9 @@ def qb_user_auth_buttons(accounts_list: list):
             buttons.append([InlineKeyboardButton(btn_text, callback_data=callback, style=ButtonStyle.DANGER)])
             
     # Style: SUCCESS
-    buttons.append([InlineKeyboardButton("➕ TAMBAH AKUN LAIN", callback_data="uset_qb_instr", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT", callback_data="uset_qb_instr", style=ButtonStyle.SUCCESS)])
     # Style: PRIMARY
-    buttons.append([InlineKeyboardButton("🔙 KEMBALI", callback_data="uset_qobuz", style=ButtonStyle.PRIMARY)])
+    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_qobuz", style=ButtonStyle.PRIMARY)])
     
     return InlineKeyboardMarkup(buttons)
 
@@ -728,7 +728,7 @@ def qb_user_auth_buttons(accounts_list: list):
 def deezer_user_auth_buttons(accounts_list: list):
     buttons = []
     if accounts_list:
-        buttons.append([InlineKeyboardButton("🔻 KLIK UNTUK MENGHAPUS 🔻", callback_data="ignore")])
+        buttons.append([InlineKeyboardButton("🔻 CLICK BELOW TO DELETE 🔻", callback_data="ignore")])
         for acc in accounts_list:
             label = acc.get('label', 'Unknown')
             uid = acc.get('user_id', '0')
@@ -737,8 +737,8 @@ def deezer_user_auth_buttons(accounts_list: list):
             # Style: DANGER
             buttons.append([InlineKeyboardButton(btn_text, callback_data=callback, style=ButtonStyle.DANGER)])
             
-    buttons.append([InlineKeyboardButton("➕ TAMBAH AKUN LAIN", callback_data="uset_dz_instr", style=ButtonStyle.SUCCESS)])
-    buttons.append([InlineKeyboardButton("🔙 KEMBALI", callback_data="uset_deezer", style=ButtonStyle.PRIMARY)])
+    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT", callback_data="uset_dz_instr", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_deezer", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -995,7 +995,7 @@ def highresaudio_user_auth_buttons(is_logged_in: bool):
     else:
         buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT", callback_data="uset_hra_instr", style=ButtonStyle.SUCCESS)])
         
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="uset_highresaudio", style=ButtonStyle.PRIMARY)])
+    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_highresaudio", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
 def hra_button(user_id: int = None):
