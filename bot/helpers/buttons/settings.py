@@ -718,7 +718,7 @@ def qb_user_auth_buttons(accounts_list: list):
             buttons.append([InlineKeyboardButton(btn_text, callback_data=callback, style=ButtonStyle.DANGER)])
             
     # Style: SUCCESS
-    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT", callback_data="uset_qb_instr", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT (USER ID & TOKEN)", callback_data="uset_qb_instr", style=ButtonStyle.SUCCESS)])
     # Style: PRIMARY
     buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_qobuz", style=ButtonStyle.PRIMARY)])
     
@@ -737,7 +737,7 @@ def deezer_user_auth_buttons(accounts_list: list):
             # Style: DANGER
             buttons.append([InlineKeyboardButton(btn_text, callback_data=callback, style=ButtonStyle.DANGER)])
             
-    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT", callback_data="uset_dz_instr", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT (ARL)", callback_data="uset_dz_instr", style=ButtonStyle.SUCCESS)])
     buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_deezer", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
