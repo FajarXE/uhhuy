@@ -218,7 +218,7 @@ async def refresh_stats_callback(client, query: CallbackQuery):
     
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh")],
-        [InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")]
+        [InlineKeyboardButton("❌ Tutup", callback_data="stats_close")]
     ])
     
     try:
@@ -233,6 +233,6 @@ async def refresh_stats_callback(client, query: CallbackQuery):
         await query.answer("✅ Data sudah paling update!")
 
 # --- CALLBACK: CLOSE ---
-@Client.on_callback_query(filters.regex("^rnd_close$"))
+@Client.on_callback_query(filters.regex("^stats_close$"))
 async def close_callback(client, query: CallbackQuery):
     await query.message.delete()
