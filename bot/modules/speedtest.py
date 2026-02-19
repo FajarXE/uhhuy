@@ -6,6 +6,8 @@ import time
 from pyrogram import Client, filters
 from config import Config
 
+from bot.settings import bot_set
+
 # --- CLASS PEREDAM OUTPUT ---
 class SuppressOutput:
     def __enter__(self):
@@ -21,9 +23,13 @@ class SuppressOutput:
         sys.stderr = self._original_stderr
 
 # --- HANDLER ---
-# [PERUBAHAN] Menghapus '& admin_only' agar semua user bisa akses
 @Client.on_message(filters.command(["speedtest", "speed"]))
 async def speedtest_handler(client, message):
+    # Pengecekan: Jika Bot Public False, dan user bukan admin/auth, bot akan diam.
+    user_id = message.from_user.id
+    if not bot_set.bot_public and user_id not in bot_set.auth_users and user_id not in bot_set.admins:
+        return
+        
     m = await message.reply_text("🚀 **Menjalankan Speedtest...**\nMohon tunggu...", quote=True)
     
     try:
