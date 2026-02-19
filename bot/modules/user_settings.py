@@ -256,8 +256,8 @@ async def uset_bp_instr_handler(client, query):
         "Contoh:\n"
         "<code>/beatport_login myemail@gmail.com rahasia123</code>"
     )
-    # Tombol Back
-    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_bp_auth")]]
+    # Tombol Back (Warna Biru)
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_bp_auth", style=ButtonStyle.PRIMARY)]]
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
@@ -357,7 +357,9 @@ async def uset_bs_instr_handler(client, query):
         "Contoh:\n"
         "<code>/beatsource_login myemail@gmail.com rahasia123</code>"
     )
-    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_bs_auth")]]
+    style=ButtonStyle.PRIMARY
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_bs_auth", style=ButtonStyle.PRIMARY)]]
+    
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
