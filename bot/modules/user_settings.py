@@ -685,8 +685,14 @@ async def uset_tidal_auth_menu(client, query):
     
     user_id = query.from_user.id
     
-    # Ambil daftar akun dari memori (Berbentuk List Array)
-    accounts_list = bot_set.user_data.get(user_id, {}).get('tidal_accounts', [])
+    # Ambil daftar akun dari memori
+    user_data_mem = bot_set.user_data.get(user_id, {})
+    accounts_list = user_data_mem.get('tidal_accounts', [])
+    
+    # [FIX] Cek jika akun lama masih ada tapi belum dimasukkan ke list baru
+    if not accounts_list and user_data_mem.get('tidal_auth'):
+        accounts_list = [user_data_mem['tidal_auth']]
+        user_data_mem['tidal_accounts'] = accounts_list
     
     text = "**🔐 TIDAL PRIVATE SESSION (MULTI-ACCOUNT)**\n\n"
     buttons = []
@@ -698,14 +704,13 @@ async def uset_tidal_auth_menu(client, query):
         for i, acc in enumerate(accounts_list):
             uid = acc.get('user_id', 'Unknown')
             country = acc.get('country_code', '??')
-            sub = acc.get('sub_type', 'Premium') # Mengambil info plan
+            sub = acc.get('sub_type', 'Premium') 
             
             text += f"**{i+1}. User ID:** `{uid}`\n"
             text += f"   🏳️ Region: `{country}` | 💎 Plan: `{sub}`\n\n"
             
         text += "👇 **Klik tombol sampah (🗑️) di bawah untuk menghapus akun tertentu.**\n"
         
-        # Tambahkan Tombol Hapus Spesifik per Akun
         buttons.append([InlineKeyboardButton("🔻 HAPUS AKUN (KLIK DI BAWAH) 🔻", callback_data="ignore")])
         for acc in accounts_list:
             uid = acc.get('user_id', 'Unknown')
@@ -719,7 +724,6 @@ async def uset_tidal_auth_menu(client, query):
         text += "Bot menggunakan akun Global (Shared) untuk Anda.\n"
         text += "Login akun sendiri untuk akses region/konten khusus dan kualitas HiRes pribadi.\n"
         
-    # Tombol Login (Selalu muncul untuk tambah akun)
     buttons.append([
         InlineKeyboardButton(
             "➕ LOGIN ACCOUNT (TV CODE)", 
@@ -728,7 +732,6 @@ async def uset_tidal_auth_menu(client, query):
         )
     ])
 
-    # Tombol Back
     buttons.append([
         InlineKeyboardButton(
             "🔙 Back", 
@@ -799,27 +802,32 @@ async def uset_tidal_login_verify(client, query):
                 InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="utd_auth_menu")]])
             )
         
-        # Siapkan Data Akun Baru
         auth_data = {
             'refresh_token': temp_client.tv_session.refresh_token,
             'country_code': temp_client.tv_session.country_code,
             'user_id': temp_client.tv_session.user_id,
-            'sub_type': sub # Simpan plan untuk ditampilkan di menu
+            'sub_type': sub 
         }
         
-        # --- LOGIKA MULTI-ACCOUNT ---
         user_data_mem = bot_set.user_data.setdefault(user_id, {})
         accounts_list = user_data_mem.get('tidal_accounts', [])
         
-        # Cek Duplikasi agar tidak login akun yang sama 2x
+        # [FIX] Pastikan akun lama dimasukkan list sebelum ditambah baru
+        if not accounts_list and user_data_mem.get('tidal_auth'):
+            accounts_list = [user_data_mem['tidal_auth']]
+        
         if not any(str(acc.get('user_id')) == str(auth_data['user_id']) for acc in accounts_list):
             accounts_list.append(auth_data)
             
-            # Simpan list ke Memori dan Database
             user_data_mem['tidal_accounts'] = accounts_list
-            await database.save_user_settings(user_id, {'tidal_accounts': accounts_list})
+            user_data_mem['tidal_auth'] = None # [FIX] Hancurkan data lama di memory
             
-            # Kirim data ke manager
+            # [FIX] Wajib overwrite tidal_auth jadi None di DB
+            await database.save_user_settings(user_id, {
+                'tidal_accounts': accounts_list,
+                'tidal_auth': None 
+            })
+            
             try:
                 await tidal_manager.add_user_account(user_id, auth_data)
             except: pass
@@ -828,7 +836,6 @@ async def uset_tidal_login_verify(client, query):
         else:
             await query.answer("⚠️ Akun ini sudah ada di daftar Anda.", True)
         
-        # Bersihkan temp session
         await temp_client.close()
         bot_set.user_data[user_id].pop('temp_tidal_auth', None)
         
@@ -839,37 +846,40 @@ async def uset_tidal_login_verify(client, query):
         await edit_message(query.message, f"Error Fatal: {e}")
 
 
-# 4. Hapus Akun Spesifik (Pengganti utd_logout)
+# 4. Hapus Akun Spesifik
 @Client.on_callback_query(filters.regex(r"^utd_rm_(.+)"))
 async def uset_tidal_remove_specific(client, query):
     if not await check_user(msg=query.message): return
     
     user_id = query.from_user.id
-    # Ambil target UID dari regex data (contoh: utd_rm_123456)
     target_uid = query.matches[0].group(1)
     
     user_data_mem = bot_set.user_data.get(user_id, {})
     accounts_list = user_data_mem.get('tidal_accounts', [])
     
-    # Filter list: sisakan akun yang ID-nya TIDAK SAMA dengan target
+    # [FIX] Cek jika akun lama masih nyangkut
+    if not accounts_list and user_data_mem.get('tidal_auth'):
+         accounts_list = [user_data_mem['tidal_auth']]
+         
     new_list = [acc for acc in accounts_list if str(acc.get('user_id')) != str(target_uid)]
     
-    if len(new_list) != len(accounts_list):
-        # Update DB dan Memori
-        user_data_mem['tidal_accounts'] = new_list
-        await database.save_user_settings(user_id, {'tidal_accounts': new_list})
-        
-        # Update ke Manager backend
-        try:
-            if hasattr(tidal_manager, 'remove_specific_user_account'):
-                await tidal_manager.remove_specific_user_account(user_id, target_uid)
-            else:
-                await tidal_manager.remove_user_account(user_id) 
-        except: pass
-        
-        await query.answer(f"✅ Akun {target_uid} berhasil dihapus.", True)
-    else:
-        await query.answer("❌ Akun tidak ditemukan.", True)
+    # Update DB dan Memori
+    user_data_mem['tidal_accounts'] = new_list
+    user_data_mem['tidal_auth'] = None # [FIX] Bersihkan data lama di memory
+    
+    # [FIX] Force tidal_auth = None agar akun lama tidak kembali setelah list kosong
+    await database.save_user_settings(user_id, {
+        'tidal_accounts': new_list, 
+        'tidal_auth': None
+    })
+    
+    # Update ke Manager backend
+    try:
+        if hasattr(tidal_manager, 'remove_specific_user_account'):
+            await tidal_manager.remove_specific_user_account(user_id, target_uid)
+    except: pass
+    
+    await query.answer(f"✅ Akun berhasil dihapus.", True)
         
     await uset_tidal_auth_menu(client, query)
 
