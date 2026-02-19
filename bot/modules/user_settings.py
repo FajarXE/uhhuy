@@ -699,7 +699,7 @@ async def uset_tidal_auth_menu(client, query):
         text += f"🏳️ Region: {country} | 💎 Plan: {sub}\n\n"
         text += "Bot akan menggunakan akun ini KHUSUS untuk Anda."
         
-        # Tombol Logout (Saya tambahkan warna MERAH/DANGER agar sesuai tema)
+        # Tombol Logout (Tetap ada untuk menghapus sesi saat ini)
         buttons.append([
             InlineKeyboardButton(
                 "🚪 LOGOUT SESSION", 
@@ -712,16 +712,18 @@ async def uset_tidal_auth_menu(client, query):
         text += "Bot menggunakan akun Global (Shared) untuk Anda.\n"
         text += "Login akun sendiri untuk akses region/konten khusus dan kualitas HiRes pribadi."
         
-        # Tombol Login (Ubah jadi HIJAU / SUCCESS)
-        buttons.append([
-            InlineKeyboardButton(
-                "➕ LOGIN ACCOUNT (TV CODE)", 
-                callback_data="utd_login_start", 
-                style=ButtonStyle.SUCCESS
-            )
-        ])
+    # --- PERBAIKAN DI SINI ---
+    # Tombol LOGIN ditaruh DI LUAR if/else agar SELALU MUNCUL
+    # (Baik saat sudah login maupun belum, user tetap bisa tambah akun baru/timpa akun lama)
+    buttons.append([
+        InlineKeyboardButton(
+            "➕ ADD / LOGIN ACCOUNT (TV CODE)", 
+            callback_data="utd_login_start", 
+            style=ButtonStyle.SUCCESS
+        )
+    ])
 
-    # Tombol Back (Ubah jadi BIRU / PRIMARY)
+    # Tombol Back
     buttons.append([
         InlineKeyboardButton(
             "🔙 Back", 
