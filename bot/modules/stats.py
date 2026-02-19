@@ -9,6 +9,9 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import Config
 
+# --- TAMBAHAN IMPOR ---
+from bot.settings import bot_set
+
 # Simpan waktu start bot
 BOT_START_TIME = time.time()
 
@@ -189,6 +192,11 @@ All BW    : {total_bw}
 
 @Client.on_message(filters.command(["stats", "status"]))
 async def stats_handler(client, message):
+    # Pengecekan: Jika Bot Public False, dan user bukan admin/auth, bot akan diam.
+    user_id = message.from_user.id
+    if not bot_set.bot_public and user_id not in bot_set.auth_users and user_id not in bot_set.admins:
+        return
+
     msg = await message.reply("🔄 **Mengumpulkan Data...**", quote=True)
     
     # Ambil text dari fungsi generator
