@@ -24,7 +24,7 @@ class TidalLoginManager:
     """
     Mengelola sesi Tidal:
     1. Global Clients (Dikelola Admin, digunakan bersama/random)
-    2. User Clients (Dikelola User, private session)
+    2. User Clients (Dikelola User, private session, Multi-Account dengan Load Balancing)
     """
     def __init__(self):
         # --- GLOBAL POOL (ADMIN) ---
@@ -32,7 +32,7 @@ class TidalLoginManager:
         self._client_cycler = None
         
         # --- PRIVATE POOL (USER) ---
-        # Mapping: user_id (int) -> TidalApi instance
+        # Format Baru Mapping: user_id -> {'clients': [TidalApi, ...], 'cycler': itertools.cycle}
         self.user_clients = {}
         
         # --- DEFAULT SETTINGS ---
@@ -106,7 +106,6 @@ class TidalLoginManager:
         client = TidalApi()
         try:
             await client.login_from_saved(auth_data)
-            # LOGGER.info(f"Tidal Manager: Login Akun #{account_id} OK (ID: {client.user_id})")
             return client
         except Exception as e:
             LOGGER.error(f"Tidal Manager: Gagal login Akun #{account_id}: {e}")
@@ -121,14 +120,12 @@ class TidalLoginManager:
         Mendapatkan klien Global secara acak/bergilir.
         """
         if not self._client_cycler:
-            # Coba re-init cycler jika list ada tapi cycler mati
             if self.clients:
                  self._client_cycler = itertools.cycle(self.clients)
                  return next(self._client_cycler)
             return None
         
         try:
-            # Acak sedikit agar tidak terpaku urutan
             clients_list = list(self.clients)
             if len(clients_list) > 1:
                 random.shuffle(clients_list)
@@ -140,31 +137,46 @@ class TidalLoginManager:
 
     async def get_user_client(self, user_id: int) -> TidalApi | None:
         """
-        Mendapatkan klien KHUSUS milik user (Private Session).
-        Urutan: Cek Memory -> Cek DB -> Login -> Return.
+        Mendapatkan klien KHUSUS milik user (Private Session) menggunakan Load Balancing (Cycler).
         """
-        # 1. Cek Memori
-        if user_id in self.user_clients:
-            return self.user_clients[user_id]
-        
-        # 2. Cek Database User
-        user_data = await database.get_user_settings(user_id)
-        if not user_data or 'tidal_auth' not in user_data or not user_data['tidal_auth']:
-            return None
+        # 1. Jika belum ada di memori, baca dari DB dan Load SEMUA akun user tersebut
+        if user_id not in self.user_clients:
+            user_data = await database.get_user_settings(user_id)
+            if not user_data:
+                return None
+                
+            # Mengambil dari list format baru, fallback ke format lama jika transisi
+            accounts_list = user_data.get('tidal_accounts', [])
+            if not accounts_list and user_data.get('tidal_auth'):
+                accounts_list = [user_data['tidal_auth']]
+                
+            if not accounts_list:
+                return None
+                
+            LOGGER.info(f"Tidal Manager: Memuat {len(accounts_list)} sesi privat untuk User {user_id}...")
+            clients = []
+            for auth_data in accounts_list:
+                client = TidalApi()
+                try:
+                    await client.login_from_saved(auth_data)
+                    clients.append(client)
+                except Exception as e:
+                    LOGGER.error(f"Tidal Manager: Gagal memuat 1 sesi privat user {user_id}: {e}")
             
-        # 3. Login Session User
-        LOGGER.info(f"Tidal Manager: Memuat sesi privat untuk User {user_id}...")
-        client = TidalApi()
-        try:
-            auth_data = user_data['tidal_auth']
-            await client.login_from_saved(auth_data)
-            
-            # Simpan ke memori
-            self.user_clients[user_id] = client
-            return client
-        except Exception as e:
-            LOGGER.error(f"Tidal Manager: Gagal memuat sesi privat user {user_id}: {e}")
-            return None
+            if clients:
+                # Simpan list ke memory lengkap dengan cycler-nya
+                self.user_clients[user_id] = {
+                    'clients': clients,
+                    'cycler': itertools.cycle(clients)
+                }
+            else:
+                return None
+                
+        # 2. Putar akun (Load Balancing per User)
+        pool = self.user_clients.get(user_id)
+        if pool and pool['clients']:
+            return next(pool['cycler'])
+        return None
 
     # ==================================================================
     # MANAJEMEN AKUN (ADD/REMOVE)
@@ -172,45 +184,66 @@ class TidalLoginManager:
 
     # --- USER PRIVATE ---
     async def add_user_account(self, user_id: int, auth_data: dict):
-        """Menyimpan sesi user baru ke Database User & Memory."""
-        # 1. Simpan ke DB
-        await database.save_user_settings(user_id, {'tidal_auth': auth_data})
-        
-        # 2. Hapus sesi lama di memori jika ada
-        if user_id in self.user_clients:
-            try: await self.user_clients[user_id].close()
-            except: pass
-            
-        # 3. Init Session Baru di Memory
+        """Menyimpan sesi user baru ke Memory."""
         client = TidalApi()
         try:
             await client.login_from_saved(auth_data)
-            self.user_clients[user_id] = client
+            
+            # Jika user belum punya pool akun sama sekali, buatkan
+            if user_id not in self.user_clients:
+                self.user_clients[user_id] = {'clients': [], 'cycler': None}
+                
+            # Tambahkan ke daftar akun user di memori
+            self.user_clients[user_id]['clients'].append(client)
+            self.user_clients[user_id]['cycler'] = itertools.cycle(self.user_clients[user_id]['clients'])
+            
             return True, "Login Berhasil"
         except Exception as e:
             return False, str(e)
 
-    async def remove_user_account(self, user_id: int):
-        """Menghapus sesi user private."""
-        # 1. Hapus dari Memory
+    async def remove_specific_user_account(self, user_id: int, target_uid: str):
+        """Menghapus 1 akun spesifik dari pool Private Session User."""
+        target_uid = str(target_uid)
+        
+        # Hapus dari Memory
         if user_id in self.user_clients:
-            try: await self.user_clients[user_id].close()
-            except: pass
+            pool = self.user_clients[user_id]
+            client_to_close = None
+            
+            for c in pool['clients']:
+                if str(c.user_id) == target_uid:
+                    client_to_close = c
+                    break
+                    
+            if client_to_close:
+                try: await client_to_close.close()
+                except: pass
+                pool['clients'].remove(client_to_close)
+                
+                # Refresh Cycler atau Hapus List kalau kosong
+                if pool['clients']:
+                    pool['cycler'] = itertools.cycle(pool['clients'])
+                else:
+                    del self.user_clients[user_id]
+        return True
+
+    async def remove_user_account(self, user_id: int):
+        """(Legacy/Fallback) Menghapus SEMUA sesi user private."""
+        if user_id in self.user_clients:
+            for client in self.user_clients[user_id]['clients']:
+                try: await client.close()
+                except: pass
             del self.user_clients[user_id]
         
-        # 2. Hapus dari DB
-        await database.save_user_settings(user_id, {'tidal_auth': None})
+        await database.save_user_settings(user_id, {'tidal_accounts': [], 'tidal_auth': None})
         return True
 
     # --- GLOBAL ADMIN (REMOVE SPECIFIC) ---
     async def remove_specific_account(self, target_user_id: str) -> bool:
-        """
-        Menghapus akun Global tertentu berdasarkan User ID dari Memory dan Database.
-        """
+        """Menghapus akun Global tertentu berdasarkan User ID."""
         target_user_id = str(target_user_id)
         client_removed = False
 
-        # 1. Hapus dari Memory (Active Clients)
         client_to_close = None
         for client in self.clients:
             if str(client.user_id) == target_user_id:
@@ -223,17 +256,14 @@ class TidalLoginManager:
             LOGGER.info(f"Tidal Manager: Klien Global {target_user_id} dihapus dari memori.")
             client_removed = True
             
-            # Refresh Cycler
             if self.clients:
                 self._client_cycler = itertools.cycle(self.clients)
             else:
                 self._client_cycler = None
 
-        # 2. Hapus dari Database Global
         all_settings = await database.get_variable()
         accounts_list = all_settings.get("TIDAL_ACCOUNTS_LIST", [])
         
-        # Filter list: Ambil semua KECUALI yang ID-nya sama dengan target
         original_len = len(accounts_list)
         new_accounts_list = [
             acc for acc in accounts_list 
@@ -302,16 +332,17 @@ class TidalLoginManager:
 
     async def shutdown(self):
         """Menutup semua sesi klien TidalApi (Global & User)."""
-        LOGGER.info(f"Tidal Manager: Shutdown... Menutup {len(self.clients)} Global & {len(self.user_clients)} User clients.")
+        LOGGER.info(f"Tidal Manager: Shutdown... Menutup {len(self.clients)} Global Clients.")
         
         tasks = []
         # Close Global
         for client in self.clients:
             tasks.append(client.close())
             
-        # Close User Private
-        for client in self.user_clients.values():
-            tasks.append(client.close())
+        # Close User Private (Nested List)
+        for pool in self.user_clients.values():
+            for client in pool['clients']:
+                tasks.append(client.close())
         
         if tasks:
             try:
