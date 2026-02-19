@@ -1423,7 +1423,7 @@ async def uset_tidal(client, query):
         logging.error(format_exc())
         
 
-# --- HANDLER SETTING QOBUZ SPECIFIC ---
+# # --- HANDLER SETTING QOBUZ SPECIFIC ---
 @Client.on_callback_query(filters.regex("^uqbs"))
 async def uset_qobuz(client, query):
     m = query.message
@@ -1433,17 +1433,32 @@ async def uset_qobuz(client, query):
     to_set = query.data.split('_')[1]
     qobuz_qual = list(filter(lambda x: qobuz[x] == to_set, qobuz))[0]
     
-    if not BOT_QOBUZ_CLIENTS:
-        await query.answer("Layanan Qobuz tidak aktif!", show_alert=True)
-        return
-
+    # Pindahkan deklarasi user_id ke sini agar bisa dipakai untuk cek sesi private
     user_id = query.from_user.id
     
+    # --- PERBAIKAN LOGIKA PENGECEKAN KLIEN QOBUZ ---
+    has_client = False
+    if BOT_QOBUZ_CLIENTS:
+        has_client = True
+    elif qobuz_manager and qobuz_manager.has_private_session(user_id):
+        has_client = True
+        
+    if not has_client:
+        await query.answer("Layanan Qobuz tidak aktif!", show_alert=True)
+        return
+    # --- BATAS PERBAIKAN ---
+
     bot_set.user_data.setdefault(user_id, {})["qobuz_qual"] = int(qobuz_qual)
     await database.save_user_settings(user_id, {"qobuz_qual": int(qobuz_qual)})
     
-    for q_client in BOT_QOBUZ_CLIENTS.values():
-        await q_client.setup_quality(int(user_id), int(qobuz_qual))
+    # Terapkan kualitas ke Global Clients jika bot memilikinya
+    if BOT_QOBUZ_CLIENTS:
+        for q_client in BOT_QOBUZ_CLIENTS.values():
+            await q_client.setup_quality(int(user_id), int(qobuz_qual))
+            
+    # Terapkan kualitas ke Private Clients melalui manager
+    if qobuz_manager:
+        await qobuz_manager.setup_quality(user_id, int(qobuz_qual))
     
     await uset_cb(client, query, "qobuz")
 
@@ -1498,11 +1513,23 @@ async def uset_beatsource(client, query):
     if not to_set:
         return await query.answer("Kualitas tidak valid.", True)
 
-    if not beatsource_manager or not beatsource_manager.clients:
+    # 1. Pindahkan user_id ke sini agar bisa digunakan untuk validasi
+    user_id = query.from_user.id
+
+    # --- 2. PERBAIKAN LOGIKA PENGECEKAN KLIEN BEATSOURCE ---
+    has_client = False
+    if beatsource_manager:
+        # Pengecekan aman untuk global clients atau clients biasa
+        if getattr(beatsource_manager, 'global_clients', []) or getattr(beatsource_manager, 'clients', []):
+            has_client = True
+        # Pengecekan untuk private session milik user
+        elif beatsource_manager.has_private_session(user_id):
+            has_client = True
+
+    if not has_client:
         await query.answer("Layanan Beatsource tidak aktif!", show_alert=True)
         return
-
-    user_id = query.from_user.id
+    # --- BATAS PERBAIKAN ---
     
     await beatsource_manager.setup_quality(user_id, to_set) 
     bot_set.user_data.setdefault(user_id, {})['beatsource_qual'] = to_set 
@@ -1556,10 +1583,20 @@ async def uset_deezer(client, query):
     to_set = qual_map_display.get(to_set_display)
     if not to_set:
         return await query.answer("Kualitas tidak valid.", True)
-    if not deezer_manager or not deezer_manager.clients:
+    
+    user_id = query.from_user.id
+    
+    # --- PERBAIKAN LOGIKA PENGECEKAN KLIEN ---
+    has_client = False
+    if deezer_manager:
+        # Cek apakah ada akun global ATAU akun private milik user
+        if deezer_manager.clients or deezer_manager.has_private_session(user_id):
+            has_client = True
+
+    if not has_client:
         await query.answer("Layanan Deezer tidak aktif!", show_alert=True)
         return
-    user_id = query.from_user.id
+    # --- BATAS PERBAIKAN ---
 
     await deezer_manager.setup_quality(user_id, to_set) 
     bot_set.user_data.setdefault(user_id, {})['deezer_qual'] = to_set 
