@@ -205,7 +205,7 @@ async def stats_handler(client, message):
     # Tombol Refresh
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh")],
-        [InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")]
+        [InlineKeyboardButton("❌ Tutup", callback_data="stats_close")]
     ])
     
     await msg.edit(final_text, reply_markup=buttons)
