@@ -171,26 +171,25 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
     
     # Booklet
     booklet_path = None
-    if not album_meta.get('booklet_url'):
-        try:
-            raw_album = await client.get_album_meta(item_id)
-            if 'goodies' in raw_album and raw_album['goodies']:
-                for goodie in raw_album['goodies']:
-                    if goodie.get('url'):
-                        album_meta['booklet_url'] = goodie['url']
-                        break
-        except Exception as e:
-            LOGGER.warning(f"Gagal mengambil URL goodies: {e}")
-
     if album_meta.get('booklet_url'):
         b_url = album_meta['booklet_url']
         temp_path = os.path.join(album_meta['folderpath'], "Booklet.pdf")
         
-        err = await download_file(b_url, temp_path)
+        # Bypass S3 / CloudFront Hotlink Protection menggunakan Referer & Origin
+        browser_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/111.0",
+            "Referer": "https://play.qobuz.com/",
+            "Origin": "https://play.qobuz.com",
+            "Accept": "application/pdf,application/octet-stream,*/*"
+        }
+        
+        err = await download_file(b_url, temp_path, headers=browser_headers)
         
         if err or not os.path.exists(temp_path):
-            LOGGER.info("Mencoba ulang unduh booklet dengan Qobuz Headers...")
+            LOGGER.info("Mencoba ulang unduh booklet dengan Qobuz API Headers + Referer...")
             q_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/111.0",
+                "Referer": "https://play.qobuz.com/",
                 "X-App-Id": getattr(client, 'id', ''),
                 "X-User-Auth-Token": getattr(client, 'uat', '')
             }
