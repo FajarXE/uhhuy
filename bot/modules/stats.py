@@ -202,10 +202,10 @@ async def stats_handler(client, message):
     # Ambil text dari fungsi generator
     final_text = generate_stats_text()
     
-    # Tombol Refresh
+    # Tombol Refresh (Default) dan Tutup (Merah)
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh")],
-        [InlineKeyboardButton("❌ Tutup", callback_data="stats_close")]
+        [InlineKeyboardButton("Close", callback_data="stats_close", style=ButtonStyle.DANGER)]
     ])
     
     await msg.edit(final_text, reply_markup=buttons)
@@ -216,9 +216,10 @@ async def refresh_stats_callback(client, query: CallbackQuery):
     # Ambil data terbaru
     new_text = generate_stats_text()
     
+    # Tombol Refresh (Default) dan Tutup (Merah)
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh")],
-        [InlineKeyboardButton("❌ Tutup", callback_data="stats_close")]
+        [InlineKeyboardButton("Close", callback_data="stats_close", style=ButtonStyle.DANGER)]
     ])
     
     try:
