@@ -98,7 +98,7 @@ class BeatsourceAPI:
             login_url = f"{self.API_URL}auth/login/"
             login_payload = {"username": email, "password": password}
             
-            await asyncio.sleep(random.uniform(1.5, 2.5)) # Simulasi mengetik
+            await asyncio.sleep(random.uniform(1.5, 2.5)) # Simulasi jeda manusia
             
             async with self.session.post(login_url, json=login_payload) as r_login:
                 if r_login.status != 200:
@@ -107,7 +107,7 @@ class BeatsourceAPI:
                         if "non_field_errors" in err:
                             raise BeatsourceError(f"Login gagal: {err['non_field_errors'][0]}")
                     except: pass
-                    raise BeatsourceError(f"Login step 1 gagal: {r_login.status}")
+                    raise BeatsourceError(f"Login step 1 gagal: HTTP {r_login.status}")
 
             cookies = self.session.cookie_jar.filter_cookies(self.API_URL)
             if 'sessionid' not in cookies:
@@ -117,15 +117,16 @@ class BeatsourceAPI:
             auth_url = f"{self.API_URL}auth/o/authorize/"
             auth_params = {
                 "client_id": self.client_id,
-                "response_type": "code",
-                "redirect_uri": self.redirect_uri, # [WAJIB]
+                "response_type": "code"
+                # [PERBAIKAN] redirect_uri DIHAPUS, mengikuti logika OrpheusDL
             }
             
             await asyncio.sleep(random.uniform(0.5, 1.5))
             
             async with self.session.get(auth_url, params=auth_params, allow_redirects=False) as r_auth:
                 if r_auth.status != 302:
-                    raise BeatsourceError(f"Auth step 2 gagal (No redirect): {r_auth.status}")
+                    error_text = await r_auth.text()
+                    raise BeatsourceError(f"Auth step 2 gagal (No redirect): {r_auth.status}. Server: {error_text}")
                 
                 location = r_auth.headers.get('Location')
                 if not location:
@@ -137,22 +138,23 @@ class BeatsourceAPI:
                 except: code = None
                 
                 if not code:
-                    raise BeatsourceError("Gagal mengambil auth code.")
+                    raise BeatsourceError("Gagal mengambil auth code dari URL.")
 
             # 3. Token POST (Tukar Code dengan Token)
             token_url = f"{self.API_URL}auth/o/token/"
             token_payload = {
                 "client_id": self.client_id,
                 "code": code,
-                "grant_type": "authorization_code",
-                "redirect_uri": self.redirect_uri, # [WAJIB]
+                "grant_type": "authorization_code"
+                # [PERBAIKAN] redirect_uri DIHAPUS dari payload token
             }
             
             await asyncio.sleep(random.uniform(0.5, 1.0))
             
             async with self.session.post(token_url, data=token_payload) as r_token:
                 if r_token.status != 200:
-                    raise BeatsourceError(f"Token exchange gagal: {await r_token.text()}")
+                    error_text = await r_token.text()
+                    raise BeatsourceError(f"Token exchange gagal: HTTP {r_token.status}. Detail: {error_text}")
                 
                 js = await r_token.json()
                 self.access_token = js['access_token']
