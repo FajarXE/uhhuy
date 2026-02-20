@@ -196,10 +196,12 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             f"Finished: <code>{deploy.get('finishedAt', 'Running...')}</code>"
         )
         
-        buttons = [[InlineKeyboardButton("🔙 Kembali", callback_data=f"rnd_view_{svc_id}")]]
+        # Tambahkan style=ButtonStyle.PRIMARY agar tombol berwarna biru
+        buttons = [[InlineKeyboardButton("🔙 Back", callback_data=f"rnd_view_{svc_id}", style=ButtonStyle.PRIMARY)]]
         
         if status in ["build_in_progress", "pre_deploy_in_progress", "live_in_progress", "created"]:
-            buttons.insert(0, [InlineKeyboardButton("⛔ BATALKAN DEPLOY", callback_data=f"rnd_cancel_{svc_id}_{deploy_id}")])
+            # Jika Anda ingin tombol BATALKAN DEPLOY menjadi merah, Anda juga bisa menambahkan style=ButtonStyle.DANGER di sini
+            buttons.insert(0, [InlineKeyboardButton("⛔ BATALKAN DEPLOY", callback_data=f"rnd_cancel_{svc_id}_{deploy_id}", style=ButtonStyle.DANGER)])
             
         await query.answer(f"Status: {status}", show_alert=False)
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -262,7 +264,7 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             buttons.append([InlineKeyboardButton(f"{status_icon} {svc['name']}", callback_data=f"rnd_view_{svc['id']}")])
             
         # Tambahkan style=ButtonStyle.DANGER agar tombol berwarna merah
-        buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="rnd_close", style=ButtonStyle.DANGER)])
+        buttons.append([InlineKeyboardButton("Close", callback_data="rnd_close", style=ButtonStyle.DANGER)])
         
         await query.edit_message_text(
             "<b>🎛 Render Control Panel</b>\n\nPilih layanan untuk dikelola:",
