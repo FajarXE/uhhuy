@@ -174,7 +174,12 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
     if album_meta.get('booklet_url'):
         try:
             temp_path = os.path.join(album_meta['folderpath'], "Booklet.pdf")
-            if not await download_file(album_meta['booklet_url'], temp_path): booklet_path = temp_path
+            # Gunakan session Qobuz agar lolos otentikasi header
+            async with client.session.get(album_meta['booklet_url']) as resp:
+                if resp.status == 200:
+                    with open(temp_path, 'wb') as f:
+                        f.write(await resp.read())
+                    booklet_path = temp_path
         except: pass
 
     if album_meta.get('cover') and os.path.exists(album_meta['cover']):
@@ -184,9 +189,6 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
     if album_zip: 
         await edit_message(user['bot_msg'], f"Zipping {album_meta['totaltracks']} tracks...")
         album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-    elif booklet_path and os.path.exists(booklet_path):
-        try: await user['bot_msg'].reply_document(document=booklet_path, caption="Booklet", file_name=f"Booklet.pdf")
-        except: pass
 
     if upload: await album_upload(album_meta, user)
 
