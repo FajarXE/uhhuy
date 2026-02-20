@@ -241,10 +241,12 @@ async def album_upload(metadata, user):
             LOGGER.info("[DEBUG ALBUM] Uploading Batch Tracks (ZIP False/Gagal)")
             await batch_telegram_upload(metadata, user)
             
-            # Kirim Booklet secara terpisah di mode non-zip
+            # --- TAMBAHAN BOOKLET NON-ZIP ---
             booklet_path = os.path.join(metadata.get('folderpath', ''), "Booklet.pdf")
             if os.path.exists(booklet_path):
-                await send_message(user, booklet_path, 'doc', caption=f"📑 **Booklet:** {metadata.get('title', 'Album')}", meta=metadata)
+                LOGGER.info("[DEBUG ALBUM] Uploading Booklet (Non-ZIP)")
+                b_caption = f"📑 **Booklet:** {metadata.get('title', 'Unknown Album')}"
+                await send_message(user, booklet_path, 'doc', caption=b_caption, meta=metadata)
 
     # 4. RCLONE UPLOAD
     else:
