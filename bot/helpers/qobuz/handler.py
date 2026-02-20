@@ -173,33 +173,37 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
     booklet_path = None
     if album_meta.get('booklet_url'):
         b_url = album_meta['booklet_url']
+        
+        # Trik Bypass 1: Suntikkan App ID langsung ke URL (Bypass S3 Token Guard)
+        app_id = getattr(client, 'id', '')
+        uat = getattr(client, 'uat', '')
+        if "?" not in b_url and app_id:
+            b_url = f"{b_url}?app_id={app_id}"
+            
         temp_path = os.path.join(album_meta['folderpath'], "Booklet.pdf")
         
-        # Bypass S3 / CloudFront Hotlink Protection menggunakan Referer & Origin
-        browser_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/111.0",
-            "Referer": "https://play.qobuz.com/",
-            "Origin": "https://play.qobuz.com",
-            "Accept": "application/pdf,application/octet-stream,*/*"
-        }
-        
-        err = await download_file(b_url, temp_path, headers=browser_headers)
-        
-        if err or not os.path.exists(temp_path):
-            LOGGER.info("Mencoba ulang unduh booklet dengan Qobuz API Headers + Referer...")
-            q_headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/111.0",
+        try:
+            # Trik Bypass 2: Gunakan client.session (aiohttp) milik bot yang sudah terotentikasi.
+            # Ini menghindari library 'requests' yang sering di-blacklist WAF CloudFront.
+            dl_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Referer": "https://play.qobuz.com/",
-                "X-App-Id": getattr(client, 'id', ''),
-                "X-User-Auth-Token": getattr(client, 'uat', '')
+                "Origin": "https://play.qobuz.com",
+                "X-App-Id": app_id,
+                "X-User-Auth-Token": uat
             }
-            err = await download_file(b_url, temp_path, headers=q_headers)
-
-        if not err and os.path.exists(temp_path):
-            booklet_path = temp_path
-            LOGGER.info(f"Booklet berhasil diunduh ke: {booklet_path}")
-        else:
-            LOGGER.warning(f"Gagal mengunduh booklet dari semua metode. Error: {err}")
+            
+            LOGGER.info(f"Mencoba unduh booklet via aiohttp bypass...")
+            async with client.session.get(b_url, headers=dl_headers, timeout=30) as resp:
+                if resp.status == 200:
+                    with open(temp_path, 'wb') as f:
+                        f.write(await resp.read())
+                    booklet_path = temp_path
+                    LOGGER.info(f"Booklet berhasil diunduh ke: {booklet_path}")
+                else:
+                    LOGGER.warning(f"Akses Booklet ditolak server Qobuz (Status {resp.status}). Kemungkinan IP Server diblokir.")
+        except Exception as e:
+            LOGGER.warning(f"Crash saat mengunduh booklet: {e}")
 
     if album_meta.get('cover') and os.path.exists(album_meta['cover']):
         try: shutil.copy2(album_meta['cover'], os.path.join(album_meta['folderpath'], "cover.jpg"))
