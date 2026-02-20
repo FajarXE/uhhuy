@@ -171,16 +171,36 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
     
     # Booklet
     booklet_path = None
-    if album_meta.get('booklet_url'):
+    if not album_meta.get('booklet_url'):
         try:
-            temp_path = os.path.join(album_meta['folderpath'], "Booklet.pdf")
-            # Gunakan session Qobuz agar lolos otentikasi header
-            async with client.session.get(album_meta['booklet_url']) as resp:
-                if resp.status == 200:
-                    with open(temp_path, 'wb') as f:
-                        f.write(await resp.read())
-                    booklet_path = temp_path
-        except: pass
+            raw_album = await client.get_album_meta(item_id)
+            if 'goodies' in raw_album and raw_album['goodies']:
+                for goodie in raw_album['goodies']:
+                    if goodie.get('url'):
+                        album_meta['booklet_url'] = goodie['url']
+                        break
+        except Exception as e:
+            LOGGER.warning(f"Gagal mengambil URL goodies: {e}")
+
+    if album_meta.get('booklet_url'):
+        b_url = album_meta['booklet_url']
+        temp_path = os.path.join(album_meta['folderpath'], "Booklet.pdf")
+        
+        err = await download_file(b_url, temp_path)
+        
+        if err or not os.path.exists(temp_path):
+            LOGGER.info("Mencoba ulang unduh booklet dengan Qobuz Headers...")
+            q_headers = {
+                "X-App-Id": getattr(client, 'id', ''),
+                "X-User-Auth-Token": getattr(client, 'uat', '')
+            }
+            err = await download_file(b_url, temp_path, headers=q_headers)
+
+        if not err and os.path.exists(temp_path):
+            booklet_path = temp_path
+            LOGGER.info(f"Booklet berhasil diunduh ke: {booklet_path}")
+        else:
+            LOGGER.warning(f"Gagal mengunduh booklet dari semua metode. Error: {err}")
 
     if album_meta.get('cover') and os.path.exists(album_meta['cover']):
         try: shutil.copy2(album_meta['cover'], os.path.join(album_meta['folderpath'], "cover.jpg"))
