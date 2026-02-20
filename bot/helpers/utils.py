@@ -27,13 +27,19 @@ from .message import send_message, edit_message
 # Batas aman Telegram (1.9GB)
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
 
-async def download_file(url, path, retries=3, timeout=30):
+async def download_file(url, path, retries=3, timeout=30, headers=None):
     if not url: return "URL is empty"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
+    # Bypass standar jika tidak ada custom header
+    if not headers:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
     def _sync_download():
         with requests.Session() as s:
-            with s.get(url, stream=True, timeout=timeout) as r:
+            with s.get(url, stream=True, timeout=timeout, headers=headers) as r:
                 r.raise_for_status()
                 with open(path, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
