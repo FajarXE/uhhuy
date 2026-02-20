@@ -105,7 +105,8 @@ async def render_dashboard(client, message):
             callback_data=f"rnd_view_{svc['id']}"
         )])
     
-    buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")])
+    # Tambahkan style=ButtonStyle.DANGER agar tombol berwarna merah
+    buttons.append([InlineKeyboardButton("Close", callback_data="rnd_close", style=ButtonStyle.DANGER)])
     
     await msg.edit(
         "<b>🎛 Render Control Panel</b>\n\nPilih layanan untuk dikelola:",
@@ -258,7 +259,10 @@ async def render_callbacks(client: Client, query: CallbackQuery):
             svc = item.get('service', item)
             status_icon = "🟢" if svc['suspended'] == 'not_suspended' else "🔴"
             buttons.append([InlineKeyboardButton(f"{status_icon} {svc['name']}", callback_data=f"rnd_view_{svc['id']}")])
-        buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="rnd_close")])
+            
+        # Tambahkan style=ButtonStyle.DANGER agar tombol berwarna merah
+        buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="rnd_close", style=ButtonStyle.DANGER)])
+        
         await query.edit_message_text(
             "<b>🎛 Render Control Panel</b>\n\nPilih layanan untuk dikelola:",
             reply_markup=InlineKeyboardMarkup(buttons)
