@@ -34,7 +34,8 @@ async def start_spotify(link: str, user: dict):
     msg = user.get('bot_msg')
     await edit_message(msg, "🔍 **Spotify:** Menganalisis Link...")
     
-    parsed_data = client.parse_url(link)
+    # [FIX] Pindahkan parse_url ke thread terpisah karena ada potensi blocking (requests resolving link)
+    parsed_data = await asyncio.to_thread(client.parse_url, link)
     if not parsed_data:
         await edit_message(msg, "❌ Link Spotify tidak valid.")
         return
@@ -63,28 +64,15 @@ async def start_spotify(link: str, user: dict):
         await edit_message(msg, f"❌ **Error:** {str(e)}")
 
 
-def fetch_artist_genre(client, artist_id):
-    """Helper untuk mengambil Genre dari Artist ID"""
+async def fetch_artist_genre(client, artist_id):
+    """Helper untuk mengambil Genre dari Artist ID (Diubah menjadi Async)"""
     try:
         if not artist_id: return None
         
-        # Ambil info artis dari API (gunakan fungsi yang sudah ada di spotify_api.py)
-        # Note: Kita ambil raw dict atau object ArtistInfo
-        # get_artist_info di spotify_api.py mengembalikan object ArtistInfo, 
-        # tapi kita butuh akses ke raw genres yang mungkin tidak terekspos di object tersebut
-        # atau kita perlu modifikasi sedikit cara panggilnya.
+        # [FIX] Pindahkan requests ke API artist di thread terpisah
+        artist_obj = await asyncio.to_thread(client.get_artist_info, artist_id)
         
-        # Kita panggil get_artist_info, lalu cek atributnya atau panggil API manual jika perlu.
-        # Namun, cara termudah dan teraman sesuai kode Anda:
-        
-        # Gunakan client.get_artist_info yang sudah Anda punya
-        artist_obj = client.get_artist_info(artist_id)
-        
-        # Karena class ArtistInfo di spotify_api.py tidak menyimpan field 'genres',
-        # kita harus sedikit 'mengintip' atau memodifikasi.
-        # TAPI, ada cara lain: pakai get_several_artists (raw json) jika hanya butuh genre.
-        
-        raw_artists = client.get_several_artists([artist_id])
+        raw_artists = await asyncio.to_thread(client.get_several_artists, [artist_id])
         if raw_artists and raw_artists[0]:
             genres = raw_artists[0].get('genres', [])
             if genres:
@@ -102,21 +90,21 @@ async def process_track(client, track_id, user, is_episode=False):
     await edit_message(msg, f"⬇️ **Spotify:** Mengunduh {'Episode' if is_episode else 'Lagu'}...")
 
     try:
-        # 1. Ambil Info Track/Episode
+        # 1. Ambil Info Track/Episode [FIX: asyncio.to_thread]
         if is_episode:
-             track_info = client.get_episode_info(track_id, "HIGH", None)
+             track_info = await asyncio.to_thread(client.get_episode_info, track_id, "HIGH", None)
         else:
-             track_info = client.get_track_info(track_id, "HIGH", None)
+             track_info = await asyncio.to_thread(client.get_track_info, track_id, "HIGH", None)
              
         if not track_info:
             raise Exception("Gagal mengambil metadata.")
 
-        # 2. Download Audio Stream
+        # 2. Download Audio Stream [FIX: asyncio.to_thread untuk mencegah hang]
         download_result = None
         if is_episode:
-             download_result = client.get_episode_download(track_id=track_id, quality_tier="HIGH")
+             download_result = await asyncio.to_thread(client.get_episode_download, track_id=track_id, quality_tier="HIGH")
         else:
-             download_result = client.get_track_download(track_id=track_id, quality_tier="HIGH")
+             download_result = await asyncio.to_thread(client.get_track_download, track_id=track_id, quality_tier="HIGH")
 
         if not download_result or not download_result.temp_file_path:
             raise Exception("Gagal mengunduh stream audio.")
@@ -124,7 +112,7 @@ async def process_track(client, track_id, user, is_episode=False):
         # 3. [FIX GENRE] Ambil Genre dari Artis (Jika bukan episode)
         fetched_genre = None
         if not is_episode and track_info.artist_id:
-            fetched_genre = fetch_artist_genre(client, track_info.artist_id)
+            fetched_genre = await fetch_artist_genre(client, track_info.artist_id)
 
         # 4. Map Metadata (Pass fetched_genre)
         meta = map_spotify_to_bot_metadata(track_info, user, is_episode, custom_genre=fetched_genre)
@@ -172,8 +160,8 @@ async def process_album(client, album_id, user):
     msg = user.get('bot_msg')
     await edit_message(msg, "🔍 **Spotify:** Mengambil Info Album...")
 
-    # 1. Ambil Info Album Global
-    album_info = client.get_album_info(album_id)
+    # 1. Ambil Info Album Global [FIX: asyncio.to_thread]
+    album_info = await asyncio.to_thread(client.get_album_info, album_id)
     if not album_info:
         raise Exception("Album tidak ditemukan.")
 
@@ -186,7 +174,7 @@ async def process_album(client, album_id, user):
     album_genre = None
     try:
         if tracks and tracks[0].artist_id:
-            album_genre = fetch_artist_genre(client, tracks[0].artist_id)
+            album_genre = await fetch_artist_genre(client, tracks[0].artist_id)
             if album_genre: LOGGER.info(f"Genre ditemukan: {album_genre}")
     except Exception as e:
         LOGGER.warning(f"Gagal mengambil genre album: {e}")
@@ -251,14 +239,15 @@ async def process_album(client, album_id, user):
             
             await edit_message(msg, status_text)
             
-            download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
+            # [FIX: asyncio.to_thread] Ini yang menyebabkan hang selama ini
+            download_result = await asyncio.to_thread(client.get_track_download, track_id=track.id, quality_tier="HIGH")
             
             if download_result and download_result.temp_file_path:
                 
-                # A. Fetch Full Info untuk dapat ISRC & Metadata lengkap
+                # A. Fetch Full Info untuk dapat ISRC & Metadata lengkap [FIX: asyncio.to_thread]
                 full_track_info = None
                 try:
-                    full_track_info = client.get_track_info(track.id, "HIGH", None)
+                    full_track_info = await asyncio.to_thread(client.get_track_info, track.id, "HIGH", None)
                 except Exception as e:
                     LOGGER.warning(f"Gagal fetch full track info: {e}")
 
@@ -349,7 +338,8 @@ async def process_playlist(client, playlist_id, user):
     msg = user.get('bot_msg')
     await edit_message(msg, "🔍 **Spotify:** Mengambil Info Playlist...")
 
-    playlist_info = client.get_playlist_info(playlist_id)
+    # [FIX: asyncio.to_thread]
+    playlist_info = await asyncio.to_thread(client.get_playlist_info, playlist_id)
     if not playlist_info:
         raise Exception("Playlist tidak ditemukan / Privat.")
 
@@ -415,13 +405,14 @@ async def process_playlist(client, playlist_id, user):
             
             await edit_message(msg, status_text)
             
-            download_result = client.get_track_download(track_id=track.id, quality_tier="HIGH")
+            # [FIX: asyncio.to_thread]
+            download_result = await asyncio.to_thread(client.get_track_download, track_id=track.id, quality_tier="HIGH")
             
             if download_result and download_result.temp_file_path:
                 
-                # [FIX UTAMA PLAYLIST]
+                # [FIX UTAMA PLAYLIST: asyncio.to_thread]
                 # Panggil Full Track Info agar Label/UPC/Copyright terambil dari Album
-                full_track_info = client.get_track_info(track.id, "HIGH", None)
+                full_track_info = await asyncio.to_thread(client.get_track_info, track.id, "HIGH", None)
                 
                 # Gunakan info lengkap jika berhasil, jika gagal pakai info sederhana dari playlist
                 target_info = full_track_info if full_track_info else track
