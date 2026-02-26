@@ -14,13 +14,12 @@ aiohttp-socks
 pycryptodomex
 git+https://github.com/KurimuzonAkuma/pyrogram
 python-dotenv
-requests
+requests[socks]
 TgCrypto
 tqdm
 bs4
 pycryptodome
 yt-dlp
-aiohttp-socks
 urllib3
 git+https://github.com/kokarare1212/librespot-python
 protobuf==3.20.1
