@@ -77,20 +77,24 @@ class KkboxAPI:
                 r = self.s.get(url, params=params, timeout=timeout)
             else:
                 r = self.s.post(url, params=params, data=payload, timeout=timeout)
-        except Exception:
+        except Exception as e:
+            LOGGER.error(f"KKBox Connection Error ({url}): {e}")
             return None
 
         if not r.content:
+            LOGGER.error(f"KKBox API Error: r.content kosong dari {url}")
             return None
 
         decrypted = self.kc1_decrypt(r.content)
         if not decrypted:
+            LOGGER.error(f"KKBox API Error: Gagal decrypt response dari {url}")
             return None
 
         try:
             resp = json.loads(decrypted)
             return resp
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            LOGGER.error(f"KKBox API Error: JSON Decode gagal ({url}) - {e}. Raw: {decrypted}")
             return None
 
     def login(self, email, password):
