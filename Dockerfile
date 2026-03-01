@@ -8,9 +8,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /usr/src/app
 
-# Install curl dan dependencies sistem
+# Install curl dan dependencies sistem (DITAMBAHKAN: aria2)
 RUN apt-get update -qq && \
-    apt-get install -qq -y ffmpeg gcc libffi-dev curl zip cargo pkg-config git && \
+    apt-get install -qq -y ffmpeg gcc libffi-dev curl zip cargo pkg-config git aria2 && \
     rm -rf /var/lib/apt/lists/*
 
 # Builder Stage
@@ -33,4 +33,4 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
-ENTRYPOINT ["python", "-m", "bot"]
+ENTRYPOINT ["bash", "start.sh"]
