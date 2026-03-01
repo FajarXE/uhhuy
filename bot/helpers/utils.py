@@ -28,19 +28,19 @@ from .aria2_helper import aria2_download
 # Batas aman Telegram (1.9GB)
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
 
-async def download_file(url, path, retries=3, timeout=30):
+async def download_file(url, path, retries=3, timeout=30, details=None):
     if not url: return "URL is empty"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
     for attempt in range(1, retries + 1):
         try:
-            # Memanggil fungsi Aria2
-            success = await aria2_download(url, path)
+            # Memanggil fungsi Aria2 beserta UI details-nya
+            success = await aria2_download(url, path, details)
             
             if success and os.path.exists(path) and os.path.getsize(path) > 0:
                 return path
             else:
-                LOGGER.warning(f"Aria2 attempt {attempt} gagal, mencoba lagi...")
+                LOGGER.warning(f"Aria2 attempt {attempt} gagal/dibatalkan...")
         except Exception as e:
             LOGGER.error(f"Download gagal: {e}")
             
@@ -336,10 +336,93 @@ async def post_simple_message(user, meta, r_link=None, i_link=None):
     markup = links_button(r_link, i_link)
     await send_message(user, caption, markup=markup)
 
+# --- HELPER FORMAT WAKTU ---
+def get_readable_time(seconds: int) -> str:
+    count = 0
+    ping_time = ""
+    time_list = []
+    time_suffix_list = ["s", "m", "h", "d"]
+    while count < 4:
+        count += 1
+        remainder, result = divmod(seconds, 60) if count < 3 else divmod(seconds, 24)
+        if seconds == 0 and remainder == 0:
+            break
+        time_list.append(int(result))
+        seconds = int(remainder)
+    for x in range(len(time_list)):
+        time_list[x] = str(time_list[x]) + time_suffix_list[x]
+    if len(time_list) == 4:
+        ping_time += time_list.pop() + ", "
+    time_list.reverse()
+    ping_time += ":".join(time_list)
+    return ping_time if ping_time else "0s"
+
+# --- HELPER FORMAT UKURAN ---
+def get_readable_file_size(size_in_bytes) -> str:
+    if not size_in_bytes:
+        return "0B"
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:
+        if size_in_bytes < 1024.0:
+            return f"{size_in_bytes:.2f} {unit}"
+        size_in_bytes /= 1024.0
+    return f"{size_in_bytes:.2f} YB"
+
+# --- FUNGSI PROGRESS BAR BARU ---
 async def progress_message(done, total, details):
-    progress_bar = "{0}{1}".format(''.join(["▰" for i in range(math.floor((done/total) * 10))]), ''.join(["▱" for i in range(10 - math.floor((done/total) * 10))]))
-    try: await edit_message(details['msg'], details['text'].format(progress_bar, done, total, details['title'], details['type'].title()), None, False)
-    except FloodWait: pass
+    now = time.time()
+    
+    # 1. Rate Limiter (Mencegah bot terkena Flood/Spam dari Telegram)
+    if 'last_updated' in details:
+        if now - details['last_updated'] < 2.0 and done < total:
+            return
+    details['last_updated'] = now
+
+    # 2. Inisialisasi start_time untuk kalkulasi Speed & ETA
+    if 'start_time' not in details:
+        details['start_time'] = now
+        
+    diff = now - details['start_time']
+    if diff < 1:
+        diff = 1 
+        
+    speed = done / diff
+    eta_seconds = int((total - done) / speed) if speed > 0 else 0
+    percentage = (done / total) * 100 if total > 0 else 0
+    
+    # 3. Membuat Progress Bar [◘◘◘◘◘◘◘◘◘◘◘◘] (12 Kotak)
+    filled_blocks = math.floor((percentage / 100) * 12)
+    empty_blocks = 12 - filled_blocks
+    progress_bar = "◘" * filled_blocks + "▱" * empty_blocks
+    
+    # 4. Format String
+    done_str = get_readable_file_size(done)
+    total_str = get_readable_file_size(total)
+    speed_str = f"{get_readable_file_size(speed)}/s"
+    eta_str = get_readable_time(eta_seconds) if eta_seconds > 0 else "-"
+    since_str = get_readable_time(int(diff))
+    
+    # Ambil detail task
+    title = details.get('title', 'Unknown File')
+    task_type = details.get('type', 'Download').capitalize()
+    task_id = details.get('task_id', 'BfHk9lwBj9RcA') # Dummy ID
+    
+    # 5. Template Teks Sesuai Permintaan
+    text = f"**{task_type}**: `{title}`\n"
+    text += f"**Since**: {since_str}\n\n"
+    text += f"**File_DataCenter**: File DC 4\n"
+    text += f"**Progress**: `[{progress_bar}]` {percentage:.1f}%\n"
+    text += f"**Processed_bytes**: {done_str} of {total_str}\n"
+    text += f"**Processed_speed**: {speed_str} | **ETA**: {eta_str}\n"
+    text += f"**Machine_type**: 2.2.18 | Bot\n"
+    text += f"**Destination_mode**: Leech as Extract\n"
+    text += f"**Cancel**: /cancel1 {task_id}"
+
+    try: 
+        await edit_message(details['msg'], text, None, False)
+    except FloodWait: 
+        pass
+    except MessageNotModified:
+        pass
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
