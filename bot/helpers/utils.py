@@ -23,6 +23,7 @@ from ..logger import LOGGER
 from ..settings import bot_set
 from .buttons.links import links_button
 from .message import send_message, edit_message
+from .aria2_helper import aria2_download
 
 # Batas aman Telegram (1.9GB)
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
@@ -31,25 +32,24 @@ async def download_file(url, path, retries=3, timeout=30):
     if not url: return "URL is empty"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     
-    def _sync_download():
-        with requests.Session() as s:
-            with s.get(url, stream=True, timeout=timeout) as r:
-                r.raise_for_status()
-                with open(path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk: f.write(chunk)
-
     for attempt in range(1, retries + 1):
         try:
-            await asyncio.to_thread(_sync_download)
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                return None
+            # Memanggil fungsi Aria2
+            success = await aria2_download(url, path)
+            
+            if success and os.path.exists(path) and os.path.getsize(path) > 0:
+                return path
             else:
-                if attempt == retries: return f"Download finished but file is missing: {path}"
-                await asyncio.sleep(1)
+                LOGGER.warning(f"Aria2 attempt {attempt} gagal, mencoba lagi...")
         except Exception as e:
-            if attempt == retries: return str(e)
-            await asyncio.sleep(1)
+            LOGGER.error(f"Download gagal: {e}")
+            
+        if attempt == retries: 
+            return None
+            
+        await asyncio.sleep(2)
+        
+    return None
 
 async def format_string(text:str, data:dict, user=None):
     def safe_get(key):
