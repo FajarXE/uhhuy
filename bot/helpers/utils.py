@@ -110,15 +110,18 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
         if update_details:
             try:
                 if completed_tasks % 5 == 0 or completed_tasks == total_tasks: 
-                    progress_bar = "{0}{1}".format(
-                        ''.join(["▰" for _ in range(math.floor((completed_tasks/total_tasks) * 10))]),
-                        ''.join(["▱" for _ in range(10 - math.floor((completed_tasks/total_tasks) * 10))])
-                    )
+                    # --- BAGIAN PROGRESS BAR BARU ---
+                    percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+                    filled_blocks = math.floor((percentage / 100) * 12)
+                    empty_blocks = 12 - filled_blocks
+                    progress_bar = "◘" * filled_blocks + "▱" * empty_blocks
+                    
                     text_to_send = update_details['text'].format(
-                        progress_bar, completed_tasks, total_tasks,
+                        f"[{progress_bar}] {percentage:.1f}%", completed_tasks, total_tasks,
                         update_details['title'], update_details['type'].title()
                     )
                     await edit_message(update_details['msg'], text_to_send, None, False)
+                    # --------------------------------
             except: pass
         return result
 
