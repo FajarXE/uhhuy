@@ -169,15 +169,17 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 action = "Upload"
                 task_type = "File" if type == 'doc' else type.capitalize()
 
-                # --- RADAR PINTAR ARIA2 (DITAMBAHKAN) ---
+                # --- RADAR PINTAR ARIA2 & TELEGRAM ---
                 try:
                     from bot.helpers.aria2_helper import get_aria2_global_stat
                     stats = await get_aria2_global_stat()
+                    # Download speed tetap dipantau dari Aria2
                     speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
-                    speed_ul = int(stats.get('uploadSpeed', 0)) if stats else speed
                 except:
                     speed_dl = 0
-                    speed_ul = speed
+                    
+                # FIX UTAMA: Kecepatan Upload murni mengambil dari laju unggah Telegram!
+                speed_ul = speed
 
                 text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
                 text_to_send += f"**Since**: {since_str}\n\n"
