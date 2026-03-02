@@ -25,6 +25,8 @@ from .buttons.links import links_button
 from .message import send_message, edit_message
 from .aria2_helper import aria2_download
 
+GLOBAL_CANCEL_DICT = set()
+
 # Batas aman Telegram (1.9GB)
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
 
@@ -102,22 +104,31 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
     results = []
     is_running = True
 
+    import hashlib
+    start_time = time.time()
+    batch_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
+
     async def run_with_sem(task):
         nonlocal completed_tasks
+        # 1. Jika tombol batal ditekan, hancurkan tugas sebelum berjalan!
+        if batch_id in GLOBAL_CANCEL_DICT:
+            task.close()
+            return None
+            
         try:
             async with sem:
+                if batch_id in GLOBAL_CANCEL_DICT:
+                    task.close()
+                    return None
                 res = await task
         except Exception:
             res = None
+            
         completed_tasks += 1
         return res
 
     async def live_updater():
         from .aria2_helper import get_aria2_global_stat
-        import hashlib
-        start_time = time.time()
-        batch_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
-        
         try:
             user_id = update_details['msg'].chat.id if update_details and 'msg' in update_details else 0
             dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode) if user_id else bot_set.upload_mode
@@ -125,6 +136,13 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
             dest_mode = bot_set.upload_mode
             
         while is_running:
+            # 2. Cek apakah pengguna menekan /cancel
+            if batch_id in GLOBAL_CANCEL_DICT:
+                if update_details:
+                    try: await edit_message(update_details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                    except: pass
+                break # Matikan radar
+
             if update_details:
                 try:
                     stats = await get_aria2_global_stat()
@@ -139,7 +157,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                     speed_str = f"{get_readable_file_size(speed_dl)}/s"
                     since_str = get_readable_time(int(time.time() - start_time))
                     
-                    # --- DETEKSI ACTION & TYPE ---
                     title = update_details.get('title', 'Unknown')
                     action = update_details.get('action', 'Download').capitalize()
                     task_type = update_details.get('type', 'Task').capitalize()
@@ -151,8 +168,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                     text_to_send += f"**Current_Speed**: {speed_str}\n"
                     text_to_send += f"**Machine_type**: Aria2c 1.37.0\n"
                     text_to_send += f"**Destination_mode**: {dest_mode}\n"
-                    
-                    # Perubahan ke format /cancel_id agar biru semua
                     text_to_send += f"**Cancel**: /cancel_{batch_id}\n\n"
                     text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
