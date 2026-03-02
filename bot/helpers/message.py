@@ -128,10 +128,12 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
         cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
         last_update_time = start_time
         
-        # --- FIX UTAMA: CEK APAKAH INI FILE LOKAL ATAU URL ---
-        is_local = isinstance(text, str) and os.path.exists(text)
-        
-        # Jangan kirim pesan "Menyiapkan Upload..." jika hanya mengunggah URL (seperti Art Poster)
+        # Cek apakah ini file lokal (untuk zip/lagu) atau URL (untuk Art Poster)
+        is_local = False
+        if isinstance(text, str):
+            try: is_local = os.path.exists(text)
+            except: pass
+            
         msg = None
         if is_local:
             msg = await client.send_message(chat_id, f"🔄 Menyiapkan Upload... `/cancel_{cancel_id}`")
@@ -167,6 +169,16 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 action = "Upload"
                 task_type = "File" if type == 'doc' else type.capitalize()
 
+                # --- RADAR PINTAR ARIA2 (DITAMBAHKAN) ---
+                try:
+                    from bot.helpers.aria2_helper import get_aria2_global_stat
+                    stats = await get_aria2_global_stat()
+                    speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
+                    speed_ul = int(stats.get('uploadSpeed', 0)) if stats else speed
+                except:
+                    speed_dl = 0
+                    speed_ul = speed
+
                 text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
                 text_to_send += f"**Since**: {since_str}\n\n"
                 text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
@@ -174,52 +186,50 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 text_to_send += f"**Current_Speed**: {speed_str} | **ETA**: {eta_str}\n"
                 text_to_send += f"**Machine_type**: Telegram API\n"
                 text_to_send += f"**Destination_mode**: {dest_mode}\n"
-                text_to_send += f"**Cancel**: /cancel_{cancel_id}\n"
+                text_to_send += f"**Cancel**: /cancel_{cancel_id}\n\n"
+                text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
-                try:
-                    await edit_message(msg, text_to_send, None, False)
+                try: await edit_message(msg, text_to_send, None, False)
                 except MessageNotModified: pass
                 except FloodWait: pass
                 last_update_time = now
 
         try:
+            # FIX: Inisialisasi 'res' agar tidak error UnboundLocalVariable
+            res = None 
             final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
             thumb = meta.get('cover') if meta and meta.get('cover') else None
             
-            # --- FIX UTAMA: MATIKAN PROGRESS JIKA INI URL ---
             prog_func = progress if is_local else None
             
             if type == 'audio':
                 duration = meta.get('duration', 0) if meta else 0
                 performer = meta.get('artist', '') if meta else ''
                 audio_title = meta.get('title', '') if meta else ''
-                
-                res = await client.send_audio(
-                    chat_id, audio=text, caption=final_caption, duration=duration,
-                    performer=performer, title=audio_title, thumb=thumb, progress=prog_func
-                )
-            elif type == 'doc':
-                res = await client.send_document(
-                    chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func
-                )
-            elif type == 'photo':
-                res = await client.send_photo(
-                    chat_id, photo=text, caption=final_caption, progress=prog_func
-                )
-            elif type == 'video':
-                res = await client.send_video(
-                    chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func
-                )
-                
-            await copy_to_channel(client, res)
+                res = await client.send_audio(chat_id, audio=text, caption=final_caption, duration=duration, performer=performer, title=audio_title, thumb=thumb, progress=prog_func)
             
-            # Hapus pesan status HANYA jika pesan statusnya dibuat
+            elif type == 'doc':
+                res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
+            
+            elif type == 'photo':
+                res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func)
+            
+            elif type == 'video':
+                res = await client.send_video(chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func)
+            
+            else:
+                # Fallback aman
+                res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
+                
+            if res:
+                await copy_to_channel(client, res)
             if msg:
                 await aio.delete_messages(chat_id, msg.id)
             return res
 
         except Exception as e:
-            if str(e) == "DIBATALKAN_PENGGUNA":
+            # FIX: Mendeteksi Cancel bahkan jika Pyrogram mengeluarkan error 'NoneType' write
+            if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
                 if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**")
             else:
                 LOGGER.error(f"Gagal mengirim {type}: {e}")
