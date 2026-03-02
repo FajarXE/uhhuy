@@ -101,9 +101,19 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
         return False
 
 
-async def send_message(user: dict, text: str, type: str = 'text', markup=None, antiflood=False, meta=None, caption=None):
-    client = user.get('client', aio)
-    chat_id = user['chat_id']
+async def send_message(user, text: str, type: str = 'text', markup=None, antiflood=False, meta=None, caption=None):
+    from pyrogram.types import Message
+    from bot.tgclient import aio
+    
+    if isinstance(user, Message):
+        client = getattr(user, '_client', aio)
+        chat_id = user.chat.id
+    elif isinstance(user, dict):
+        client = user.get('client', aio)
+        chat_id = user.get('chat_id')
+    else:
+        return None
+
     if not client or not chat_id:
         return None
 
@@ -114,6 +124,7 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
             return msg
         except FloodWait as e:
             if antiflood:
+                import asyncio
                 await asyncio.sleep(e.value)
                 return await send_message(user, text, type, markup, antiflood, meta, caption)
         except Exception as e:
@@ -128,7 +139,6 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
         cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
         last_update_time = start_time
         
-        # Cek apakah ini file lokal (untuk zip/lagu) atau URL (untuk Art Poster)
         is_local = False
         if isinstance(text, str):
             try: is_local = os.path.exists(text)
@@ -169,16 +179,13 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 action = "Upload"
                 task_type = "File" if type == 'doc' else type.capitalize()
 
-                # --- RADAR PINTAR ARIA2 & TELEGRAM ---
                 try:
                     from bot.helpers.aria2_helper import get_aria2_global_stat
                     stats = await get_aria2_global_stat()
-                    # Download speed tetap dipantau dari Aria2
                     speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
                 except:
                     speed_dl = 0
                     
-                # FIX UTAMA: Kecepatan Upload murni mengambil dari laju unggah Telegram!
                 speed_ul = speed
 
                 text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
@@ -197,7 +204,6 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 last_update_time = now
 
         try:
-            # FIX: Inisialisasi 'res' agar tidak error UnboundLocalVariable
             res = None 
             final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
             thumb = meta.get('cover') if meta and meta.get('cover') else None
@@ -220,17 +226,16 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 res = await client.send_video(chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func)
             
             else:
-                # Fallback aman
                 res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
                 
             if res:
                 await copy_to_channel(client, res)
             if msg:
+                from bot.tgclient import aio
                 await aio.delete_messages(chat_id, msg.id)
             return res
 
         except Exception as e:
-            # FIX: Mendeteksi Cancel bahkan jika Pyrogram mengeluarkan error 'NoneType' write
             if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
                 if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**")
             else:
