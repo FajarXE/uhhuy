@@ -101,13 +101,12 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
         return False
 
 
-async def send_message(user: dict, text: str, type: str = 'text', markup=None, antiflood=False, meta=None):
+async def send_message(user: dict, text: str, type: str = 'text', markup=None, antiflood=False, meta=None, caption=None):
     client = user.get('client', aio)
     chat_id = user['chat_id']
     if not client or not chat_id:
         return None
 
-    # --- 1. JIKA MENGIRIM PESAN TEKS BIASA ---
     if type == 'text':
         try:
             msg = await client.send_message(chat_id, text, reply_markup=markup, disable_web_page_preview=True)
@@ -116,30 +115,23 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
         except FloodWait as e:
             if antiflood:
                 await asyncio.sleep(e.value)
-                return await send_message(user, text, type, markup, antiflood)
+                return await send_message(user, text, type, markup, antiflood, meta, caption)
         except Exception as e:
             LOGGER.error(f"Gagal mengirim teks: {e}")
             return None
 
-    # --- 2. JIKA MENGUNGGAH FILE (AUDIO, DOC, PHOTO, VIDEO) ---
     else:
         import time, hashlib, math
         from bot.helpers.utils import get_readable_time, get_readable_file_size, GLOBAL_CANCEL_DICT
         
         start_time = time.time()
-        # Membuat ID Cancel unik khusus untuk upload ini
         cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
         last_update_time = start_time
         
-        # Pesan awal UI
         msg = await client.send_message(chat_id, f"🔄 Menyiapkan Upload... `/cancel_{cancel_id}`")
 
-        # RADAR UI UNTUK PROSES UPLOAD TELEGRAM
         async def progress(current, total):
             nonlocal last_update_time
-            
-            # ---> SISTEM KILL SWITCH (BOM WAKTU) <---
-            # Jika user menekan tombol batal, paksakan error untuk membunuh proses upload Pyrogram!
             if cancel_id in GLOBAL_CANCEL_DICT:
                 raise Exception("DIBATALKAN_PENGGUNA")
 
@@ -151,7 +143,6 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 speed = current / diff
                 percentage = (current / total) * 100 if total > 0 else 0
                 
-                # Progress Bar Full Aria2 Refactor
                 filled_blocks = math.floor((percentage / 100) * 12)
                 empty_blocks = 12 - filled_blocks
                 progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
@@ -166,12 +157,11 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 try: dest_mode = bot_set.user_data.get(chat_id, {}).get('upload_mode', bot_set.upload_mode)
                 except: dest_mode = bot_set.upload_mode
 
-                title = os.path.basename(text) if isinstance(text, str) else "Unknown File"
+                file_title = os.path.basename(text) if isinstance(text, str) else "Unknown File"
                 action = "Upload"
                 task_type = "File" if type == 'doc' else type.capitalize()
 
-                # Template Tampilan UI
-                text_to_send = f"**{action} {task_type}**: `{title}`\n"
+                text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
                 text_to_send += f"**Since**: {since_str}\n\n"
                 text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
                 text_to_send += f"**Processed_bytes**: {done_str} of {total_str}\n"
@@ -186,31 +176,32 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 except FloodWait: pass
                 last_update_time = now
 
-        # EKSEKUSI UPLOAD BERDASARKAN TIPE
         try:
-            caption = meta.get('caption', '') if meta else ''
+            # --- PERBAIKAN DI SINI ---
+            # Mengutamakan parameter 'caption', baru kemudian membaca dari 'meta'
+            final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
             thumb = meta.get('cover') if meta and meta.get('cover') else None
             
             if type == 'audio':
                 duration = meta.get('duration', 0) if meta else 0
                 performer = meta.get('artist', '') if meta else ''
-                title = meta.get('title', '') if meta else ''
+                audio_title = meta.get('title', '') if meta else ''
                 
                 res = await client.send_audio(
-                    chat_id, audio=text, caption=caption, duration=duration,
-                    performer=performer, title=title, thumb=thumb, progress=progress
+                    chat_id, audio=text, caption=final_caption, duration=duration,
+                    performer=performer, title=audio_title, thumb=thumb, progress=progress
                 )
             elif type == 'doc':
                 res = await client.send_document(
-                    chat_id, document=text, caption=caption, thumb=thumb, progress=progress
+                    chat_id, document=text, caption=final_caption, thumb=thumb, progress=progress
                 )
             elif type == 'photo':
                 res = await client.send_photo(
-                    chat_id, photo=text, caption=caption, progress=progress
+                    chat_id, photo=text, caption=final_caption, progress=progress
                 )
             elif type == 'video':
                 res = await client.send_video(
-                    chat_id, video=text, caption=caption, thumb=thumb, progress=progress
+                    chat_id, video=text, caption=final_caption, thumb=thumb, progress=progress
                 )
                 
             await copy_to_channel(client, res)
@@ -218,7 +209,6 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
             return res
 
         except Exception as e:
-            # ---> MENANGKAP HASIL KILL SWITCH <---
             if str(e) == "DIBATALKAN_PENGGUNA":
                 await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**")
             else:
