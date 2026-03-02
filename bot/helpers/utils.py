@@ -115,34 +115,52 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
     # --- RADAR PINTAR UNTUK ALBUM/BATCH ---
     async def live_updater():
         from .aria2_helper import get_aria2_global_stat
+        import hashlib
+        
         start_time = time.time()
+        # Membuat Hash ID Cancel Unik 16 digit untuk batch ini
+        batch_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
+        
+        # --- DETEKSI DESTINATION MODE OTOMATIS ---
+        try:
+            user_id = update_details['msg'].chat.id if update_details and 'msg' in update_details else 0
+            dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode) if user_id else bot_set.upload_mode
+        except:
+            dest_mode = bot_set.upload_mode
+            
         while is_running:
             if update_details:
                 try:
                     stats = await get_aria2_global_stat()
-                    speed = int(stats.get('downloadSpeed', 0)) if stats else 0
+                    speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
+                    speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
                     
                     percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
                     filled_blocks = math.floor((percentage / 100) * 12)
                     empty_blocks = 12 - filled_blocks
-                    progress_bar = "◘" * filled_blocks + "▱" * empty_blocks
+                    progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
                     
-                    speed_str = f"{get_readable_file_size(speed)}/s"
+                    speed_str = f"{get_readable_file_size(speed_dl)}/s"
                     since_str = get_readable_time(int(time.time() - start_time))
                     
-                    # --- TEMPLATE MUTLAK MIRROR BOT (MENGABAIKAN tr_en.py) ---
-                    text_to_send = f"**{update_details.get('type', 'Task').title()}**: `{update_details.get('title', 'Unknown')}`\n"
+                    title = update_details.get('title', 'Unknown')
+                    task_type = update_details.get('type', 'Task').capitalize()
+                    
+                    # --- TEMPLATE FULL REFACTOR (Sesuai Permintaan) ---
+                    text_to_send = f"**{task_type}**: `{title}`\n"
                     text_to_send += f"**Since**: {since_str}\n\n"
-                    text_to_send += f"**File_DataCenter**: File DC 4\n"
-                    text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.1f}%\n"
+                    text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
                     text_to_send += f"**Processed_tasks**: {completed_tasks} of {total_tasks}\n"
-                    text_to_send += f"**Current_Speed**: {speed_str} 🚀\n"
-                    text_to_send += f"**Machine_type**: 2.2.18 | Bot\n"
-                    text_to_send += f"**Destination_mode**: Leech as Extract"
+                    text_to_send += f"**Current_Speed**: {speed_str}\n"
+                    text_to_send += f"**Machine_type**: Aria2c 1.37.0\n"
+                    text_to_send += f"**Destination_mode**: {dest_mode}\n"
+                    text_to_send += f"**Cancel**: /cancel {batch_id}\n\n"
+                    text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
                     await edit_message(update_details['msg'], text_to_send, None, False)
                 except: pass
             
+            # Update Radar 3.5 detik sekali agar aman dari FloodWait
             await asyncio.sleep(3.5)
 
     updater_task = asyncio.create_task(live_updater())
@@ -410,45 +428,53 @@ async def progress_message(done, total, details):
     if diff < 1: diff = 1 
         
     speed = done / diff
-    eta_seconds = int((total - done) / speed) if speed > 0 else 0
     percentage = (done / total) * 100 if total > 0 else 0
     
-    # Progress bar ala Mirror Bot
+    # Progress bar baru [◙◙◙◙◙◙◘◘◘◘◘◘]
     filled_blocks = math.floor((percentage / 100) * 12)
     empty_blocks = 12 - filled_blocks
-    progress_bar = "◘" * filled_blocks + "▱" * empty_blocks
+    progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
     
-    # Deteksi Otomatis: Apakah ini menghitung Bytes (Single Track) atau Tasks (Playlist Loop)?
     if total > 1000: # Mode Bytes
         done_str = get_readable_file_size(done)
         total_str = get_readable_file_size(total)
         speed_str = f"{get_readable_file_size(speed)}/s"
         progress_label = "Processed_bytes"
-    else: # Mode Playlist (Lagu per Lagu)
+    else: # Mode Playlist 
         done_str = str(done)
         total_str = str(total)
-        speed_str = "-"
+        speed_str = "0B/s"
         progress_label = "Processed_tasks"
         
-    eta_str = get_readable_time(eta_seconds) if eta_seconds > 0 else "-"
     since_str = get_readable_time(int(diff))
     
     title = details.get('title', 'Unknown File')
     task_type = details.get('type', 'Task').capitalize()
     task_id = details.get('task_id', 'BatchTask')
     
-    # --- TEMPLATE MUTLAK MIRROR BOT (MENGABAIKAN tr_en.py) ---
+    # --- DETEKSI DESTINATION MODE OTOMATIS ---
+    try:
+        user_id = details['msg'].chat.id
+        dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode)
+    except:
+        dest_mode = bot_set.upload_mode
+        
+    # --- AMBIL STATISTIK GLOBAL ARIA2 UNTUK FOOTER ---
+    from .aria2_helper import get_aria2_global_stat
+    stats = await get_aria2_global_stat()
+    speed_dl = int(stats.get('downloadSpeed', 0)) if stats else speed
+    speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
+    
+    # --- TEMPLATE FULL REFACTOR (Sesuai Permintaan) ---
     text = f"**{task_type}**: `{title}`\n"
     text += f"**Since**: {since_str}\n\n"
-    text += f"**File_DataCenter**: File DC 4\n"
-    text += f"**Progress**: `[{progress_bar}]` {percentage:.1f}%\n"
+    text += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
     text += f"**{progress_label}**: {done_str} of {total_str}\n"
-    text += f"**Processed_speed**: {speed_str} | **ETA**: {eta_str}\n"
-    text += f"**Machine_type**: 2.2.18 | Bot\n"
-    text += f"**Destination_mode**: Leech as Extract\n"
-    
-    if total > 1000:
-        text += f"**Cancel**: /cancel1 {task_id}"
+    text += f"**Current_Speed**: {speed_str}\n"
+    text += f"**Machine_type**: Aria2c 1.37.0\n"
+    text += f"**Destination_mode**: {dest_mode}\n"
+    text += f"**Cancel**: /cancel {task_id}\n\n"
+    text += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
     try: 
         await edit_message(details['msg'], text, None, False)
