@@ -34,22 +34,25 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
     
     for attempt in range(1, retries + 1):
         try:
-            # Memanggil fungsi Aria2 beserta UI details-nya
+            # Panggil aria2
+            from .aria2_helper import aria2_download
             success = await aria2_download(url, path, details)
             
+            # ---> PERBAIKAN FATAL: Kembalikan None jika sukses! <---
             if success and os.path.exists(path) and os.path.getsize(path) > 0:
-                return path
+                return None 
             else:
                 LOGGER.warning(f"Aria2 attempt {attempt} gagal/dibatalkan...")
         except Exception as e:
             LOGGER.error(f"Download gagal: {e}")
             
+        # ---> Kembalikan teks error (Truthy) jika gagal <---
         if attempt == retries: 
-            return None
+            return f"Gagal mengunduh file setelah {retries} percobaan."
             
         await asyncio.sleep(2)
         
-    return None
+    return "Failed"
 
 async def format_string(text:str, data:dict, user=None):
     def safe_get(key):
