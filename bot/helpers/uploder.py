@@ -190,7 +190,11 @@ async def album_upload(metadata, user):
     # [FIX] Auto-Generate ZIP
     if is_zip and not metadata.get('zip_path'):
         LOGGER.info("[DEBUG ALBUM] ZIP aktif tapi path kosong. Memulai Zipping...")
-        if 'bot_msg' in user: await edit_message(user['bot_msg'], "📦 Zipping Album (Force)...")
+        if 'bot_msg' in user: 
+            # --- MEMANGGIL PROGRESS BAR UI BARU ---
+            up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
+            await progress_message(0, 1, up_zip)
+            
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
         LOGGER.info(f"[DEBUG ALBUM] Hasil Zipping: {metadata.get('zip_path')}")
 
@@ -269,7 +273,10 @@ async def artist_upload(metadata, user):
     LOGGER.info(f"[DEBUG ARTIST] User: {user_id} | ZIP: {is_zip} | Poster: {show_poster}")
     
     if is_zip and not metadata.get('zip_path'):
-        if 'bot_msg' in user: await edit_message(user['bot_msg'], "📦 Zipping Artist (Force)...")
+        if 'bot_msg' in user: 
+            up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
+            await progress_message(0, 1, up_zip)
+            
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
@@ -334,7 +341,11 @@ async def playlist_upload(metadata, user):
     LOGGER.info(f"[DEBUG PLAYLIST] User: {user_id} | ZIP: {is_zip} | Poster: {show_poster}")
 
     if is_zip and not metadata.get('zip_path'):
-        if 'bot_msg' in user: await edit_message(user['bot_msg'], "📦 Zipping Playlist (Force)...")
+        if 'bot_msg' in user: 
+            # --- MEMANGGIL PROGRESS BAR UI BARU ---
+            up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
+            await progress_message(0, 1, up_zip)
+            
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
         LOGGER.info(f"[DEBUG PLAYLIST] Zip path: {metadata.get('zip_path')}")
 
@@ -490,12 +501,23 @@ async def batch_telegram_upload(metadata, user):
                 if not track.get('filepath'): continue
                 tasks.append(telegram_upload(track, user, batch_mode=True))
     if not tasks: return
-    try: await edit_message(user['bot_msg'], f"Mengunggah {len(tasks)} lagu secara paralel...")
-    except: pass
-    semaphore = asyncio.Semaphore(Config.MAX_WORKERS)
-    async def sem_task(task):
-        async with semaphore:
-            try: await task 
-            except FileNotFoundError: pass
-            except Exception as e: LOGGER.error(f"Failed to upload one track during batch: {e}")
-    await asyncio.gather(*(sem_task(task) for task in tasks))
+
+    # --- MENYAMBUNGKAN KE UI BARU (UPLOAD) ---
+    if 'bot_msg' in user:
+        update_details = {
+            'action': 'Upload', 
+            'type': metadata.get('type', 'Task').capitalize(),
+            'title': metadata.get('title', 'Unknown'),
+            'msg': user['bot_msg']
+        }
+        # Memanggil Radar Pintar (Aria2/Telegram Speed) dari utils.py
+        await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+    else:
+        # Fallback jika tidak ada pesan bot
+        semaphore = asyncio.Semaphore(Config.MAX_WORKERS)
+        async def sem_task(task):
+            async with semaphore:
+                try: await task 
+                except FileNotFoundError: pass
+                except Exception as e: LOGGER.error(f"Failed to upload: {e}")
+        await asyncio.gather(*(sem_task(task) for task in tasks))
