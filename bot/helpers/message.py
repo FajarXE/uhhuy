@@ -101,155 +101,130 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
         return False
 
 
-async def send_message(user, item, itype='text',
-    caption=None, markup=None, chat_id=None,
-    meta=None, thumb=None
-  ):
-    if not isinstance(user, dict):
-        user = await fetch_user_details(user)
-    
-    # [LOGIKA DIRECT TO CHANNEL]
-    # Tentukan target chat ID
-    target_chat_id = chat_id if chat_id else user['chat_id']
-    original_chat_id = target_chat_id
-    
-    # Jika mode Direct aktif dan Channel ID valid, kirim ke Channel
-    is_direct_mode = Config.DIRECT_TO_CHANNEL and Config.COPY_CHANNEL_ID
-    if is_direct_mode:
-        target_chat_id = Config.COPY_CHANNEL_ID
-    
-    # Tentukan pesan mana yang di-reply
-    reply_to_id = user['r_id']
-    if is_direct_mode:
-        reply_to_id = None # Tidak bisa reply pesan user di channel
-
-    sent_msg = None
-
-    try:
-        if itype == 'text':
-            sent_msg = await aio.send_message(
-                chat_id=target_chat_id,
-                text=item,
-                reply_to_message_id=reply_to_id,
-                reply_markup=markup,
-                disable_web_page_preview=True
-            )
-            
-        elif itype == 'doc':
-            # Logika Thumb Lama Anda
-            thumb_path = thumb 
-            if not thumb_path and meta:
-                thumb_path = meta.get('thumbnail') or meta.get('cover')
-            
-            if thumb_path and not os.path.exists(thumb_path):
-                thumb_path = None
-            
-            # Progress Callback (Hanya jika kirim ke User, agar tidak spam edit di channel)
-            progress_callback = None
-            if not is_direct_mode:
-                last_update_time = [0] 
-                async def doc_progress(current, total):
-                    current_time = time.time()
-                    if current_time - last_update_time[0] < 5: return
-                    last_update_time[0] = current_time
-                    percentage = int((current / total) * 100)
-                    progress_bar = "{0}{1}".format(
-                        ''.join(["▰" for i in range(math.floor(percentage / 10))]),
-                        ''.join(["▱" for i in range(10 - math.floor(percentage / 10))])
-                    )
-                    try:
-                        text = (f"**Mengunggah file .zip...**\n`{os.path.basename(item)}`\n\n{progress_bar} {percentage}%")
-                        asyncio.create_task(edit_message(user['bot_msg'], text, antiflood=False))
-                    except: pass
-                progress_callback = doc_progress
-            
-            sent_msg = await aio.send_document(
-                chat_id=target_chat_id,
-                document=item,
-                caption=caption,
-                reply_to_message_id=reply_to_id,
-                thumb=thumb_path,
-                progress=progress_callback
-            )
-
-        elif itype == 'audio':
-            thumb_path = None
-            cover_candidate = meta.get('cover') or meta.get('thumbnail')
-            if cover_candidate and isinstance(cover_candidate, str):
-                if os.path.exists(cover_candidate):
-                    thumb_path = cover_candidate
-            
-            duration = 0
-            raw_duration = meta.get('duration')
-            if raw_duration:
-                try: duration = int(float(str(raw_duration)))
-                except: duration = 0
-
-            # Progress Callback (Hanya jika kirim ke User)
-            progress_callback = None 
-            if not is_direct_mode and meta and not meta.get('batch_mode', False) and user.get('bot_msg'):
-                last_update_time = [0]
-                async def audio_progress(current, total):
-                    current_time = time.time()
-                    if current_time - last_update_time[0] < 5: return
-                    last_update_time[0] = current_time
-                    percentage = int((current / total) * 100)
-                    progress_bar = "{0}{1}".format(
-                        ''.join(["▰" for i in range(math.floor(percentage / 10))]),
-                        ''.join(["▱" for i in range(10 - math.floor(percentage / 10))])
-                    )
-                    try:
-                        track_num = meta.get('tracknumber', '?')
-                        total_tracks = meta.get('totaltracks', '?')
-                        title = meta.get('title', 'Unknown Track')
-                        text = (f"**Mengunggah...**\nLagu {track_num} dari {total_tracks}\n`{title}`\n\n{progress_bar} {percentage}%")
-                        asyncio.create_task(edit_message(user['bot_msg'], text, antiflood=False))
-                    except Exception: pass
-                progress_callback = audio_progress 
-            
-            sent_msg = await aio.send_audio(
-                chat_id=target_chat_id,
-                audio=item,
-                caption=caption,
-                duration=duration,
-                performer=meta.get('artist'),
-                title=meta.get('title'),
-                thumb=thumb_path, 
-                reply_to_message_id=reply_to_id,
-                progress=progress_callback
-            )
-
-        elif itype == 'pic':
-            sent_msg = await aio.send_photo(
-                chat_id=target_chat_id,
-                photo=item,
-                caption=caption,
-                reply_to_message_id=reply_to_id
-            )
-
-        # [LOGIKA COPY TO CHANNEL]
-        # Jika Direct Mode MATI (User sudah terima file),
-        # DAN Channel ID ada, maka COPY file tersebut ke Channel
-        if sent_msg and not is_direct_mode and Config.COPY_CHANNEL_ID:
-            # Hanya copy file media penting (Audio/Doc/Pic)
-            if itype in ['audio', 'doc', 'pic']:
-                 await copy_to_channel(aio, sent_msg)
-        
-        return sent_msg
-
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        return await send_message(user, item, itype, caption, markup, chat_id, meta, thumb)
-        
-    except Exception as e:
-        LOGGER.error(f"Send Message Error: {e}")
-        # Fallback: Jika gagal kirim ke Channel (misal bot dikick), coba kirim ke User
-        if is_direct_mode and target_chat_id != original_chat_id:
-            LOGGER.info("Fallback: Mengirim ulang ke User karena gagal kirim ke Channel...")
-            # Matikan direct mode sementara untuk pemanggilan rekursif ini
-            Config.DIRECT_TO_CHANNEL = False 
-            return await send_message(user, item, itype, caption, markup, original_chat_id, meta, thumb)
+async def send_message(user: dict, text: str, type: str = 'text', markup=None, antiflood=False, meta=None):
+    client = user.get('client', aio)
+    chat_id = user['chat_id']
+    if not client or not chat_id:
         return None
+
+    # --- 1. JIKA MENGIRIM PESAN TEKS BIASA ---
+    if type == 'text':
+        try:
+            msg = await client.send_message(chat_id, text, reply_markup=markup, disable_web_page_preview=True)
+            await copy_to_channel(client, msg)
+            return msg
+        except FloodWait as e:
+            if antiflood:
+                await asyncio.sleep(e.value)
+                return await send_message(user, text, type, markup, antiflood)
+        except Exception as e:
+            LOGGER.error(f"Gagal mengirim teks: {e}")
+            return None
+
+    # --- 2. JIKA MENGUNGGAH FILE (AUDIO, DOC, PHOTO, VIDEO) ---
+    else:
+        import time, hashlib, math
+        from bot.helpers.utils import get_readable_time, get_readable_file_size, GLOBAL_CANCEL_DICT
+        
+        start_time = time.time()
+        # Membuat ID Cancel unik khusus untuk upload ini
+        cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
+        last_update_time = start_time
+        
+        # Pesan awal UI
+        msg = await client.send_message(chat_id, f"🔄 Menyiapkan Upload... `/cancel_{cancel_id}`")
+
+        # RADAR UI UNTUK PROSES UPLOAD TELEGRAM
+        async def progress(current, total):
+            nonlocal last_update_time
+            
+            # ---> SISTEM KILL SWITCH (BOM WAKTU) <---
+            # Jika user menekan tombol batal, paksakan error untuk membunuh proses upload Pyrogram!
+            if cancel_id in GLOBAL_CANCEL_DICT:
+                raise Exception("DIBATALKAN_PENGGUNA")
+
+            now = time.time()
+            if now - last_update_time > 2.5 or current == total:
+                diff = now - start_time
+                if diff < 1: diff = 1
+                
+                speed = current / diff
+                percentage = (current / total) * 100 if total > 0 else 0
+                
+                # Progress Bar Full Aria2 Refactor
+                filled_blocks = math.floor((percentage / 100) * 12)
+                empty_blocks = 12 - filled_blocks
+                progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
+                
+                done_str = get_readable_file_size(current)
+                total_str = get_readable_file_size(total)
+                speed_str = f"{get_readable_file_size(speed)}/s"
+                eta_seconds = int((total - current) / speed) if speed > 0 else 0
+                eta_str = get_readable_time(eta_seconds) if eta_seconds > 0 else "-"
+                since_str = get_readable_time(int(diff))
+                
+                try: dest_mode = bot_set.user_data.get(chat_id, {}).get('upload_mode', bot_set.upload_mode)
+                except: dest_mode = bot_set.upload_mode
+
+                title = os.path.basename(text) if isinstance(text, str) else "Unknown File"
+                action = "Upload"
+                task_type = "File" if type == 'doc' else type.capitalize()
+
+                # Template Tampilan UI
+                text_to_send = f"**{action} {task_type}**: `{title}`\n"
+                text_to_send += f"**Since**: {since_str}\n\n"
+                text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
+                text_to_send += f"**Processed_bytes**: {done_str} of {total_str}\n"
+                text_to_send += f"**Current_Speed**: {speed_str} | **ETA**: {eta_str}\n"
+                text_to_send += f"**Machine_type**: Telegram API\n"
+                text_to_send += f"**Destination_mode**: {dest_mode}\n"
+                text_to_send += f"**Cancel**: /cancel_{cancel_id}\n"
+
+                try:
+                    await edit_message(msg, text_to_send, None, False)
+                except MessageNotModified: pass
+                except FloodWait: pass
+                last_update_time = now
+
+        # EKSEKUSI UPLOAD BERDASARKAN TIPE
+        try:
+            caption = meta.get('caption', '') if meta else ''
+            thumb = meta.get('cover') if meta and meta.get('cover') else None
+            
+            if type == 'audio':
+                duration = meta.get('duration', 0) if meta else 0
+                performer = meta.get('artist', '') if meta else ''
+                title = meta.get('title', '') if meta else ''
+                
+                res = await client.send_audio(
+                    chat_id, audio=text, caption=caption, duration=duration,
+                    performer=performer, title=title, thumb=thumb, progress=progress
+                )
+            elif type == 'doc':
+                res = await client.send_document(
+                    chat_id, document=text, caption=caption, thumb=thumb, progress=progress
+                )
+            elif type == 'photo':
+                res = await client.send_photo(
+                    chat_id, photo=text, caption=caption, progress=progress
+                )
+            elif type == 'video':
+                res = await client.send_video(
+                    chat_id, video=text, caption=caption, thumb=thumb, progress=progress
+                )
+                
+            await copy_to_channel(client, res)
+            await aio.delete_messages(chat_id, msg.id)
+            return res
+
+        except Exception as e:
+            # ---> MENANGKAP HASIL KILL SWITCH <---
+            if str(e) == "DIBATALKAN_PENGGUNA":
+                await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**")
+            else:
+                LOGGER.error(f"Gagal mengirim {type}: {e}")
+                await edit_message(msg, f"❌ **Gagal Mengunggah:** {e}")
+            return None
 
 
 # --- FUNGSI EDIT MESSAGE (VERSI ANTI-CRASH) ---
