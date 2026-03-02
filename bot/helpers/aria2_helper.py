@@ -114,3 +114,29 @@ async def aria2_cancel(gid):
     except:
         pass
     return False
+
+async def get_aria2_global_stat():
+    """Mengambil total kecepatan download Aria2 secara realtime"""
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "bot_global_stat",
+        "method": "aria2.getGlobalStat",
+        "params": []
+    }
+    
+    # URL harus sama dengan yang ada di bagian atas file aria2_helper.py
+    ARIA2_RPC_URL = "http://localhost:6800/jsonrpc" 
+    
+    try:
+        # Gunakan aiohttp untuk melakukan request ke daemon Aria2
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.post(ARIA2_RPC_URL, json=payload) as resp:
+                res = await resp.json()
+                if "error" not in res:
+                    return res["result"]
+    except Exception as e:
+        from bot.logger import LOGGER
+        LOGGER.error(f"Gagal mengambil Global Stat Aria2: {e}")
+        
+    return None
