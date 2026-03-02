@@ -100,36 +100,58 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
     total_tasks = len(tasks)
     completed_tasks = 0
     results = []
+    is_running = True
 
     async def run_with_sem(task):
         nonlocal completed_tasks
-        result = None 
         try:
             async with sem:
-                result = await task
-        except Exception: result = None
+                res = await task
+        except Exception:
+            res = None
         completed_tasks += 1
-        
-        if update_details:
-            try:
-                if completed_tasks % 5 == 0 or completed_tasks == total_tasks: 
-                    # --- BAGIAN PROGRESS BAR BARU ---
+        return res
+
+    # --- RADAR PINTAR UNTUK ALBUM/BATCH ---
+    async def live_updater():
+        from .aria2_helper import get_aria2_global_stat
+        start_time = time.time()
+        while is_running:
+            if update_details:
+                try:
+                    stats = await get_aria2_global_stat()
+                    speed = int(stats.get('downloadSpeed', 0)) if stats else 0
+                    
                     percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
                     filled_blocks = math.floor((percentage / 100) * 12)
                     empty_blocks = 12 - filled_blocks
                     progress_bar = "◘" * filled_blocks + "▱" * empty_blocks
                     
-                    text_to_send = update_details['text'].format(
-                        f"[{progress_bar}] {percentage:.1f}%", completed_tasks, total_tasks,
-                        update_details['title'], update_details['type'].title()
-                    )
-                    await edit_message(update_details['msg'], text_to_send, None, False)
-                    # --------------------------------
-            except: pass
-        return result
+                    speed_str = f"{get_readable_file_size(speed)}/s"
+                    since_str = get_readable_time(int(time.time() - start_time))
+                    
+                    # --- TEMPLATE MUTLAK MIRROR BOT (MENGABAIKAN tr_en.py) ---
+                    text_to_send = f"**{update_details.get('type', 'Task').title()}**: `{update_details.get('title', 'Unknown')}`\n"
+                    text_to_send += f"**Since**: {since_str}\n\n"
+                    text_to_send += f"**File_DataCenter**: File DC 4\n"
+                    text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.1f}%\n"
+                    text_to_send += f"**Processed_tasks**: {completed_tasks} of {total_tasks}\n"
+                    text_to_send += f"**Current_Speed**: {speed_str} 🚀\n"
+                    text_to_send += f"**Machine_type**: 2.2.18 | Bot\n"
+                    text_to_send += f"**Destination_mode**: Leech as Extract"
 
+                    await edit_message(update_details['msg'], text_to_send, None, False)
+                except: pass
+            
+            await asyncio.sleep(3.5)
+
+    updater_task = asyncio.create_task(live_updater())
     wrapped_tasks = [run_with_sem(task) for task in tasks]
     results = await asyncio.gather(*wrapped_tasks)
+    
+    is_running = False
+    await updater_task
+    
     return results
 
 async def create_link(path, basepath):
@@ -376,59 +398,62 @@ def get_readable_file_size(size_in_bytes) -> str:
 # --- FUNGSI PROGRESS BAR BARU ---
 async def progress_message(done, total, details):
     now = time.time()
-    
-    # 1. Rate Limiter (Mencegah bot terkena Flood/Spam dari Telegram)
     if 'last_updated' in details:
         if now - details['last_updated'] < 2.0 and done < total:
             return
     details['last_updated'] = now
 
-    # 2. Inisialisasi start_time untuk kalkulasi Speed & ETA
     if 'start_time' not in details:
         details['start_time'] = now
         
     diff = now - details['start_time']
-    if diff < 1:
-        diff = 1 
+    if diff < 1: diff = 1 
         
     speed = done / diff
     eta_seconds = int((total - done) / speed) if speed > 0 else 0
     percentage = (done / total) * 100 if total > 0 else 0
     
-    # 3. Membuat Progress Bar [◘◘◘◘◘◘◘◘◘◘◘◘] (12 Kotak)
+    # Progress bar ala Mirror Bot
     filled_blocks = math.floor((percentage / 100) * 12)
     empty_blocks = 12 - filled_blocks
     progress_bar = "◘" * filled_blocks + "▱" * empty_blocks
     
-    # 4. Format String
-    done_str = get_readable_file_size(done)
-    total_str = get_readable_file_size(total)
-    speed_str = f"{get_readable_file_size(speed)}/s"
+    # Deteksi Otomatis: Apakah ini menghitung Bytes (Single Track) atau Tasks (Playlist Loop)?
+    if total > 1000: # Mode Bytes
+        done_str = get_readable_file_size(done)
+        total_str = get_readable_file_size(total)
+        speed_str = f"{get_readable_file_size(speed)}/s"
+        progress_label = "Processed_bytes"
+    else: # Mode Playlist (Lagu per Lagu)
+        done_str = str(done)
+        total_str = str(total)
+        speed_str = "-"
+        progress_label = "Processed_tasks"
+        
     eta_str = get_readable_time(eta_seconds) if eta_seconds > 0 else "-"
     since_str = get_readable_time(int(diff))
     
-    # Ambil detail task
     title = details.get('title', 'Unknown File')
-    task_type = details.get('type', 'Download').capitalize()
-    task_id = details.get('task_id', 'BfHk9lwBj9RcA') # Dummy ID
+    task_type = details.get('type', 'Task').capitalize()
+    task_id = details.get('task_id', 'BatchTask')
     
-    # 5. Template Teks Sesuai Permintaan
+    # --- TEMPLATE MUTLAK MIRROR BOT (MENGABAIKAN tr_en.py) ---
     text = f"**{task_type}**: `{title}`\n"
     text += f"**Since**: {since_str}\n\n"
     text += f"**File_DataCenter**: File DC 4\n"
     text += f"**Progress**: `[{progress_bar}]` {percentage:.1f}%\n"
-    text += f"**Processed_bytes**: {done_str} of {total_str}\n"
+    text += f"**{progress_label}**: {done_str} of {total_str}\n"
     text += f"**Processed_speed**: {speed_str} | **ETA**: {eta_str}\n"
     text += f"**Machine_type**: 2.2.18 | Bot\n"
     text += f"**Destination_mode**: Leech as Extract\n"
-    text += f"**Cancel**: /cancel1 {task_id}"
+    
+    if total > 1000:
+        text += f"**Cancel**: /cancel1 {task_id}"
 
     try: 
         await edit_message(details['msg'], text, None, False)
-    except FloodWait: 
-        pass
-    except MessageNotModified:
-        pass
+    except FloodWait: pass
+    except MessageNotModified: pass
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
