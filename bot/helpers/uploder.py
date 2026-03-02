@@ -502,7 +502,7 @@ async def batch_telegram_upload(metadata, user):
                 tasks.append(telegram_upload(track, user, batch_mode=True))
     if not tasks: return
 
-    # --- MENYAMBUNGKAN KE UI BARU (UPLOAD) ---
+    # --- PENYAMBUNG UI BARU (YANG LAMA DIHAPUS) ---
     if 'bot_msg' in user:
         update_details = {
             'action': 'Upload', 
@@ -510,10 +510,11 @@ async def batch_telegram_upload(metadata, user):
             'title': metadata.get('title', 'Unknown'),
             'msg': user['bot_msg']
         }
-        # Memanggil Radar Pintar (Aria2/Telegram Speed) dari utils.py
+        # Mengirim data ke Radar Pintar kita di utils.py
+        from .utils import run_concurrent_tasks
         await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     else:
-        # Fallback jika tidak ada pesan bot
+        # Fallback rahasia jika pesan tidak ada
         semaphore = asyncio.Semaphore(Config.MAX_WORKERS)
         async def sem_task(task):
             async with semaphore:
