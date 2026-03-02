@@ -121,14 +121,20 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
             return None
 
     else:
-        import time, hashlib, math
+        import time, hashlib, math, os
         from bot.helpers.utils import get_readable_time, get_readable_file_size, GLOBAL_CANCEL_DICT
         
         start_time = time.time()
         cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
         last_update_time = start_time
         
-        msg = await client.send_message(chat_id, f"🔄 Menyiapkan Upload... `/cancel_{cancel_id}`")
+        # --- FIX UTAMA: CEK APAKAH INI FILE LOKAL ATAU URL ---
+        is_local = isinstance(text, str) and os.path.exists(text)
+        
+        # Jangan kirim pesan "Menyiapkan Upload..." jika hanya mengunggah URL (seperti Art Poster)
+        msg = None
+        if is_local:
+            msg = await client.send_message(chat_id, f"🔄 Menyiapkan Upload... `/cancel_{cancel_id}`")
 
         async def progress(current, total):
             nonlocal last_update_time
@@ -136,7 +142,7 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 raise Exception("DIBATALKAN_PENGGUNA")
 
             now = time.time()
-            if now - last_update_time > 2.5 or current == total:
+            if msg and (now - last_update_time > 2.5 or current == total):
                 diff = now - start_time
                 if diff < 1: diff = 1
                 
@@ -177,10 +183,11 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 last_update_time = now
 
         try:
-            # --- PERBAIKAN DI SINI ---
-            # Mengutamakan parameter 'caption', baru kemudian membaca dari 'meta'
             final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
             thumb = meta.get('cover') if meta and meta.get('cover') else None
+            
+            # --- FIX UTAMA: MATIKAN PROGRESS JIKA INI URL ---
+            prog_func = progress if is_local else None
             
             if type == 'audio':
                 duration = meta.get('duration', 0) if meta else 0
@@ -189,31 +196,34 @@ async def send_message(user: dict, text: str, type: str = 'text', markup=None, a
                 
                 res = await client.send_audio(
                     chat_id, audio=text, caption=final_caption, duration=duration,
-                    performer=performer, title=audio_title, thumb=thumb, progress=progress
+                    performer=performer, title=audio_title, thumb=thumb, progress=prog_func
                 )
             elif type == 'doc':
                 res = await client.send_document(
-                    chat_id, document=text, caption=final_caption, thumb=thumb, progress=progress
+                    chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func
                 )
             elif type == 'photo':
                 res = await client.send_photo(
-                    chat_id, photo=text, caption=final_caption, progress=progress
+                    chat_id, photo=text, caption=final_caption, progress=prog_func
                 )
             elif type == 'video':
                 res = await client.send_video(
-                    chat_id, video=text, caption=final_caption, thumb=thumb, progress=progress
+                    chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func
                 )
                 
             await copy_to_channel(client, res)
-            await aio.delete_messages(chat_id, msg.id)
+            
+            # Hapus pesan status HANYA jika pesan statusnya dibuat
+            if msg:
+                await aio.delete_messages(chat_id, msg.id)
             return res
 
         except Exception as e:
             if str(e) == "DIBATALKAN_PENGGUNA":
-                await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**")
+                if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**")
             else:
                 LOGGER.error(f"Gagal mengirim {type}: {e}")
-                await edit_message(msg, f"❌ **Gagal Mengunggah:** {e}")
+                if msg: await edit_message(msg, f"❌ **Gagal Mengunggah:** {e}")
             return None
 
 
