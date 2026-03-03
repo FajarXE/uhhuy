@@ -17,6 +17,29 @@ from Cryptodome.Cipher import Blowfish
 from config import Config 
 from bot.logger import LOGGER
 
+# --- RADAR SPEED KHUSUS DEEZER ---
+GLOBAL_DEEZER_BYTES = 0
+LAST_CHECK_TIME = time()
+LAST_CHECK_BYTES = 0
+CURRENT_DEEZER_SPEED = 0
+
+def get_deezer_speed():
+    global GLOBAL_DEEZER_BYTES, LAST_CHECK_TIME, LAST_CHECK_BYTES, CURRENT_DEEZER_SPEED
+    from time import time as current_time
+    now = current_time()
+    diff = now - LAST_CHECK_TIME
+    if diff >= 1.0:
+        speed = (GLOBAL_DEEZER_BYTES - LAST_CHECK_BYTES) / diff
+        CURRENT_DEEZER_SPEED = int(speed)
+        LAST_CHECK_BYTES = GLOBAL_DEEZER_BYTES
+        LAST_CHECK_TIME = now
+        
+    # Reset ke 0 jika tidak ada aktivitas unduhan
+    if diff >= 2.0 and LAST_CHECK_BYTES == GLOBAL_DEEZER_BYTES:
+        CURRENT_DEEZER_SPEED = 0
+        
+    return CURRENT_DEEZER_SPEED
+
 class APIError(Exception):
     def __init__(self, type, msg, payload):
         self.type = type
@@ -256,6 +279,7 @@ class DeezerAPI:
         return key
     
     async def dl_track(self, id, url, path):
+        global GLOBAL_DEEZER_BYTES
         bf_key = self._get_blowfish_key(id)
         async with self.session.get(url, allow_redirects=True) as resp:
             if resp.status in [403, 404]:
@@ -265,6 +289,9 @@ class DeezerAPI:
             buf = bytearray()
             async for data, _ in resp.content.iter_chunks():
                 buf += data
+                # ---> SENSOR BEKERJA DISINI (Menghitung bytes) <---
+                GLOBAL_DEEZER_BYTES += len(data)
+                
             encrypt_chunk_size = 3 * 2048
             os.makedirs(os.path.dirname(path), exist_ok=True)
             async with aiofiles.open(path, "wb") as audio:
