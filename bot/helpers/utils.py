@@ -98,27 +98,30 @@ async def format_string(text:str, data:dict, user=None):
     return text
 
 async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 100):
+    import asyncio
+    import hashlib
+    import time
+    import math
+    from bot.settings import bot_set
+    from .message import edit_message
+    from .utils import get_readable_file_size, get_readable_time, GLOBAL_CANCEL_DICT
+
     sem = asyncio.Semaphore(limit)
     total_tasks = len(tasks)
     completed_tasks = 0
-    results = []
     is_running = True
 
-    import hashlib
     start_time = time.time()
     batch_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
 
     async def run_with_sem(task):
         nonlocal completed_tasks
-        # 1. Jika tombol batal ditekan, hancurkan tugas sebelum berjalan!
         if batch_id in GLOBAL_CANCEL_DICT:
-            task.close()
             return None
             
         try:
             async with sem:
                 if batch_id in GLOBAL_CANCEL_DICT:
-                    task.close()
                     return None
                 res = await task
         except Exception:
@@ -126,6 +129,9 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
             
         completed_tasks += 1
         return res
+
+    # Bungkus task agar bisa dibunuh paksa nanti
+    pending_tasks = [asyncio.create_task(run_with_sem(task)) for task in tasks]
 
     async def live_updater():
         from .aria2_helper import get_aria2_global_stat
@@ -136,53 +142,67 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
             dest_mode = bot_set.upload_mode
             
         while is_running:
-            # 2. Cek apakah pengguna menekan /cancel
             if batch_id in GLOBAL_CANCEL_DICT:
                 if update_details:
                     try: await edit_message(update_details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                     except: pass
-                break # Matikan radar
+                
+                # --- KILL SWITCH INSTAN ---
+                # Membatalkan paksa semua lagu yang sedang berjalan!
+                for t in pending_tasks:
+                    if not t.done():
+                        t.cancel()
+                break 
 
             if update_details:
                 try:
                     stats = await get_aria2_global_stat()
                     speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
                     speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
+                except:
+                    speed_dl = 0
+                    speed_ul = 0
                     
-                    percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
-                    filled_blocks = math.floor((percentage / 100) * 12)
-                    empty_blocks = 12 - filled_blocks
-                    progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
-                    
-                    speed_str = f"{get_readable_file_size(speed_dl)}/s"
-                    since_str = get_readable_time(int(time.time() - start_time))
-                    
-                    title = update_details.get('title', 'Unknown')
-                    action = update_details.get('action', 'Download').capitalize()
-                    task_type = update_details.get('type', 'Task').capitalize()
-                    
-                    text_to_send = f"**{action} {task_type}**: `{title}`\n"
-                    text_to_send += f"**Since**: {since_str}\n\n"
-                    text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
-                    text_to_send += f"**Processed_tasks**: {completed_tasks} of {total_tasks}\n"
-                    text_to_send += f"**Current_Speed**: {speed_str}\n"
-                    text_to_send += f"**Machine_type**: Aria2c 1.37.0\n"
-                    text_to_send += f"**Destination_mode**: {dest_mode}\n"
-                    text_to_send += f"**Cancel**: /cancel_{batch_id}\n\n"
-                    text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
+                percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+                filled_blocks = math.floor((percentage / 100) * 12)
+                empty_blocks = 12 - filled_blocks
+                progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
+                
+                speed_str = f"{get_readable_file_size(speed_dl)}/s"
+                since_str = get_readable_time(int(time.time() - start_time))
+                
+                title = update_details.get('title', 'Unknown')
+                action = update_details.get('action', 'Download').capitalize()
+                task_type = update_details.get('type', 'Task').capitalize()
+                
+                text_to_send = f"**{action} {task_type}**: `{title}`\n"
+                text_to_send += f"**Since**: {since_str}\n\n"
+                text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
+                text_to_send += f"**Processed_tasks**: {completed_tasks} of {total_tasks}\n"
+                text_to_send += f"**Current_Speed**: {speed_str}\n"
+                text_to_send += f"**Machine_type**: Aria2c 1.37.0\n"
+                text_to_send += f"**Destination_mode**: {dest_mode}\n"
+                text_to_send += f"**Cancel**: /cancel_{batch_id}\n\n"
+                text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
-                    await edit_message(update_details['msg'], text_to_send, None, False)
+                try: await edit_message(update_details['msg'], text_to_send, None, False)
                 except: pass
             
             await asyncio.sleep(3.5)
 
     updater_task = asyncio.create_task(live_updater())
-    wrapped_tasks = [run_with_sem(task) for task in tasks]
-    results = await asyncio.gather(*wrapped_tasks)
+    
+    # Tunggu semua task, abaikan error jika kita membunuhnya paksa (cancel)
+    results = await asyncio.gather(*pending_tasks, return_exceptions=True)
     
     is_running = False
     await updater_task
     
+    # --- MEMOTONG JALUR KE UPLOAD ---
+    # Jika batal, buat error sengaja agar handler.py TIDAK meneruskan ke proses upload
+    if batch_id in GLOBAL_CANCEL_DICT:
+        raise Exception("DIBATALKAN_PENGGUNA")
+        
     return results
 
 async def create_link(path, basepath):
