@@ -261,14 +261,9 @@ class DeezerAPI:
         
         from bot.helpers.utils import download_file
         import os
-        import aiofiles
         import asyncio
-        import random
         
-        # [FIX] Beri sedikit jeda acak (0-1 detik) agar panggilan ke Aria2 tidak tabrakan di memori
-        await asyncio.sleep(random.uniform(0.1, 1.2))
-        
-        # 1. Biarkan Aria2 yang ngebut mengunduh file
+        # 1. Aria2 ngebut mengunduh file terenkripsi (.enc)
         err = await download_file(url, enc_path, details=details)
         
         # Jika dibatalkan (/cancel) atau gagal, bersihkan!
@@ -278,22 +273,10 @@ class DeezerAPI:
                 except: pass
             return err 
             
-        # 2. Setelah Aria2 sukses, bongkar gembok (Dekripsi) secara lokal
+        # 2. Dekripsi Super Cepat via Background Thread (Bot TIDAK akan freeze lagi!)
         try:
-            encrypt_chunk_size = 3 * 2048
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            async with aiofiles.open(enc_path, "rb") as enc_file:
-                async with aiofiles.open(path, "wb") as audio:
-                    while True:
-                        chunk = await enc_file.read(encrypt_chunk_size)
-                        if not chunk:
-                            break
-                        if len(chunk) >= 2048:
-                            decrypted_chunk = (self._decrypt_chunk(bf_key, chunk[:2048]) + chunk[2048:])
-                        else:
-                            decrypted_chunk = chunk
-                        await audio.write(decrypted_chunk)
-                        
+            await asyncio.to_thread(self._decrypt_file_sync, bf_key, enc_path, path)
+            
             # Bersihkan file .enc mentah setelah sukses menjadi FLAC/MP3
             if os.path.exists(enc_path):
                 os.remove(enc_path)
@@ -306,6 +289,28 @@ class DeezerAPI:
                 try: os.remove(enc_path)
                 except: pass
             return str(e)
+
+    # --- TAMBAHKAN FUNGSI BARU INI TEPAT DI BAWAH dl_track ---
+    @staticmethod
+    def _decrypt_file_sync(bf_key, enc_path, path):
+        from Cryptodome.Cipher import Blowfish
+        import os
+        
+        encrypt_chunk_size = 3 * 2048
+        iv = b"\x00\x01\x02\x03\x04\x05\x06\x07"
+        
+        with open(enc_path, "rb") as enc_file, open(path, "wb") as audio:
+            while True:
+                chunk = enc_file.read(encrypt_chunk_size)
+                if not chunk:
+                    break
+                # Bongkar gembok hanya pada 2048 bytes pertama setiap potongan
+                if len(chunk) >= 2048:
+                    cipher = Blowfish.new(bf_key, Blowfish.MODE_CBC, iv)
+                    decrypted_chunk = cipher.decrypt(chunk[:2048]) + chunk[2048:]
+                else:
+                    decrypted_chunk = chunk
+                audio.write(decrypted_chunk)
 
     @staticmethod
     def _decrypt_chunk(key, data):
