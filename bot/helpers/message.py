@@ -250,7 +250,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             return res
 
         except Exception as e:
-            if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
+            import asyncio
+            if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e) or isinstance(e, asyncio.CancelledError):
                 if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**")
             else:
                 LOGGER.error(f"Gagal mengirim {type}: {e}")
