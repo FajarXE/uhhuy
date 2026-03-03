@@ -249,15 +249,19 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 await aio.delete_messages(chat_id, msg.id)
             return res
 
-        except Exception as e:
-            import asyncio
-            if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e) or isinstance(e, asyncio.CancelledError):
-                if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**")
-            else:
-                LOGGER.error(f"Gagal mengirim {type}: {e}")
-                if msg: await edit_message(msg, f"❌ **Gagal Mengunggah:** {e}")
+        # [FIX] Tangkap khusus CancelledError agar UI Telegram ter-update!
+        except asyncio.CancelledError:
+            if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
             return None
-
+            
+        except Exception as e:
+            if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
+                if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
+            else:
+                from bot.logger import LOGGER
+                LOGGER.error(f"Gagal mengirim {type}: {e}")
+                if msg: await edit_message(msg, f"❌ **Gagal Mengunggah:** {e}", None, False)
+            return None
 
 # --- FUNGSI EDIT MESSAGE (VERSI ANTI-CRASH) ---
 async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
