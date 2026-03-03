@@ -186,6 +186,15 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 except:
                     speed_dl = 0
                     
+                # --- SUNTIKAN RADAR DEEZER (KHUSUS MESSAGE.PY) ---
+                try:
+                    from bot.helpers.deezer.dzapi import get_deezer_speed
+                    dz_spd = get_deezer_speed()
+                    if dz_spd > 0:
+                        speed_dl += dz_spd
+                except: pass
+                # -----------------------------
+                
                 speed_ul = speed
 
                 text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
@@ -219,7 +228,6 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             elif type == 'doc':
                 res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
             
-            # --- PERBAIKAN: Mengenali 'pic' dan 'photo' secara bersamaan! ---
             elif type in ['photo', 'pic']:
                 res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func)
             
