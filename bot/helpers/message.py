@@ -102,6 +102,8 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
 
 
 async def send_message(user, text: str, type: str = 'text', markup=None, antiflood=False, meta=None, caption=None):
+    # [FIX] Import asyncio diletakkan di paling atas agar dikenali seluruh blok kode!
+    import asyncio
     from pyrogram.types import Message
     from bot.tgclient import aio
     
@@ -120,20 +122,23 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
     if type == 'text':
         try:
             msg = await client.send_message(chat_id, text, reply_markup=markup, disable_web_page_preview=True)
+            from bot.helpers.message import copy_to_channel
             await copy_to_channel(client, msg)
             return msg
-        except FloodWait as e:
-            if antiflood:
-                import asyncio
-                await asyncio.sleep(e.value)
-                return await send_message(user, text, type, markup, antiflood, meta, caption)
         except Exception as e:
-            LOGGER.error(f"Gagal mengirim teks: {e}")
+            if "FloodWait" in str(type(e).__name__):
+                if antiflood:
+                    await asyncio.sleep(e.value)
+                    return await send_message(user, text, type, markup, antiflood, meta, caption)
+            else:
+                from bot.logger import LOGGER
+                LOGGER.error(f"Gagal mengirim teks: {e}")
             return None
 
     else:
         import time, hashlib, math, os
         from bot.helpers.utils import get_readable_time, get_readable_file_size, GLOBAL_CANCEL_DICT
+        from bot.settings import bot_set
         
         start_time = time.time()
         cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
@@ -142,8 +147,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         is_local = False
         if isinstance(text, str):
             try:
-                # Perluas cakupan: Anggap file 'local' jika path-nya bukan URL/URI.
-                # Ini mengizinkan Aria2 memicu radar UI sebelum file .enc terunduh sepenuhnya.
+                # Membaca path lokal untuk trigger radar UI
                 if not text.startswith("http") and not text.startswith("tg://"):
                     is_local = True
             except: pass
@@ -155,7 +159,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         async def progress(current, total):
             nonlocal last_update_time
             if cancel_id in GLOBAL_CANCEL_DICT:
-                import asyncio
+                # Sengaja lempar CancelledError agar langsung ditangkap bawahnya
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
             now = time.time()
@@ -191,14 +195,12 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 except:
                     speed_dl = 0
                     
-                # --- SUNTIKAN RADAR DEEZER (KHUSUS MESSAGE.PY) ---
+                # Injeksi kecepatan Deezer jika ada (aman dari error)
                 try:
                     from bot.helpers.deezer.dzapi import get_deezer_speed
                     dz_spd = get_deezer_speed()
-                    if dz_spd > 0:
-                        speed_dl += dz_spd
+                    if dz_spd > 0: speed_dl += dz_spd
                 except: pass
-                # -----------------------------
                 
                 speed_ul = speed
 
@@ -212,9 +214,10 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 text_to_send += f"**Cancel**: /cancel_{cancel_id}\n\n"
                 text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
-                try: await edit_message(msg, text_to_send, None, False)
-                except MessageNotModified: pass
-                except FloodWait: pass
+                try:
+                    from bot.helpers.message import edit_message
+                    await edit_message(msg, text_to_send, None, False)
+                except Exception: pass
                 last_update_time = now
 
         try:
@@ -243,18 +246,24 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
                 
             if res:
-                await copy_to_channel(client, res)
+                try:
+                    from bot.helpers.message import copy_to_channel
+                    await copy_to_channel(client, res)
+                except: pass
             if msg:
                 from bot.tgclient import aio
-                await aio.delete_messages(chat_id, msg.id)
+                try: await aio.delete_messages(chat_id, msg.id)
+                except: pass
             return res
 
-        # [FIX] Tangkap khusus CancelledError agar UI Telegram ter-update!
+        # [FIX] Karena asyncio dideklarasikan di awal, Python pasti kenal bagian ini!
         except asyncio.CancelledError:
+            from bot.helpers.message import edit_message
             if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
             return None
             
         except Exception as e:
+            from bot.helpers.message import edit_message
             if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
                 if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
             else:
@@ -262,6 +271,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 LOGGER.error(f"Gagal mengirim {type}: {e}")
                 if msg: await edit_message(msg, f"❌ **Gagal Mengunggah:** {e}", None, False)
             return None
+
 
 # --- FUNGSI EDIT MESSAGE (VERSI ANTI-CRASH) ---
 async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
