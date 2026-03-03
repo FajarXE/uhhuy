@@ -262,8 +262,13 @@ class DeezerAPI:
         from bot.helpers.utils import download_file
         import os
         import aiofiles
+        import asyncio
+        import random
         
-        # 1. Biarkan Aria2 yang ngebut mengunduh file (meskipun terenkripsi)
+        # [FIX] Beri sedikit jeda acak (0-1 detik) agar panggilan ke Aria2 tidak tabrakan di memori
+        await asyncio.sleep(random.uniform(0.1, 1.2))
+        
+        # 1. Biarkan Aria2 yang ngebut mengunduh file
         err = await download_file(url, enc_path, details=details)
         
         # Jika dibatalkan (/cancel) atau gagal, bersihkan!
@@ -300,7 +305,7 @@ class DeezerAPI:
             if os.path.exists(enc_path):
                 try: os.remove(enc_path)
                 except: pass
-            return str(e) 
+            return str(e)
 
     @staticmethod
     def _decrypt_chunk(key, data):
