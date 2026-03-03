@@ -155,7 +155,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         async def progress(current, total):
             nonlocal last_update_time
             if cancel_id in GLOBAL_CANCEL_DICT:
-                raise Exception("DIBATALKAN_PENGGUNA")
+                import asyncio
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
             now = time.time()
             if msg and (now - last_update_time > 2.5 or current == total):
