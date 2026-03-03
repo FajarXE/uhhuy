@@ -116,12 +116,16 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
 
     async def run_with_sem(task):
         nonlocal completed_tasks
+        
+        # [FIX 1] Menutup coroutine secara resmi agar tidak error "never awaited"
         if batch_id in GLOBAL_CANCEL_DICT:
+            if hasattr(task, 'close'): task.close() 
             return None
             
         try:
             async with sem:
                 if batch_id in GLOBAL_CANCEL_DICT:
+                    if hasattr(task, 'close'): task.close()
                     return None
                 res = await task
         except Exception:
@@ -130,7 +134,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
         completed_tasks += 1
         return res
 
-    # Bungkus task agar bisa dibunuh paksa nanti
     pending_tasks = [asyncio.create_task(run_with_sem(task)) for task in tasks]
 
     async def live_updater():
@@ -143,12 +146,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
             
         while is_running:
             if batch_id in GLOBAL_CANCEL_DICT:
-                if update_details:
-                    try: await edit_message(update_details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
-                    except: pass
-                
-                # --- KILL SWITCH INSTAN ---
-                # Membatalkan paksa semua lagu yang sedang berjalan!
                 for t in pending_tasks:
                     if not t.done():
                         t.cancel()
@@ -188,18 +185,25 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 try: await edit_message(update_details['msg'], text_to_send, None, False)
                 except: pass
             
-            await asyncio.sleep(3.5)
+            # [FIX 2] Memecah jeda 3.5 detik menjadi kepingan kecil agar super responsif terhadap Cancel
+            for _ in range(35):
+                if not is_running or batch_id in GLOBAL_CANCEL_DICT:
+                    break
+                await asyncio.sleep(0.1)
 
     updater_task = asyncio.create_task(live_updater())
     
-    # Tunggu semua task, abaikan error jika kita membunuhnya paksa (cancel)
     results = await asyncio.gather(*pending_tasks, return_exceptions=True)
     
     is_running = False
     await updater_task
     
-    # --- MEMOTONG JALUR KE UPLOAD ---
+    # [FIX 3] Garansi Mutlak UI akan berubah menjadi Batal!
     if batch_id in GLOBAL_CANCEL_DICT:
+        if update_details and 'msg' in update_details:
+            try: await edit_message(update_details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+            except: pass
+            
         import asyncio
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         
