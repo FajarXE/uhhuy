@@ -199,9 +199,9 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
     await updater_task
     
     # --- MEMOTONG JALUR KE UPLOAD ---
-    # Jika batal, buat error sengaja agar handler.py TIDAK meneruskan ke proses upload
     if batch_id in GLOBAL_CANCEL_DICT:
-        raise Exception("DIBATALKAN_PENGGUNA")
+        import asyncio
+        raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         
     return results
 
