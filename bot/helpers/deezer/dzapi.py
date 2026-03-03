@@ -17,29 +17,6 @@ from Cryptodome.Cipher import Blowfish
 from config import Config 
 from bot.logger import LOGGER
 
-# --- RADAR SPEED KHUSUS DEEZER ---
-GLOBAL_DEEZER_BYTES = 0
-LAST_CHECK_TIME = time()
-LAST_CHECK_BYTES = 0
-CURRENT_DEEZER_SPEED = 0
-
-def get_deezer_speed():
-    global GLOBAL_DEEZER_BYTES, LAST_CHECK_TIME, LAST_CHECK_BYTES, CURRENT_DEEZER_SPEED
-    from time import time as current_time
-    now = current_time()
-    diff = now - LAST_CHECK_TIME
-    if diff >= 1.0:
-        speed = (GLOBAL_DEEZER_BYTES - LAST_CHECK_BYTES) / diff
-        CURRENT_DEEZER_SPEED = int(speed)
-        LAST_CHECK_BYTES = GLOBAL_DEEZER_BYTES
-        LAST_CHECK_TIME = now
-        
-    # Reset ke 0 jika tidak ada aktivitas unduhan
-    if diff >= 2.0 and LAST_CHECK_BYTES == GLOBAL_DEEZER_BYTES:
-        CURRENT_DEEZER_SPEED = 0
-        
-    return CURRENT_DEEZER_SPEED
-
 class APIError(Exception):
     def __init__(self, type, msg, payload):
         self.type = type
@@ -278,32 +255,52 @@ class DeezerAPI:
         key = bytes([md5_id[i] ^ md5_id[i + 16] ^ self.bf_secret[i] for i in range(16)])
         return key
     
-    async def dl_track(self, id, url, path):
-        global GLOBAL_DEEZER_BYTES
+    async def dl_track(self, id, url, path, details=None):
         bf_key = self._get_blowfish_key(id)
-        async with self.session.get(url, allow_redirects=True) as resp:
-            if resp.status in [403, 404]:
-                LOGGER.error(f"Deezer download URL gagal (HTTP {resp.status}) untuk track ID {id}")
-                return f"HTTP {resp.status} Error" 
+        enc_path = path + ".enc"
+        
+        from bot.helpers.utils import download_file
+        import os
+        import aiofiles
+        
+        # 1. Biarkan Aria2 yang ngebut mengunduh file (meskipun terenkripsi)
+        err = await download_file(url, enc_path, details=details)
+        
+        # Jika dibatalkan (/cancel) atau gagal, bersihkan!
+        if err is not None:
+            if os.path.exists(enc_path):
+                try: os.remove(enc_path)
+                except: pass
+            return err 
             
-            buf = bytearray()
-            async for data, _ in resp.content.iter_chunks():
-                buf += data
-                # ---> SENSOR BEKERJA DISINI (Menghitung bytes) <---
-                GLOBAL_DEEZER_BYTES += len(data)
-                
+        # 2. Setelah Aria2 sukses, bongkar gembok (Dekripsi) secara lokal
+        try:
             encrypt_chunk_size = 3 * 2048
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            async with aiofiles.open(path, "wb") as audio:
-                buflen = len(buf)
-                for i in range(0, buflen, encrypt_chunk_size):
-                    data = buf[i : min(i + encrypt_chunk_size, buflen)]
-                    if len(data) >= 2048:
-                        decrypted_chunk = (self._decrypt_chunk(bf_key, data[:2048]) + data[2048:])
-                    else:
-                        decrypted_chunk = data
-                    await audio.write(decrypted_chunk)
-        return None 
+            async with aiofiles.open(enc_path, "rb") as enc_file:
+                async with aiofiles.open(path, "wb") as audio:
+                    while True:
+                        chunk = await enc_file.read(encrypt_chunk_size)
+                        if not chunk:
+                            break
+                        if len(chunk) >= 2048:
+                            decrypted_chunk = (self._decrypt_chunk(bf_key, chunk[:2048]) + chunk[2048:])
+                        else:
+                            decrypted_chunk = chunk
+                        await audio.write(decrypted_chunk)
+                        
+            # Bersihkan file .enc mentah setelah sukses menjadi FLAC/MP3
+            if os.path.exists(enc_path):
+                os.remove(enc_path)
+            return None 
+            
+        except Exception as e:
+            from bot.logger import LOGGER
+            LOGGER.error(f"Deezer Decryption error: {e}")
+            if os.path.exists(enc_path):
+                try: os.remove(enc_path)
+                except: pass
+            return str(e) 
 
     @staticmethod
     def _decrypt_chunk(key, data):
