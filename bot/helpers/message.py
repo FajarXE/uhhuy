@@ -219,7 +219,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             elif type == 'doc':
                 res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
             
-            elif type == 'photo':
+            # --- PERBAIKAN: Mengenali 'pic' dan 'photo' secara bersamaan! ---
+            elif type in ['photo', 'pic']:
                 res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func)
             
             elif type == 'video':
