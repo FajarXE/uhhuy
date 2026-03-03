@@ -256,26 +256,30 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 except: pass
             return res
 
-        # [FIX] Tangkap CancelledError, update UI, kirim pesan penutup, lalu matikan proses!
+        # [FIX] Tangkap CancelledError, update Radar UI, update pesan "UPLOADING...", lalu lempar sinyal!
         except asyncio.CancelledError:
             from bot.helpers.message import edit_message
             if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
             
-            # --- TAMBAHAN BARU: Bot langsung mengirim pesan konfirmasi batal ---
-            try: await client.send_message(chat_id, "Tugas dibatalkan.")
-            except: pass
+            # --- MENGHAPUS PESAN "UPLOADING..." YANG NYANGKUT ---
+            if isinstance(user, dict) and 'bot_msg' in user:
+                try: await edit_message(user['bot_msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                except: pass
             
-            raise  # Teruskan sinyal agar proses tidak lanjut mengunggah lagu berikutnya
+            # Lempar sinyal ke sistem utama (agar sistem utama yg mengirim 1x pesan "Tugas Dibatalkan")
+            raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             
         except Exception as e:
             from bot.helpers.message import edit_message
             if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
                 if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
                 
-                # --- TAMBAHAN BARU: Bot langsung mengirim pesan konfirmasi batal ---
-                try: await client.send_message(chat_id, "Tugas dibatalkan.")
-                except: pass
+                # --- MENGHAPUS PESAN "UPLOADING..." YANG NYANGKUT ---
+                if isinstance(user, dict) and 'bot_msg' in user:
+                    try: await edit_message(user['bot_msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                    except: pass
                 
+                # Lempar sinyal ke sistem utama
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 from bot.logger import LOGGER
