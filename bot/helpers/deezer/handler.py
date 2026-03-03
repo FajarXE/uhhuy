@@ -174,7 +174,7 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
         'type': album_meta['type']
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
 
     original_tracks = album_meta['tracks']
     successful_tracks = []
@@ -285,7 +285,7 @@ async def start_playlist(playlist_id, user):
         for track in play_meta['tracks']:
             tasks.append(start_track(track['itemid'], user, track, upload, playlist_folder))
         
-        task_results = await run_concurrent_tasks(tasks, update_details)
+        task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
         original_tracks = play_meta['tracks']
         successful_tracks = []
         for i in range(len(original_tracks)):
