@@ -90,8 +90,8 @@ async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=
         return False
     # -----------------------------------------------------
 
-    if not os.path.exists(track_meta['filepath']) or os.path.getsize(track_meta['filepath']) < 1048576: 
-        LOGGER.warning(f"Deezer: File terlalu kecil (<1MB).")
+    if not os.path.exists(track_meta['filepath']) or os.path.getsize(track_meta['filepath']) == 0: 
+        LOGGER.warning(f"Deezer: File gagal diunduh atau kosong!")
         try: os.remove(track_meta['filepath'])
         except: pass
         return False
