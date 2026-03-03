@@ -141,7 +141,11 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         
         is_local = False
         if isinstance(text, str):
-            try: is_local = os.path.exists(text)
+            try:
+                # Perluas cakupan: Anggap file 'local' jika path-nya bukan URL/URI.
+                # Ini mengizinkan Aria2 memicu radar UI sebelum file .enc terunduh sepenuhnya.
+                if not text.startswith("http") and not text.startswith("tg://"):
+                    is_local = True
             except: pass
             
         msg = None
