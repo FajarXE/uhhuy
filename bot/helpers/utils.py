@@ -145,21 +145,9 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
 
             if update_details:
                 try:
-                    # Ambil data dari Aria2
-                    try:
-                        stats = await get_aria2_global_stat()
-                        speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
-                        speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-                    except:
-                        speed_dl = 0
-                        speed_ul = 0
-                        
-                    # --- SUNTIKAN RADAR DEEZER ---
-                    try:
-                        from bot.helpers.deezer.dzapi import get_deezer_speed
-                        speed_dl += get_deezer_speed()
-                    except: pass
-                    # -----------------------------
+                    stats = await get_aria2_global_stat()
+                    speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
+                    speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
                     
                     percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
                     filled_blocks = math.floor((percentage / 100) * 12)
@@ -440,10 +428,6 @@ def get_readable_file_size(size_in_bytes) -> str:
 
 # --- FUNGSI PROGRESS BAR BARU ---
 async def progress_message(done, total, details):
-    import math
-    import time
-    from .utils import get_readable_file_size, get_readable_time # Pastikan import ini ada
-
     now = time.time()
     if 'last_updated' in details:
         if now - details['last_updated'] < 2.0 and done < total:
@@ -478,39 +462,20 @@ async def progress_message(done, total, details):
     
     # --- DETEKSI ACTION & TYPE ---
     title = details.get('title', 'Unknown File')
-    action = details.get('action', 'Download').capitalize()
+    action = details.get('action', 'Download').capitalize() # Default ke Download
     task_type = details.get('type', 'Task').capitalize()
     task_id = details.get('task_id', 'BatchTask')
     
     try:
         user_id = details['msg'].chat.id
-        from bot.settings import bot_set
         dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode)
     except:
-        from bot.settings import bot_set
         dest_mode = bot_set.upload_mode
         
-    try:
-        from .aria2_helper import get_aria2_global_stat
-        stats = await get_aria2_global_stat()
-        speed_dl = int(stats.get('downloadSpeed', 0)) if stats else speed
-        speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-    except:
-        speed_dl = speed
-        speed_ul = 0
-        
-    # --- SUNTIKAN RADAR DEEZER ---
-    try:
-        from bot.helpers.deezer.dzapi import get_deezer_speed
-        dz_spd = get_deezer_speed()
-        if dz_spd > 0:
-            speed_dl += dz_spd
-            # Jika ini sedang mengunduh lagu tunggal (menghitung Bytes),
-            # Ganti teks 'Current_Speed' agar menggunakan laju Deezer
-            if total > 1000: 
-                speed_str = f"{get_readable_file_size(dz_spd)}/s"
-    except: pass
-    # -----------------------------
+    from .aria2_helper import get_aria2_global_stat
+    stats = await get_aria2_global_stat()
+    speed_dl = int(stats.get('downloadSpeed', 0)) if stats else speed
+    speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
     
     # --- TEMPLATE TEXT TERBARU ---
     text = f"**{action} {task_type}**: `{title}`\n"
@@ -526,10 +491,9 @@ async def progress_message(done, total, details):
     text += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
     try: 
-        from .message import edit_message
         await edit_message(details['msg'], text, None, False)
-    except Exception: 
-        pass
+    except FloodWait: pass
+    except MessageNotModified: pass
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
