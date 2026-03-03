@@ -176,10 +176,10 @@ class TidalApi:
 
     async def get_stream_url(self, track_id, quality, session):
         return await self._get('tracks/' + str(track_id) + '/playbackinfopostpaywall/v4', {
-            'playbackmode': 'DOWNLOAD', # <--- GANTI 'STREAM' MENJADI 'DOWNLOAD' DI SINI
+            'playbackmode': 'STREAM', # <-- WAJIB KEMBALI KE STREAM
             'assetpresentation': 'FULL',
             'audioquality': quality,
-            'prefetch': 'false'
+            'prefetch': 'false' # <-- KEMBALIKAN JUGA BARIS INI
         },
         session)
 
