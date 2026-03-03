@@ -176,10 +176,10 @@ class TidalApi:
 
     async def get_stream_url(self, track_id, quality, session):
         return await self._get('tracks/' + str(track_id) + '/playbackinfopostpaywall/v4', {
-            'playbackmode': 'STREAM',
+            'playbackmode': 'DOWNLOAD', # <--- GANTI 'STREAM' MENJADI 'DOWNLOAD' DI SINI
             'assetpresentation': 'FULL',
-            'audioquality': quality
-            # [FIX] Baris 'prefetch': 'false' dihapus total di sini agar Tidal CDN melepaskan limit kecepatan!
+            'audioquality': quality,
+            'prefetch': 'false'
         },
         session)
 
