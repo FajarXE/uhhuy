@@ -134,12 +134,22 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         filepath = sanitize_filepath(filepath)
         track_meta['filepath'] = filepath 
 
+        # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
+        details = None
+        if upload and 'bot_msg' in user:
+            details = {
+                'msg': user['bot_msg'],
+                'title': track_meta.get('title', 'Unknown'),
+                'type': track_meta.get('type', 'Track').capitalize()
+            }
+        # ----------------------------------------
+
         if type(urls) == list:
             i = 0
             temp_files = []
             for url in urls[0]:
                 temp_path = f"{filepath}.{i}"
-                err = await download_file(url, temp_path)
+                err = await download_file(url, temp_path, details=details) # <-- Tambahkan details
                 if err:
                     LOGGER.error(f"Download_file gagal (list): {err}")
                     return None
@@ -147,7 +157,7 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                 temp_files.append(temp_path)
             await merge_tracks(temp_files, filepath)
         else:
-            err = await download_file(urls, filepath)
+            err = await download_file(urls, filepath, details=details) # <-- Tambahkan details
             if err:
                 LOGGER.error(f"Download_file gagal (single): {err}")
                 return None
@@ -270,7 +280,9 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
         'type': album_meta['type']
     }
     
-    results = await run_concurrent_tasks(tasks, update_details)
+    # [FIX] Tambahkan limit antrean agar Aria2 stabil dan tidak tersedak!
+    results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+    
     album_meta['tracks'] = [track for track in results if track]
     
     _, album_zip, __, ___ = fetch_zip_settings(user)
@@ -366,7 +378,14 @@ async def start_playlist(playlist_id:str, user:dict, upload=True, basefolder=Non
         'type': playlist_meta['type']
     }
     
-    results = await run_concurrent_tasks(tasks, update_details)
+    # [FIX] Tambahkan limit antrean. Mendukung Mode Concurrent atau Berurutan!
+    if getattr(bot_set, 'playlist_conc', True):
+        limit_pekerja = Config.MAX_WORKERS
+    else:
+        limit_pekerja = 1 # Sequential (Kerjakan 1 per 1)
+        
+    results = await run_concurrent_tasks(tasks, update_details, limit=limit_pekerja)
+    
     playlist_meta['tracks'] = [track for track in results if track]
     
     playlist_zip, _, __, ___ = fetch_zip_settings(user)
