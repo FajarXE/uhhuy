@@ -178,11 +178,10 @@ class TidalApi:
         return await self._get('tracks/' + str(track_id) + '/playbackinfopostpaywall/v4', {
             'playbackmode': 'STREAM',
             'assetpresentation': 'FULL',
-            'audioquality': quality,
-            'prefetch': 'false'
+            'audioquality': quality
+            # [FIX] Baris 'prefetch': 'false' dihapus total di sini agar Tidal CDN melepaskan limit kecepatan!
         },
         session)
-
 
     # call this from bot settings panel only
     async def get_tv_login_url(self):
