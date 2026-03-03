@@ -49,14 +49,11 @@ async def start_deezer(url:str, user: dict):
         await start_playlist(item_id, user)
 
 
-async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=True, \
-    filepath=None, disable_link=False):
-
+async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
     deezerapi = user['deezer_api']
 
     if not track_meta:
-        try:
-            track_meta = await process_track_metadata(item_id, user['r_id'], user=user)
+        try: track_meta = await process_track_metadata(item_id, user['r_id'], user=user)
         except Exception as e:
             LOGGER.warning(f"Deezer track {item_id} tidak tersedia: {e}")
             raise e 
@@ -65,49 +62,46 @@ async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=
         filepath = sanitize_filepath(filepath)
 
     try:
-        url = await deezerapi.get_track_url(
-            item_id, 
-            track_meta['token'], 
-            track_meta['token_expiry'], 
-            track_meta['quality'])
+        url = await deezerapi.get_track_url(item_id, track_meta['token'], track_meta['token_expiry'], track_meta['quality'])
     except Exception as e:
-        LOGGER.warning(f"Gagal mendapatkan URL unduhan Deezer untuk track {item_id}: {e}")
+        LOGGER.warning(f"Gagal mendapatkan URL Deezer: {e}")
         return False
 
     track_meta['folderpath'] = filepath
-    
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
     safe_filename = sanitize_filepath(raw_filename)
 
     track_meta['extension'] = 'flac' if track_meta['quality'] == 'FLAC' else 'mp3'
-
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
-    err = await deezerapi.dl_track(item_id, url, track_meta['filepath'])
-    if err:
-        LOGGER.error(f"Deezer dl_track gagal untuk {item_id}: {err}")
-        return False
+    # --- PERBAIKAN ARIA2 DETAILS (Memicu Progress Bar) ---
+    details = None
+    if upload and 'bot_msg' in user:
+        details = {
+            'msg': user['bot_msg'],
+            'title': track_meta.get('title', 'Unknown'),
+            'type': track_meta.get('type', 'Track').capitalize()
+        }
 
-    # --- PERBAIKAN VALIDASI UKURAN FILE ---
+    err = await deezerapi.dl_track(item_id, url, track_meta['filepath'], details=details)
+    if err:
+        LOGGER.error(f"Deezer dl_track gagal: {err}")
+        return False
+    # -----------------------------------------------------
+
     if not os.path.exists(track_meta['filepath']) or os.path.getsize(track_meta['filepath']) < 1048576: 
-        LOGGER.warning(f"Deezer: File unduhan terlalu kecil (<1MB). Mengulang...")
+        LOGGER.warning(f"Deezer: File terlalu kecil (<1MB).")
         try: os.remove(track_meta['filepath'])
         except: pass
         return False
-    # --- BATAS PERBAIKAN ---
 
-    # --- PERBAIKAN BARU: VALIDASI HEADER FILE (MAGIC BYTES) ---
-    # Ini mencegah error "not a valid FLAC file" pada metadata.py
     is_valid_header = False
     try:
         with open(track_meta['filepath'], 'rb') as f:
             header = f.read(4)
-            # Cek FLAC (Header: fLaC)
             if track_meta['extension'] == 'flac':
-                if header == b'fLaC':
-                    is_valid_header = True
-            # Cek MP3 (Header: ID3 atau Sync Frame FF FB)
+                if header == b'fLaC': is_valid_header = True
             else: 
                 if header.startswith(b'ID3') or header.startswith(b'\xff\xfb') or header.startswith(b'\xff\xf3'):
                     is_valid_header = True
@@ -115,24 +109,16 @@ async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=
         LOGGER.warning(f"Gagal membaca header file: {e}")
 
     if not is_valid_header:
-        LOGGER.warning(f"Deezer: File korup (Header Invalid/Decryption Failed) untuk {track_meta['title']}. Menghapus...")
+        LOGGER.warning(f"Deezer: File korup. Menghapus...")
         try: os.remove(track_meta['filepath'])
         except: pass
         return False
-    # --- BATAS PERBAIKAN HEADER ---
 
-    try:
-        await set_metadata(track_meta, user['user_id'])
-    except FileNotFoundError:
-        LOGGER.error(f"[Errno 2] File not found setelah download Deezer: {filepath}")
-        return False
+    try: await set_metadata(track_meta, user['user_id'])
     except Exception as e:
-        # Tangkap error spesifik metadata jika masih lolos
-        LOGGER.warning(f"Deezer: Metadata gagal ({e}). Mengulang...")
-        try:
-            os.remove(track_meta['filepath'])
-        except:
-            pass
+        LOGGER.warning(f"Deezer: Metadata gagal ({e}).")
+        try: os.remove(track_meta['filepath'])
+        except: pass
         return False
 
     if upload:
