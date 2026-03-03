@@ -256,16 +256,27 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 except: pass
             return res
 
-        # [FIX] Karena asyncio dideklarasikan di awal, Python pasti kenal bagian ini!
+        # [FIX] Tangkap CancelledError, update UI, kirim pesan penutup, lalu matikan proses!
         except asyncio.CancelledError:
             from bot.helpers.message import edit_message
             if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
-            return None
+            
+            # --- TAMBAHAN BARU: Bot langsung mengirim pesan konfirmasi batal ---
+            try: await client.send_message(chat_id, "Tugas dibatalkan.")
+            except: pass
+            
+            raise  # Teruskan sinyal agar proses tidak lanjut mengunggah lagu berikutnya
             
         except Exception as e:
             from bot.helpers.message import edit_message
             if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
                 if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
+                
+                # --- TAMBAHAN BARU: Bot langsung mengirim pesan konfirmasi batal ---
+                try: await client.send_message(chat_id, "Tugas dibatalkan.")
+                except: pass
+                
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 from bot.logger import LOGGER
                 LOGGER.error(f"Gagal mengirim {type}: {e}")
