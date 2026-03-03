@@ -279,33 +279,29 @@ async def start_playlist(playlist_id, user):
             play_meta['poster_msg'] = await post_art_poster(user, play_meta)
             user[poster_key] = play_meta['poster_msg']
     
+    # [FIX] SATUKAN LOGIC CONCURRENT & SEQUENTIAL MENGGUNAKAN RADAR PINTAR ARIA2
     if bot_set.playlist_conc:
-        upload = False
-        tasks = []
-        for track in play_meta['tracks']:
-            tasks.append(start_track(track['itemid'], user, track, upload, playlist_folder))
-        
-        task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
-        original_tracks = play_meta['tracks']
-        successful_tracks = []
-        for i in range(len(original_tracks)):
-            if i < len(task_results) and task_results[i]:
-                successful_tracks.append(original_tracks[i])
-        play_meta['tracks'] = successful_tracks
-        play_meta['totaltracks'] = len(successful_tracks)
-
+        upload = False # Concurrent selalu batch upload
+        limit_pekerja = Config.MAX_WORKERS
     else:
-        i = 0
-        if playlist_zip: upload = False 
-        successful_tracks_non_conc = []
-        for track in play_meta['tracks']:
-            await progress_message(i, len(play_meta['tracks']), update_details)
-            success = await start_track(track['itemid'], user, track, upload, playlist_folder, bot_set.disable_sort_link)
-            if success:
-                successful_tracks_non_conc.append(track)
-            i+=1
-        play_meta['tracks'] = successful_tracks_non_conc
-        play_meta['totaltracks'] = len(successful_tracks_non_conc)
+        if playlist_zip: upload = False
+        limit_pekerja = 1 # Sequential (Kerjakan 1 per 1 agar berurutan)
+
+    tasks = []
+    for track in play_meta['tracks']:
+        tasks.append(start_track(track['itemid'], user, track, upload, playlist_folder, bot_set.disable_sort_link))
+    
+    # Radar Pintar akan otomatis membuat ID Cancel unik & memantau kecepatan Aria2!
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=limit_pekerja)
+    
+    original_tracks = play_meta['tracks']
+    successful_tracks = []
+    for i in range(len(original_tracks)):
+        if i < len(task_results) and task_results[i]:
+            successful_tracks.append(original_tracks[i])
+            
+    play_meta['tracks'] = successful_tracks
+    play_meta['totaltracks'] = len(successful_tracks)
     
     if not play_meta['tracks']:
          raise Exception(f"Tidak ada lagu Deezer yang berhasil diunduh (Track not available) untuk playlist {play_meta['title']}.")
