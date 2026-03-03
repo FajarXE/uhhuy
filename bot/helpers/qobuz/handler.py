@@ -158,7 +158,9 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
         tasks.append(start_track(track['itemid'], user, track, False, album_folder))
         
     update_details = {'text': lang.s.DOWNLOAD_PROGRESS, 'msg': user['bot_msg'], 'title': album_meta['title'], 'type': album_meta['type']}
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    
+    # [FIX] Tambahkan limit agar Aria2 tidak tersedak!
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
     successful_tracks = [album_meta['tracks'][i] for i, res in enumerate(task_results) if res]
     album_meta['tracks'] = successful_tracks
@@ -213,7 +215,20 @@ async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=Tru
         full_path = f"{filepath}/{sanitize_filepath(raw_filename)}.{track_meta['extension']}"
         track_meta['filepath'] = full_path
 
-        if await download_file(url, full_path): return False
+        # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
+        details = None
+        if upload and 'bot_msg' in user:
+            details = {
+                'msg': user['bot_msg'],
+                'title': track_meta.get('title', 'Unknown'),
+                'type': track_meta.get('type', 'Track').capitalize()
+            }
+
+        # Jalankan Aria2 dengan mengirimkan "details" UI
+        err = await download_file(url, full_path, details=details)
+        if err is not None:
+            return False
+        # ----------------------------------------
         
         await set_metadata(track_meta, user['user_id'])
         await force_custom_tags(full_path, track_meta)
@@ -244,7 +259,6 @@ async def start_artist(albums, user, artist):
             artist_meta['zip_path'] = await zip_handler(artist_meta['folderpath'])
         await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await artist_upload(artist_meta, user)
-
 
 async def start_playlist(tracks, playlist, user):
     client = user['qobuz_api']
@@ -285,7 +299,9 @@ async def start_playlist(tracks, playlist, user):
         for track in play_meta['tracks']: 
             tasks.append(start_track(track['itemid'], user, track, upload, playlist_folder))
         
-        task_results = await run_concurrent_tasks(tasks, update_details)
+        # [FIX] Tambahkan limit agar Aria2 tidak tersedak!
+        task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+        
         successful_tracks = [play_meta['tracks'][i] for i, res in enumerate(task_results) if res]
         play_meta['tracks'] = successful_tracks
         play_meta['totaltracks'] = len(successful_tracks)
