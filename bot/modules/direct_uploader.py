@@ -148,7 +148,7 @@ class DirectUpload:
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
-                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**\n\n**Tugas dibatalkan.**", None, False)
+                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                 except: pass
                 # Membunuh rantai Fallback dan Loop secara total!
                 import asyncio
@@ -217,7 +217,7 @@ class DirectUpload:
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
-                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**\n\n**Tugas dibatalkan.**", None, False)
+                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                 except: pass
                 # Membunuh rantai Fallback dan Loop secara total!
                 import asyncio
@@ -277,7 +277,7 @@ class DirectUpload:
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
-                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**\n\n**Tugas dibatalkan.**", None, False)
+                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                 except: pass
                 # Membunuh rantai Fallback dan Loop secara total!
                 import asyncio
