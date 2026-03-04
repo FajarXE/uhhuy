@@ -146,16 +146,40 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
 
         if type(urls) == list:
             # --- [FIX ARIA2 DASH TURBO PARALEL] ---
-            import asyncio
+            import asyncio, os, aiofiles
             temp_files = [f"{filepath}.{i}" for i in range(len(urls[0]))]
             
-            # Turunkan sedikit ke 7 agar server Fastly CDN Tidal tidak memblokir IP
-            sem = asyncio.Semaphore(7) 
+            # Kembalikan ke 15 paralel karena kita sudah punya Smart Fallback!
+            sem = asyncio.Semaphore(15) 
 
             async def dl_segment(url, temp_path):
                 async with sem:
-                    # Parameter details=None agar UI tidak spam notif untuk file pecahan kecil
-                    return await download_file(url, temp_path, details=None)
+                    err = await download_file(url, temp_path, details=None)
+                    
+                    # --- [SMART VALIDATOR ANTI-KORUP] ---
+                    # Cek apakah Aria2 disusupi halaman HTML/XML dari CDN Fastly
+                    is_corrupt = False
+                    if not err and os.path.exists(temp_path):
+                        if os.path.getsize(temp_path) < 15000: # Cek file kecil yang mencurigakan
+                            async with aiofiles.open(temp_path, 'rb') as f:
+                                header = await f.read(100)
+                                if b'<html' in header.lower() or b'<?xml' in header.lower() or b'<error' in header.lower() or b'fastly' in header.lower():
+                                    is_corrupt = True
+                                    
+                    # Jika Aria2 gagal atau file terbukti HTML, aktifkan Fallback Native TCP seketika!
+                    if err or is_corrupt:
+                        import aiohttp
+                        try:
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(url, timeout=15) as resp:
+                                    if resp.status in [200, 206]:
+                                        async with aiofiles.open(temp_path, 'wb') as f:
+                                            await f.write(await resp.read())
+                                        return None
+                        except: pass
+                        return "Gagal"
+                        
+                    return None
             
             if details and 'msg' in details:
                 try: 
@@ -163,7 +187,6 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                     await edit_message(details['msg'], f"⚡ Mengunduh `{details.get('title', 'Unknown')}`\n⚙️ **Aria2 Turbo**: Memproses {len(urls[0])} segmen DASH paralel...", None, False)
                 except: pass
 
-            # Eksekusi puluhan perintah Aria2 secara serentak
             tasks = [dl_segment(urls[0][i], temp_files[i]) for i in range(len(urls[0]))]
             results = await asyncio.gather(*tasks)
             
@@ -172,8 +195,6 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                 LOGGER.error("Aria2 gagal mengunduh salah satu list segmen DASH")
                 return None
                 
-            # [KEMBALIKAN KE FUNGSI MERGE_TRACKS ASLI!]
-            # Fungsi ini terbukti aman untuk menstruktur ulang file fMP4 DASH
             await merge_tracks(temp_files, filepath)
             
         else:
