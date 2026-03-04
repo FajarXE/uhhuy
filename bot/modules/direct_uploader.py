@@ -223,9 +223,21 @@ class DirectUpload:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(srv, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
-                    res = await resp.json()
+                    # [FIX] Jangan gunakan resp.json() karena server Viking melempar HTML!
+                    # Kita baca sebagai teks biasa, lalu gali JSON-nya secara manual.
+                    raw_text = await resp.text()
                     wrapper.close()
-                    if res.get('url'): return res['url']
+                    
+                    try:
+                        res = json.loads(raw_text)
+                        if res.get('url'): return res['url']
+                    except:
+                        # Fallback: Gunakan mesin bor Regex jika bentuknya berantakan
+                        match = re.search(r'(\{.*\})', raw_text)
+                        if match:
+                            res = json.loads(match.group(1))
+                            if res.get('url'): return res['url']
+                            
         except Exception as e:
             wrapper.close()
             # [FIX] Filter Log Cancel
