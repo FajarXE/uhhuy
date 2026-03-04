@@ -38,6 +38,7 @@ class ProgressFileWrapper(io.IOBase):
         if chunk:
             self.bytes_read += len(chunk)
             now = time.time()
+            # Tembakkan radar progres setiap 1.5 detik agar Telegram tidak FloodWait
             if self.details and (now - self.last_update > 1.5 or self.bytes_read == self.total_size):
                 self.last_update = now
                 from bot.helpers.utils import progress_message
@@ -47,6 +48,14 @@ class ProgressFileWrapper(io.IOBase):
                     
                 self.loop.call_soon_threadsafe(schedule_progress, self.bytes_read, self.total_size, self.details)
         return chunk
+        
+    # --- [FIX UTAMA: ANTI CHUNKED TRANSFER UNTUK SERVER PHP/VIKINGFILE] ---
+    def tell(self):
+        return self.file.tell()
+        
+    def seek(self, offset, whence=io.SEEK_SET):
+        return self.file.seek(offset, whence)
+    # ----------------------------------------------------------------------
     
     def close(self):
         self.file.close()
