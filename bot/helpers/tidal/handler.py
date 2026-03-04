@@ -145,61 +145,71 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         # ------------------------------
 
         if type(urls) == list:
-            # --- [FIX ARIA2 DASH TURBO PARALEL] ---
-            import asyncio, os, aiofiles
-            temp_files = [f"{filepath}.{i}" for i in range(len(urls[0]))]
+            # --- [MODE DEBUG FORENSIK: MENCARI DOSA ARIA2] ---
+            import aiohttp
+            import aiofiles
+            import os
             
-            # Kembalikan ke 15 paralel karena kita sudah punya Smart Fallback!
-            sem = asyncio.Semaphore(15) 
-
-            async def dl_segment(url, temp_path):
-                async with sem:
-                    err = await download_file(url, temp_path, details=None)
-                    
-                    # --- [SMART VALIDATOR ANTI-KORUP] ---
-                    # Cek apakah Aria2 disusupi halaman HTML/XML dari CDN Fastly
-                    is_corrupt = False
-                    if not err and os.path.exists(temp_path):
-                        if os.path.getsize(temp_path) < 15000: # Cek file kecil yang mencurigakan
-                            async with aiofiles.open(temp_path, 'rb') as f:
-                                header = await f.read(100)
-                                if b'<html' in header.lower() or b'<?xml' in header.lower() or b'<error' in header.lower() or b'fastly' in header.lower():
-                                    is_corrupt = True
-                                    
-                    # Jika Aria2 gagal atau file terbukti HTML, aktifkan Fallback Native TCP seketika!
-                    if err or is_corrupt:
-                        import aiohttp
-                        try:
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(url, timeout=15) as resp:
-                                    if resp.status in [200, 206]:
-                                        async with aiofiles.open(temp_path, 'wb') as f:
-                                            await f.write(await resp.read())
-                                        return None
-                        except: pass
-                        return "Gagal"
-                        
-                    return None
+            temp_path_aria = f"{filepath}.aria.test"
+            temp_path_native = f"{filepath}.native.test"
+            test_url = urls[0][0] # Kita ambil potongan 0 saja untuk diuji forensik
             
             if details and 'msg' in details:
                 try: 
                     from bot.helpers.message import edit_message
-                    await edit_message(details['msg'], f"⚡ Mengunduh `{details.get('title', 'Unknown')}`\n⚙️ **Aria2 Turbo**: Memproses {len(urls[0])} segmen DASH paralel...", None, False)
+                    await edit_message(details['msg'], f"🛠 **Menjalankan Tes Forensik Aria2 vs Native...**", None, False)
                 except: pass
 
-            tasks = [dl_segment(urls[0][i], temp_files[i]) for i in range(len(urls[0]))]
-            results = await asyncio.gather(*tasks)
+            # 1. Unduh pakai Aria2 (Persis seperti setingan terakhirmu)
+            await download_file(test_url, temp_path_aria, details=None)
             
-            if any(results):
-                from bot.logger import LOGGER
-                LOGGER.error("Aria2 gagal mengunduh salah satu list segmen DASH")
-                return None
+            # 2. Unduh pakai Python Native
+            async with aiohttp.ClientSession() as session:
+                async with session.get(test_url) as resp:
+                    async with aiofiles.open(temp_path_native, 'wb') as f:
+                        await f.write(await resp.read())
+                        
+            # 3. Baca dan Bandingkan Jeroan Filenya!
+            size_aria = os.path.getsize(temp_path_aria) if os.path.exists(temp_path_aria) else 0
+            size_native = os.path.getsize(temp_path_native) if os.path.exists(temp_path_native) else 0
+            
+            hex_aria = "KOSONG"
+            if size_aria > 0:
+                with open(temp_path_aria, 'rb') as f: hex_aria = f.read(15).hex()
                 
-            await merge_tracks(temp_files, filepath)
+            hex_native = "KOSONG"
+            if size_native > 0:
+                with open(temp_path_native, 'rb') as f: hex_native = f.read(15).hex()
+                
+            # 4. Kirim Laporan Investigasi ke Telegram
+            laporan = (
+                f"🕵️‍♂️ **HASIL FORENSIK TIDAL DASH** 🕵️‍♂️\n\n"
+                f"**Aria2:**\n"
+                f"Ukuran: `{size_aria}` bytes\n"
+                f"Header: `{hex_aria}`\n\n"
+                f"**Native:**\n"
+                f"Ukuran: `{size_native}` bytes\n"
+                f"Header: `{hex_native}`\n\n"
+                f"*(Copy/Foto pesan ini dan kirimkan ke saya!)*"
+            )
+            
+            from bot.logger import LOGGER
+            LOGGER.error("=== HASIL DEBUG ARIA2 ===")
+            LOGGER.error(f"Aria: {size_aria}b | {hex_aria}")
+            LOGGER.error(f"Native: {size_native}b | {hex_native}")
+            
+            try:
+                from bot.helpers.message import send_message
+                await send_message(user, laporan)
+            except: pass
+            
+            # Kita hentikan proses secara paksa di sini agar bot tidak lanjut error
+            return None 
+            # ---------------------------------------------------------
             
         else:
             # Unduhan Single File
-            err = await download_file(urls, filepath, details=details) # <-- Tambahkan details
+            err = await download_file(urls, filepath, details=details)
             if err:
                 from bot.logger import LOGGER
                 LOGGER.error(f"Download_file gagal (single): {err}")
