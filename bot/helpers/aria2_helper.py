@@ -17,6 +17,14 @@ async def aria2_download(url, filepath, details=None):
     dir_path = os.path.dirname(filepath)
     file_name = os.path.basename(filepath)
     
+    # --- [FIX METADATA KORUP & BLOKIR CDN] ---
+    # Deteksi apakah file ini adalah pecahan DASH (contoh: lagu.m4a.0, lagu.m4a.1)
+    is_dash_chunk = file_name.split('.')[-1].isdigit()
+    
+    # Jika pecahan DASH, paksa 1 koneksi per file agar tidak memicu pemblokiran WAF/CDN.
+    # Jika file utuh biasa, biarkan 16 koneksi agar tetap secepat kilat.
+    split_conn = "1" if is_dash_chunk else "16"
+    
     payload_add = {
         "jsonrpc": "2.0",
         "id": "bot_add",
@@ -26,10 +34,11 @@ async def aria2_download(url, filepath, details=None):
             {
                 "dir": dir_path,
                 "out": file_name,
-                "max-connection-per-server": "16",
-                "split": "16",
+                "max-connection-per-server": split_conn,
+                "split": split_conn,
                 "min-split-size": "1M",
-                "allow-overwrite": "true"
+                "allow-overwrite": "true",
+                "user-agent": "TIDAL_ANDROID/1039 okhttp/3.14.9" # Menyamar sebagai aplikasi resmi
             }
         ]
     }
