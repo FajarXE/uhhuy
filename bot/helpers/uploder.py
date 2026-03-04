@@ -68,13 +68,20 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     listener = FakeListener(server_dict)
     uploader = DirectUpload(listener=listener, path=base_path)
 
+    # --- [SUNTIKAN KABEL RADAR UI TELEGRAM] ---
+    details = None
+    if 'bot_msg' in user:
+        details = {
+            'msg': user['bot_msg'],
+            'title': metadata.get('title', 'Unknown'),
+            'type': metadata.get('type', 'Task').capitalize()
+        }
+    # ------------------------------------
+
     try:
         folder_name = metadata.get('title', 'Unknown Album')
         # KASUS A: LIST FILES
         if isinstance(filepath, list):
-            if 'bot_msg' in user:
-                await edit_message(user['bot_msg'], f"📂 Detected {len(filepath)} Split Files. Uploading to {mode}...")
-
             if mode == 'Gofile':
                 root_id = await uploader.gofile_get_root(token)
                 new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
@@ -82,8 +89,8 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                     folder_id = new_folder['id']
                     final_link = new_folder['code']
                     for index, file_part in enumerate(filepath, 1):
-                        await edit_message(user['bot_msg'], f"🚀 Uploading Part {index}/{len(filepath)}: `{os.path.basename(file_part)}`")
-                        await uploader.upload(os.path.basename(file_part), 0, 'gofile', specific_folder_id=folder_id)
+                        if details: details['title'] = f"Part {index}: {os.path.basename(file_part)}"
+                        await uploader.upload(os.path.basename(file_part), 0, 'gofile', specific_folder_id=folder_id, details=details)
                     return f"https://gofile.io/d/{final_link}"
 
             elif mode == 'Buzzheavier':
@@ -93,8 +100,8 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                 
                 uploaded_links = []
                 for index, file_part in enumerate(filepath, 1):
-                    await edit_message(user['bot_msg'], f"🚀 Uploading Part {index}/{len(filepath)} to Buzzheavier...")
-                    res = await uploader.upload(os.path.basename(file_part), 0, 'buzzheavier', specific_folder_id=target_folder)
+                    if details: details['title'] = f"Part {index}: {os.path.basename(file_part)}"
+                    res = await uploader.upload(os.path.basename(file_part), 0, 'buzzheavier', specific_folder_id=target_folder, details=details)
                     if res: uploaded_links.append(list(res.values())[0])
                 
                 if target_folder: return f"https://buzzheavier.com/{target_folder}"
@@ -103,31 +110,28 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
             elif mode == 'Vikingfiles':
                 links = []
                 for index, file_part in enumerate(filepath, 1):
-                    await edit_message(user['bot_msg'], f"🚀 Uploading Part {index}/{len(filepath)} to Vikingfiles...")
-                    res = await uploader.upload(os.path.basename(file_part), 0, 'viking')
+                    if details: details['title'] = f"Part {index}: {os.path.basename(file_part)}"
+                    res = await uploader.upload(os.path.basename(file_part), 0, 'viking', details=details)
                     if res: links.append(list(res.values())[0])
                 return "\n".join(links)
 
         # KASUS B: SINGLE FILE
         elif os.path.isfile(filepath):
-            if 'bot_msg' in user: await edit_message(user['bot_msg'], f"🚀 Uploading to {mode}...")
+            if details: details['title'] = os.path.basename(filepath)
             
             if mode == 'Buzzheavier':
-                # [FIX] Pelindung agar jika gagal buat folder API, file tetap dipaksa terunggah!
                 parent_id = None
                 try:
                     root_id = await uploader.buzzheavier_get_root(token)
                     parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
                 except Exception as e:
-                    from bot.logger import LOGGER
                     LOGGER.warning(f"Buzzheavier Folder API lambat: {e}")
                 
-                res = await uploader.upload(os.path.basename(filepath), 0, 'buzzheavier', specific_folder_id=parent_id)
+                res = await uploader.upload(os.path.basename(filepath), 0, 'buzzheavier', specific_folder_id=parent_id, details=details)
                 if res and parent_id: return f"https://buzzheavier.com/{parent_id}"
                 elif res: return list(res.values())[0]
                 
             elif mode == 'Gofile':
-                # [FIX] Wajib membuat/mengikat Token & Folder ID dengan aman
                 new_folder = None
                 folder_id = None
                 try:
@@ -135,20 +139,18 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                     new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
                     folder_id = new_folder['id'] if new_folder else None
                 except Exception as e:
-                    from bot.logger import LOGGER
                     LOGGER.warning(f"Gofile Folder API lambat: {e}")
                 
-                res = await uploader.upload(os.path.basename(filepath), 0, 'gofile', specific_folder_id=folder_id)
+                res = await uploader.upload(os.path.basename(filepath), 0, 'gofile', specific_folder_id=folder_id, details=details)
                 if res and new_folder: return f"https://gofile.io/d/{new_folder['code']}"
                 elif res: return list(res.values())[0]
             
             elif mode == 'Vikingfiles':
-                # [FIX] Parameter server internal yang benar adalah 'viking', BUKAN 'vikingfiles'!
-                res = await uploader.upload(os.path.basename(filepath), 0, 'viking')
+                res = await uploader.upload(os.path.basename(filepath), 0, 'viking', details=details)
                 if res: return list(res.values())[0]
             
             else:
-                res = await uploader.upload(os.path.basename(filepath), 0, mode.lower())
+                res = await uploader.upload(os.path.basename(filepath), 0, mode.lower(), details=details)
                 if res: return list(res.values())[0]
 
         # KASUS C: FOLDER ASLI
@@ -156,7 +158,6 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
             files = [f for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
             
             if mode == 'Buzzheavier':
-                if 'bot_msg' in user: await edit_message(user['bot_msg'], f"📂 Uploading Folder to Buzzheavier...")
                 uploader.path = filepath 
                 root_id = await uploader.buzzheavier_get_root(token)
                 parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
@@ -164,15 +165,14 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
 
                 links = []
                 for index, filename in enumerate(files, 1):
-                    await edit_message(user['bot_msg'], f"🚀 Uploading {index}/{len(files)}: `{filename}`")
-                    res = await uploader.upload(filename, 0, 'buzzheavier', specific_folder_id=target_folder)
+                    if details: details['title'] = f"[{index}/{len(files)}] {filename}"
+                    res = await uploader.upload(filename, 0, 'buzzheavier', specific_folder_id=target_folder, details=details)
                     if res: links.append(list(res.values())[0])
                 
                 if target_folder: return f"https://buzzheavier.com/{target_folder}"
                 return "\n".join(links)
 
             elif mode == 'Gofile':
-                if 'bot_msg' in user: await edit_message(user['bot_msg'], f"📂 Creating Gofile Folder...")
                 uploader.path = filepath 
 
                 root_id = await uploader.gofile_get_root(token)
@@ -182,8 +182,8 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                     folder_id = new_folder['id']
                     final_link = new_folder['code']
                     for index, filename in enumerate(files, 1):
-                        await edit_message(user['bot_msg'], f"🚀 Uploading {index}/{len(files)}: `{filename}`")
-                        await uploader.upload(filename, 0, 'gofile', specific_folder_id=folder_id)
+                        if details: details['title'] = f"[{index}/{len(files)}] {filename}"
+                        await uploader.upload(filename, 0, 'gofile', specific_folder_id=folder_id, details=details)
                     return f"https://gofile.io/d/{final_link}"
                 else:
                     return None
@@ -192,8 +192,8 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                 uploader.path = filepath 
                 links = []
                 for index, filename in enumerate(files, 1):
-                    await edit_message(user['bot_msg'], f"🚀 Uploading {index}/{len(files)} to Vikingfiles...")
-                    res = await uploader.upload(filename, 0, 'viking')
+                    if details: details['title'] = f"[{index}/{len(files)}] {filename}"
+                    res = await uploader.upload(filename, 0, 'viking', details=details)
                     if res: links.append(list(res.values())[0])
                 return "\n".join(links)
 
