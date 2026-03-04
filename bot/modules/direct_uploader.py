@@ -151,7 +151,6 @@ class DirectUpload:
                         await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                 except: pass
                 # Membunuh rantai Fallback dan Loop secara total!
-                import asyncio
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Gofile Upload Error: {e}")
@@ -220,7 +219,6 @@ class DirectUpload:
                         await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                 except: pass
                 # Membunuh rantai Fallback dan Loop secara total!
-                import asyncio
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Buzzheavier Upload Error: {e}")
@@ -280,7 +278,6 @@ class DirectUpload:
                         await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                 except: pass
                 # Membunuh rantai Fallback dan Loop secara total!
-                import asyncio
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Viking Upload Error: {e}")
