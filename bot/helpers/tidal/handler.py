@@ -134,7 +134,7 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         filepath = sanitize_filepath(filepath)
         track_meta['filepath'] = filepath 
 
-        # --- [SUNTIKAN RADAR ARIA2] ---
+        # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
         details = None
         if upload and 'bot_msg' in user:
             details = {
@@ -142,57 +142,23 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                 'title': track_meta.get('title', 'Unknown'),
                 'type': track_meta.get('type', 'Track').capitalize()
             }
-        # ------------------------------
+        # ----------------------------------------
 
         if type(urls) == list:
-            # --- [FIX FINAL: HTTP KEEP-ALIVE TUNNELING] ---
-            import asyncio, aiohttp, aiofiles
-            temp_files = [f"{filepath}.{i}" for i in range(len(urls[0]))]
-            
-            if details and 'msg' in details:
-                try: 
-                    from bot.helpers.message import edit_message
-                    await edit_message(details['msg'], f"⚡ Mengunduh `{details.get('title', 'Unknown')}`\n⚙️ **Turbo DASH**: Menyedot {len(urls[0])} pecahan via Keep-Alive Tunnel...", None, False)
-                except: pass
-
-            # Menggunakan 1 TCP Tunnel raksasa agar WAF Fastly CDN tidak memblokir koneksi paralel
-            sem = asyncio.Semaphore(12) 
-            connector = aiohttp.TCPConnector(limit=0, keepalive_timeout=120)
-
-            async def dl_segment(session, url, temp_path):
-                async with sem:
-                    for _ in range(3): # Auto-Retry jika ada getaran jaringan
-                        try:
-                            async with session.get(url, timeout=15) as resp:
-                                if resp.status in [200, 206]:
-                                    content = await resp.read()
-                                    # Cek ketat agar teks '403 Forbidden' dari WAF tidak tembus ke lagu
-                                    if len(content) < 500 and (b'<html' in content.lower() or b'forbidden' in content.lower()):
-                                        raise Exception("Tercegat WAF")
-                                    async with aiofiles.open(temp_path, 'wb') as f:
-                                        await f.write(content)
-                                    return None
-                        except:
-                            await asyncio.sleep(1)
-                    return "Gagal"
-
-            async with aiohttp.ClientSession(connector=connector, headers={"User-Agent": "TIDAL_ANDROID/1039 okhttp/3.14.9"}) as session:
-                tasks = [dl_segment(session, urls[0][i], temp_files[i]) for i in range(len(urls[0]))]
-                results = await asyncio.gather(*tasks)
-                
-            if any(results):
-                from bot.logger import LOGGER
-                LOGGER.error("DASH Tunneling gagal mengunduh pecahan secara utuh.")
-                return None
-                
-            # Dijamin 100% aman disatukan tanpa merusak struktur file
+            i = 0
+            temp_files = []
+            for url in urls[0]:
+                temp_path = f"{filepath}.{i}"
+                err = await download_file(url, temp_path, details=details) # <-- Tambahkan details
+                if err:
+                    LOGGER.error(f"Download_file gagal (list): {err}")
+                    return None
+                i+=1
+                temp_files.append(temp_path)
             await merge_tracks(temp_files, filepath)
-            
         else:
-            # --- [UNDUHAN SINGLE FILE TETAP MEMAKAI ARIA2] ---
-            err = await download_file(urls, filepath, details=details)
+            err = await download_file(urls, filepath, details=details) # <-- Tambahkan details
             if err:
-                from bot.logger import LOGGER
                 LOGGER.error(f"Download_file gagal (single): {err}")
                 return None
 
