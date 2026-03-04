@@ -27,11 +27,17 @@ class ProgressFileWrapper(io.IOBase):
         self.last_update = 0
 
     def read(self, size=-1):
+        # --- [TAMBAHAN: DETEKSI TOMBOL CANCEL] ---
+        from bot.helpers.utils import GLOBAL_CANCEL_DICT
+        if self.details and self.details.get('task_id') in GLOBAL_CANCEL_DICT:
+            # Membunuh koneksi upload seketika jika tombol Cancel ditekan
+            raise Exception("DIBATALKAN_PENGGUNA")
+        # -----------------------------------------
+        
         chunk = self.file.read(size)
         if chunk:
             self.bytes_read += len(chunk)
             now = time.time()
-            # Tembakkan radar progres setiap 1.5 detik agar Telegram tidak FloodWait
             if self.details and (now - self.last_update > 1.5 or self.bytes_read == self.total_size):
                 self.last_update = now
                 from bot.helpers.utils import progress_message
