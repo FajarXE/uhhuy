@@ -507,7 +507,8 @@ async def progress_message(done, total, details):
     text += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
     text += f"**{progress_label}**: {done_str} of {total_str}\n"
     text += f"**Current_Speed**: {speed_str}\n"
-    text += f"**Machine_type**: Aria2c 1.37.0\n"
+    machine = details.get('machine', 'Aria2c 1.37.0')
+    text += f"**Machine_type**: {machine}\n"
     text += f"**Destination_mode**: {dest_mode}\n"
     
     # Perubahan ke format /cancel_id agar biru semua
