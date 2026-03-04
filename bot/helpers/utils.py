@@ -497,9 +497,20 @@ async def progress_message(done, total, details):
         dest_mode = bot_set.upload_mode
         
     from .aria2_helper import get_aria2_global_stat
-    stats = await get_aria2_global_stat()
-    speed_dl = int(stats.get('downloadSpeed', 0)) if stats else speed
-    speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
+    try:
+        stats = await get_aria2_global_stat()
+    except:
+        stats = None
+        
+    # --- [FIX SINKRONISASI RADAR SEGITIGA] ---
+    if action == 'Upload':
+        # Saat proses upload Cloud, matikan radar Aria2 dan pakai kecepatan murni AIOHTTP
+        speed_dl = 0
+        speed_ul = speed 
+    else:
+        # Saat download, pakai radar Aria2 jika ada, jika tidak pakai hitungan lokal
+        speed_dl = int(stats.get('downloadSpeed', 0)) if stats and int(stats.get('downloadSpeed', 0)) > 0 else speed
+        speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
     
     # --- TEMPLATE TEXT TERBARU ---
     text = f"**{action} {task_type}**: `{title}`\n"
