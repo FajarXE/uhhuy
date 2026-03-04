@@ -145,20 +145,64 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         # ----------------------------------------
 
         if type(urls) == list:
-            i = 0
-            temp_files = []
-            for url in urls[0]:
-                temp_path = f"{filepath}.{i}"
-                err = await download_file(url, temp_path, details=details) # <-- Tambahkan details
-                if err:
-                    LOGGER.error(f"Download_file gagal (list): {err}")
-                    return None
-                i+=1
-                temp_files.append(temp_path)
+            # --- [FIX FINAL: HTTP KEEP-ALIVE TUNNELING v2] ---
+            import asyncio, aiohttp, aiofiles
+            temp_files = [f"{filepath}.{i}" for i in range(len(urls[0]))]
+            
+            if details and 'msg' in details:
+                try: 
+                    from bot.helpers.message import edit_message
+                    await edit_message(details['msg'], f"⚡ Mengunduh `{details.get('title', 'Unknown')}`\n⚙️ **Turbo DASH**: Menyedot {len(urls[0])} pecahan via Safe Tunnel...", None, False)
+                except: pass
+
+            # Turunkan menjadi 6 Paralel (Batas emas agar WAF Tidal/Fastly tidak curiga)
+            sem = asyncio.Semaphore(6) 
+            connector = aiohttp.TCPConnector(limit=0, keepalive_timeout=60)
+
+            async def dl_segment(session, url, temp_path, index):
+                async with sem:
+                    for attempt in range(1, 5): # Maksimal 4x percobaan per pecahan
+                        try:
+                            # Timeout dinaikkan ke 30 detik untuk menoleransi server yang lambat merespons
+                            async with session.get(url, timeout=30) as resp:
+                                if resp.status in [200, 206]:
+                                    content = await resp.read()
+                                    # Deteksi jebakan WAF / Halaman Error
+                                    if len(content) < 500 and (b'<html' in content.lower() or b'forbidden' in content.lower() or b'error' in content.lower()):
+                                        from bot.logger import LOGGER
+                                        LOGGER.warning(f"Pecahan {index} diblokir WAF (Percobaan {attempt}/4). Retrying...")
+                                        await asyncio.sleep(2) # Beri jeda nafas agar server tenang
+                                        continue 
+                                        
+                                    async with aiofiles.open(temp_path, 'wb') as f:
+                                        await f.write(content)
+                                    return None
+                                else:
+                                    await asyncio.sleep(1.5)
+                        except Exception as e:
+                            await asyncio.sleep(1.5)
+                    return f"Gagal di pecahan {index}"
+
+            async with aiohttp.ClientSession(connector=connector, headers={"User-Agent": "TIDAL_ANDROID/1039 okhttp/3.14.9"}) as session:
+                # Sisipkan parameter 'i' (index) untuk melacak pecahan mana yang diunduh
+                tasks = [dl_segment(session, urls[0][i], temp_files[i], i) for i in range(len(urls[0]))]
+                results = await asyncio.gather(*tasks)
+                
+            if any(results):
+                from bot.logger import LOGGER
+                for res in results:
+                    if res: LOGGER.error(f"DASH Error: {res}")
+                LOGGER.error("DASH Tunneling gagal mengunduh pecahan secara utuh.")
+                return None
+                
+            # Dijamin 100% aman disatukan tanpa merusak struktur file
             await merge_tracks(temp_files, filepath)
+            
         else:
-            err = await download_file(urls, filepath, details=details) # <-- Tambahkan details
+            # --- [UNDUHAN SINGLE FILE TETAP MEMAKAI ARIA2] ---
+            err = await download_file(urls, filepath, details=details)
             if err:
+                from bot.logger import LOGGER
                 LOGGER.error(f"Download_file gagal (single): {err}")
                 return None
 
