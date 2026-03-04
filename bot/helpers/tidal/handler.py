@@ -145,70 +145,51 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         # ------------------------------
 
         if type(urls) == list:
-            # --- [MODE DEBUG FORENSIK: MENCARI DOSA ARIA2] ---
-            import aiohttp
-            import aiofiles
-            import os
-            
-            temp_path_aria = f"{filepath}.aria.test"
-            temp_path_native = f"{filepath}.native.test"
-            test_url = urls[0][0] # Kita ambil potongan 0 saja untuk diuji forensik
+            # --- [FIX FINAL: HTTP KEEP-ALIVE TUNNELING] ---
+            import asyncio, aiohttp, aiofiles
+            temp_files = [f"{filepath}.{i}" for i in range(len(urls[0]))]
             
             if details and 'msg' in details:
                 try: 
                     from bot.helpers.message import edit_message
-                    await edit_message(details['msg'], f"🛠 **Menjalankan Tes Forensik Aria2 vs Native...**", None, False)
+                    await edit_message(details['msg'], f"⚡ Mengunduh `{details.get('title', 'Unknown')}`\n⚙️ **Turbo DASH**: Menyedot {len(urls[0])} pecahan via Keep-Alive Tunnel...", None, False)
                 except: pass
 
-            # 1. Unduh pakai Aria2 (Persis seperti setingan terakhirmu)
-            await download_file(test_url, temp_path_aria, details=None)
-            
-            # 2. Unduh pakai Python Native
-            async with aiohttp.ClientSession() as session:
-                async with session.get(test_url) as resp:
-                    async with aiofiles.open(temp_path_native, 'wb') as f:
-                        await f.write(await resp.read())
-                        
-            # 3. Baca dan Bandingkan Jeroan Filenya!
-            size_aria = os.path.getsize(temp_path_aria) if os.path.exists(temp_path_aria) else 0
-            size_native = os.path.getsize(temp_path_native) if os.path.exists(temp_path_native) else 0
-            
-            hex_aria = "KOSONG"
-            if size_aria > 0:
-                with open(temp_path_aria, 'rb') as f: hex_aria = f.read(15).hex()
+            # Menggunakan 1 TCP Tunnel raksasa agar WAF Fastly CDN tidak memblokir koneksi paralel
+            sem = asyncio.Semaphore(12) 
+            connector = aiohttp.TCPConnector(limit=0, keepalive_timeout=120)
+
+            async def dl_segment(session, url, temp_path):
+                async with sem:
+                    for _ in range(3): # Auto-Retry jika ada getaran jaringan
+                        try:
+                            async with session.get(url, timeout=15) as resp:
+                                if resp.status in [200, 206]:
+                                    content = await resp.read()
+                                    # Cek ketat agar teks '403 Forbidden' dari WAF tidak tembus ke lagu
+                                    if len(content) < 500 and (b'<html' in content.lower() or b'forbidden' in content.lower()):
+                                        raise Exception("Tercegat WAF")
+                                    async with aiofiles.open(temp_path, 'wb') as f:
+                                        await f.write(content)
+                                    return None
+                        except:
+                            await asyncio.sleep(1)
+                    return "Gagal"
+
+            async with aiohttp.ClientSession(connector=connector, headers={"User-Agent": "TIDAL_ANDROID/1039 okhttp/3.14.9"}) as session:
+                tasks = [dl_segment(session, urls[0][i], temp_files[i]) for i in range(len(urls[0]))]
+                results = await asyncio.gather(*tasks)
                 
-            hex_native = "KOSONG"
-            if size_native > 0:
-                with open(temp_path_native, 'rb') as f: hex_native = f.read(15).hex()
+            if any(results):
+                from bot.logger import LOGGER
+                LOGGER.error("DASH Tunneling gagal mengunduh pecahan secara utuh.")
+                return None
                 
-            # 4. Kirim Laporan Investigasi ke Telegram
-            laporan = (
-                f"🕵️‍♂️ **HASIL FORENSIK TIDAL DASH** 🕵️‍♂️\n\n"
-                f"**Aria2:**\n"
-                f"Ukuran: `{size_aria}` bytes\n"
-                f"Header: `{hex_aria}`\n\n"
-                f"**Native:**\n"
-                f"Ukuran: `{size_native}` bytes\n"
-                f"Header: `{hex_native}`\n\n"
-                f"*(Copy/Foto pesan ini dan kirimkan ke saya!)*"
-            )
-            
-            from bot.logger import LOGGER
-            LOGGER.error("=== HASIL DEBUG ARIA2 ===")
-            LOGGER.error(f"Aria: {size_aria}b | {hex_aria}")
-            LOGGER.error(f"Native: {size_native}b | {hex_native}")
-            
-            try:
-                from bot.helpers.message import send_message
-                await send_message(user, laporan)
-            except: pass
-            
-            # Kita hentikan proses secara paksa di sini agar bot tidak lanjut error
-            return None 
-            # ---------------------------------------------------------
+            # Dijamin 100% aman disatukan tanpa merusak struktur file
+            await merge_tracks(temp_files, filepath)
             
         else:
-            # Unduhan Single File
+            # --- [UNDUHAN SINGLE FILE TETAP MEMAKAI ARIA2] ---
             err = await download_file(urls, filepath, details=details)
             if err:
                 from bot.logger import LOGGER
@@ -216,7 +197,6 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                 return None
 
         track_meta['extension'] = await get_audio_extension(filepath)
-
         
         try:
             _, __, ___, user_convert_m4a = tidal_manager.get_user_quality_settings(user['user_id']) 
