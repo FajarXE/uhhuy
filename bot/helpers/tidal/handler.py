@@ -134,7 +134,7 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         filepath = sanitize_filepath(filepath)
         track_meta['filepath'] = filepath 
 
-        # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
+        # --- [SUNTIKAN RADAR ARIA2] ---
         details = None
         if upload and 'bot_msg' in user:
             details = {
@@ -142,27 +142,48 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                 'title': track_meta.get('title', 'Unknown'),
                 'type': track_meta.get('type', 'Track').capitalize()
             }
-        # ----------------------------------------
+        # ------------------------------
 
         if type(urls) == list:
-            i = 0
-            temp_files = []
-            for url in urls[0]:
-                temp_path = f"{filepath}.{i}"
-                err = await download_file(url, temp_path, details=details) # <-- Tambahkan details
-                if err:
-                    LOGGER.error(f"Download_file gagal (list): {err}")
-                    return None
-                i+=1
-                temp_files.append(temp_path)
+            # --- [FIX ARIA2 DASH TURBO PARALEL] ---
+            import asyncio
+            temp_files = [f"{filepath}.{i}" for i in range(len(urls[0]))]
+            
+            # Tembakkan 15 segmen sekaligus ke Aria2 agar tidak antre satu-satu!
+            sem = asyncio.Semaphore(15) 
+
+            async def dl_segment(url, temp_path):
+                async with sem:
+                    # Parameter details=None agar UI tidak spam notif untuk file pecahan kecil
+                    return await download_file(url, temp_path, details=None)
+            
+            if details and 'msg' in details:
+                try: 
+                    from bot.helpers.message import edit_message
+                    await edit_message(details['msg'], f"⚡ Mengunduh `{details.get('title', 'Unknown')}`\n⚙️ **Aria2 Turbo**: Memproses {len(urls[0])} segmen DASH paralel...", None, False)
+                except: pass
+
+            # Eksekusi puluhan perintah Aria2 secara serentak
+            tasks = [dl_segment(urls[0][i], temp_files[i]) for i in range(len(urls[0]))]
+            results = await asyncio.gather(*tasks)
+            
+            if any(results):
+                from bot.logger import LOGGER
+                LOGGER.error("Aria2 gagal mengunduh salah satu list segmen DASH")
+                return None
+                
             await merge_tracks(temp_files, filepath)
+            
         else:
-            err = await download_file(urls, filepath, details=details) # <-- Tambahkan details
+            # Unduhan Single File
+            err = await download_file(urls, filepath, details=details)
             if err:
+                from bot.logger import LOGGER
                 LOGGER.error(f"Download_file gagal (single): {err}")
                 return None
 
         track_meta['extension'] = await get_audio_extension(filepath)
+
         
         try:
             _, __, ___, user_convert_m4a = tidal_manager.get_user_quality_settings(user['user_id']) 
