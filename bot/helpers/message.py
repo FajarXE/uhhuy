@@ -237,7 +237,17 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
             
             elif type in ['photo', 'pic']:
-                res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func)
+                try:
+                    # Langkah 1: Coba kirim sebagai Foto/Gambar standar
+                    res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func)
+                except Exception as pic_err:
+                    # Langkah 2: Jika server Telegram menolak karena ukurannya raksasa, kirim sebagai File Dokumen
+                    if "IMAGE_PROCESS_FAILED" in str(pic_err) or "PHOTO_INVALID_DIMENSIONS" in str(pic_err):
+                        from bot.logger import LOGGER
+                        LOGGER.warning(f"Telegram menolak foto ({pic_err}), mengalihkan ke mode Dokumen.")
+                        res = await client.send_document(chat_id, document=text, caption=final_caption, progress=prog_func)
+                    else:
+                        raise pic_err # Lempar error jika masalahnya hal lain (seperti koneksi putus)
             
             elif type == 'video':
                 res = await client.send_video(chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func)
