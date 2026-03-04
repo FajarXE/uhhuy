@@ -1,15 +1,56 @@
-# [FILE: bot/modules/direct_uploader.py]
+# [GANTI TOTAL ISI FILE: bot/modules/direct_uploader.py]
 
 import os
 import asyncio
 import requests
 import json
 import re
-import shutil
+import io
+import time
+import aiohttp
 from urllib.parse import quote
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bot.logger import LOGGER
+
+class ProgressFileWrapper(io.IOBase):
+    """
+    Bungkus (Wrapper) file cerdas yang membaca data dari disk sedikit demi sedikit,
+    sekaligus mengirimkan denyut (radar) laporan progres ke antarmuka Telegram.
+    """
+    def __init__(self, filename, details):
+        self.file = open(filename, 'rb')
+        self.total_size = os.path.getsize(filename)
+        self.bytes_read = 0
+        self.details = details
+        self.loop = asyncio.get_event_loop()
+        self.last_update = 0
+
+    def read(self, size=-1):
+        chunk = self.file.read(size)
+        if chunk:
+            self.bytes_read += len(chunk)
+            now = time.time()
+            # Tembakkan radar progres setiap 1.5 detik agar Telegram tidak FloodWait
+            if self.details and (now - self.last_update > 1.5 or self.bytes_read == self.total_size):
+                self.last_update = now
+                from bot.helpers.utils import progress_message
+                
+                def schedule_progress(b_read, t_size, det):
+                    asyncio.create_task(progress_message(b_read, t_size, det))
+                    
+                self.loop.call_soon_threadsafe(schedule_progress, self.bytes_read, self.total_size, self.details)
+        return chunk
+    
+    def close(self):
+        self.file.close()
+
+    def readable(self):
+        return True
+        
+    def fileno(self):
+        # Penting agar AIOHTTP dapat mendeteksi ukuran Content-Length secara otomatis
+        return self.file.fileno()
 
 class DirectUpload:
     def __init__(self, listener=None, name=None, path=None):
@@ -23,39 +64,7 @@ class DirectUpload:
         self.session.mount('https://', HTTPAdapter(max_retries=retries))
 
     # ============================
-    # CORE: CURL EXECUTOR
-    # ============================
-    async def _run_curl_upload(self, cmd_args):
-        temp_log = f"curl_log_{os.getpid()}.txt"
-        try:
-            final_cmd = cmd_args + ["--http1.1"] 
-            
-            with open(temp_log, "w") as outfile:
-                process = await asyncio.create_subprocess_exec(
-                    *final_cmd,
-                    stdout=outfile,
-                    stderr=outfile
-                )
-                await process.wait()
-
-            output = ""
-            if os.path.exists(temp_log):
-                with open(temp_log, "r") as f:
-                    output = f.read().strip()
-                os.remove(temp_log)
-                
-            if process.returncode == 0:
-                return output
-            else:
-                LOGGER.warning(f"CURL Code {process.returncode}: {output[:200]}")
-                return output if output else None
-        except Exception as e:
-            LOGGER.error(f"CURL Ex Error: {e}")
-            if os.path.exists(temp_log): os.remove(temp_log)
-            return None
-
-    # ============================
-    # GOFILE HANDLER
+    # GOFILE HANDLER (AIOHTTP)
     # ============================
     def _get_gofile_server(self):
         try:
@@ -83,7 +92,6 @@ class DirectUpload:
             LOGGER.error(f"Gofile Create Folder Error: {e}")
         return None
 
-    # Helpers Public
     async def gofile_get_root(self, token):
         try:
             acc_id = await asyncio.to_thread(self._get_gofile_account, token)
@@ -97,38 +105,34 @@ class DirectUpload:
     async def gofile_create_folder_async(self, token, parent_id, name):
         return await asyncio.to_thread(self._gofile_create_folder, token, parent_id, name)
 
-    async def _upload_gofile_curl(self, filepath, token, folder_id):
+    async def _upload_gofile_aiohttp(self, filepath, token, folder_id, details):
         server = await asyncio.to_thread(self._get_gofile_server)
         url = f"https://{server}.gofile.io/uploadFile"
         
-        # [FIX] SUSUNAN COMMAND: Token -> FolderID -> File (Paling Akhir)
-        cmd = [
-            "curl", "-s", "--no-buffer",
-            "-X", "POST", url,
-            "-H", "Connection: keep-alive", 
-            "-F", f"token={token}"
-        ]
-        
-        # Masukkan Folder ID SEBELUM file agar server membacanya duluan
+        data = aiohttp.FormData()
+        data.add_field('token', token)
         if folder_id:
-            cmd.extend(["-F", f"folderId={folder_id}"])
+            data.add_field('folderId', folder_id)
             
-        # File ditaruh paling akhir
-        cmd.extend(["-F", f"file=@{filepath}"])
-            
-        output = await self._run_curl_upload(cmd)
-        if output:
-            try:
-                match = re.search(r'(\{.*\})', output)
-                if match:
-                    res = json.loads(match.group(1))
+        filename = os.path.basename(filepath)
+        wrapper = ProgressFileWrapper(filepath, details)
+        data.add_field('file', wrapper, filename=filename)
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Timeout dinaikkan ke 3600 agar file besar tidak terputus
+                async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+                    res = await resp.json()
+                    wrapper.close()
                     if res.get('status') == 'ok':
                         return res['data']['downloadPage']
-            except: pass
+        except Exception as e:
+            LOGGER.error(f"Gofile Upload Error: {e}")
+            wrapper.close()
         return None
 
     # ============================
-    # BUZZHEAVIER HANDLER
+    # BUZZHEAVIER HANDLER (AIOHTTP)
     # ============================
     def _buzzheavier_get_root(self, token):
         try:
@@ -146,7 +150,7 @@ class DirectUpload:
             r = self.session.post(url, headers=headers, json=data, timeout=15)
             res = r.json()
             if res.get('code') == 200: return res['data']['id']
-            elif res.get('code') == 409: # Conflict auto rename
+            elif res.get('code') == 409:
                 match = re.search(r"\((\d+)\)$", name)
                 if match:
                     num = int(match.group(1)) + 1
@@ -157,66 +161,66 @@ class DirectUpload:
         except: pass
         return None
 
-    # Helpers Public
     async def buzzheavier_get_root(self, token):
          return await asyncio.to_thread(self._buzzheavier_get_root, token)
 
     async def buzzheavier_create_folder_async(self, token, parent_id, name):
          return await asyncio.to_thread(self._buzzheavier_create_folder, token, parent_id, name)
 
-    async def _upload_buzzheavier_curl(self, filepath, token, folder_id=None):
+    async def _upload_buzzheavier_aiohttp(self, filepath, token, folder_id, details):
         filename = os.path.basename(filepath)
         url = f"https://w.buzzheavier.com/{folder_id}/{quote(filename)}" if folder_id else f"https://w.buzzheavier.com/{quote(filename)}"
         
-        cmd = [
-            "curl", "-s", "--no-buffer",
-            "-X", "PUT",
-            "-H", f"Authorization: Bearer {token}",
-            "-T", filepath,
-            url
-        ]
-        output = await self._run_curl_upload(cmd)
-        if output:
-            try:
-                match = re.search(r'(\{.*\})', output)
-                if match:
-                    res = json.loads(match.group(1))
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Length": str(os.path.getsize(filepath))
+        }
+        
+        wrapper = ProgressFileWrapper(filepath, details)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(url, headers=headers, data=wrapper, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+                    res = await resp.json()
+                    wrapper.close()
                     if res.get('code') == 201:
                         return f"https://buzzheavier.com/{res['data']['id']}"
-            except: pass
+        except Exception as e:
+            LOGGER.error(f"Buzzheavier Upload Error: {e}")
+            wrapper.close()
         return None
 
     # ============================
-    # VIKINGFILES HANDLER
+    # VIKINGFILES HANDLER (AIOHTTP)
     # ============================
-    async def _upload_viking_curl(self, filepath, token):
+    async def _upload_viking_aiohttp(self, filepath, token, details):
         def get_srv():
             try: return self.session.get("https://vikingfile.com/api/get-server", timeout=10).json()['server']
             except: return None
         srv = await asyncio.to_thread(get_srv)
         if not srv: return None
 
-        # Viking juga lebih aman jika user token di depan
-        cmd = [
-            "curl", "-s", "--no-buffer",
-            "-X", "POST", srv,
-            "-F", f"user={token}",
-            "-F", f"file=@{filepath}"
-        ]
-        output = await self._run_curl_upload(cmd)
-        if output:
-            try:
-                match = re.search(r'(\{.*\})', output)
-                if match:
-                    res = json.loads(match.group(1))
+        data = aiohttp.FormData()
+        data.add_field('user', token)
+        
+        filename = os.path.basename(filepath)
+        wrapper = ProgressFileWrapper(filepath, details)
+        data.add_field('file', wrapper, filename=filename)
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(srv, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+                    res = await resp.json()
+                    wrapper.close()
                     if res.get('url'): return res['url']
-            except: pass
+        except Exception as e:
+            LOGGER.error(f"Viking Upload Error: {e}")
+            wrapper.close()
         return None
 
     # ============================
     # PUBLIC METHODS
     # ============================
-    async def upload(self, file_name, size, upload_type, specific_folder_id=None):
+    async def upload(self, file_name, size, upload_type, specific_folder_id=None, details=None):
         filepath = os.path.join(self.path, file_name)
         if not os.path.exists(filepath): return None
         
@@ -224,22 +228,22 @@ class DirectUpload:
             token = self.user_dict.get("gofile", {}).get("api")
             fid = specific_folder_id or self.user_dict.get("gofile", {}).get("folder_id")
             if token:
-                LOGGER.info(f"Uploading Gofile (CURL): {file_name}")
-                link = await self._upload_gofile_curl(filepath, token, fid)
+                LOGGER.info(f"Uploading Gofile (Aiohttp): {file_name}")
+                link = await self._upload_gofile_aiohttp(filepath, token, fid, details)
                 return {'Gofile': link} if link else None
 
         elif upload_type in ['bh', 'buzzheavier']:
             token = self.user_dict.get("buzzheavier", {}).get("api")
             if token:
-                LOGGER.info(f"Uploading Buzzheavier (CURL): {file_name}")
-                link = await self._upload_buzzheavier_curl(filepath, token, folder_id=specific_folder_id)
+                LOGGER.info(f"Uploading Buzzheavier (Aiohttp): {file_name}")
+                link = await self._upload_buzzheavier_aiohttp(filepath, token, specific_folder_id, details)
                 return {'Buzzheavier': link} if link else None
 
         elif upload_type in ['vk', 'viking']:
             token = self.user_dict.get("vikingfiles", {}).get("api")
             if token:
-                LOGGER.info(f"Uploading Viking (CURL): {file_name}")
-                link = await self._upload_viking_curl(filepath, token)
+                LOGGER.info(f"Uploading Viking (Aiohttp): {file_name}")
+                link = await self._upload_viking_aiohttp(filepath, token, details)
                 return {'Vikingfiles': link} if link else None
 
         return None
