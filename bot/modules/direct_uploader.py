@@ -133,8 +133,12 @@ class DirectUpload:
                     if res.get('status') == 'ok':
                         return res['data']['downloadPage']
         except Exception as e:
-            LOGGER.error(f"Gofile Upload Error: {e}")
             wrapper.close()
+            # [FIX] Jangan jadikan Error jika itu ulah tombol Cancel
+            if 'DIBATALKAN_PENGGUNA' in str(e):
+                LOGGER.warning(f"Gofile Upload dibatalkan oleh pengguna: {filename}")
+            else:
+                LOGGER.error(f"Gofile Upload Error: {e}")
         return None
 
     # ============================
@@ -191,8 +195,12 @@ class DirectUpload:
                     if res.get('code') == 201:
                         return f"https://buzzheavier.com/{res['data']['id']}"
         except Exception as e:
-            LOGGER.error(f"Buzzheavier Upload Error: {e}")
             wrapper.close()
+            # [FIX] Filter Log Cancel
+            if 'DIBATALKAN_PENGGUNA' in str(e):
+                LOGGER.warning(f"Buzzheavier Upload dibatalkan oleh pengguna: {filename}")
+            else:
+                LOGGER.error(f"Buzzheavier Upload Error: {e}")
         return None
 
     # ============================
@@ -219,8 +227,12 @@ class DirectUpload:
                     wrapper.close()
                     if res.get('url'): return res['url']
         except Exception as e:
-            LOGGER.error(f"Viking Upload Error: {e}")
             wrapper.close()
+            # [FIX] Filter Log Cancel
+            if 'DIBATALKAN_PENGGUNA' in str(e):
+                LOGGER.warning(f"Vikingfiles Upload dibatalkan oleh pengguna: {filename}")
+            else:
+                LOGGER.error(f"Viking Upload Error: {e}")
         return None
 
     # ============================
