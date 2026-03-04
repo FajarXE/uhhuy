@@ -143,9 +143,16 @@ class DirectUpload:
                         return res['data']['downloadPage']
         except Exception as e:
             wrapper.close()
-            # [FIX] Jangan jadikan Error jika itu ulah tombol Cancel
             if 'DIBATALKAN_PENGGUNA' in str(e):
                 LOGGER.warning(f"Gofile Upload dibatalkan oleh pengguna: {filename}")
+                try:
+                    from bot.helpers.message import edit_message
+                    if details and 'msg' in details:
+                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**\n\n**Tugas dibatalkan.**", None, False)
+                except: pass
+                # Membunuh rantai Fallback dan Loop secara total!
+                import asyncio
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Gofile Upload Error: {e}")
         return None
@@ -205,9 +212,16 @@ class DirectUpload:
                         return f"https://buzzheavier.com/{res['data']['id']}"
         except Exception as e:
             wrapper.close()
-            # [FIX] Filter Log Cancel
             if 'DIBATALKAN_PENGGUNA' in str(e):
                 LOGGER.warning(f"Buzzheavier Upload dibatalkan oleh pengguna: {filename}")
+                try:
+                    from bot.helpers.message import edit_message
+                    if details and 'msg' in details:
+                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**\n\n**Tugas dibatalkan.**", None, False)
+                except: pass
+                # Membunuh rantai Fallback dan Loop secara total!
+                import asyncio
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Buzzheavier Upload Error: {e}")
         return None
@@ -259,7 +273,15 @@ class DirectUpload:
         except Exception as e:
             wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
-                LOGGER.warning(f"Vikingfiles Upload dibatalkan: {filename}")
+                LOGGER.warning(f"Vikingfiles Upload dibatalkan oleh pengguna: {filename}")
+                try:
+                    from bot.helpers.message import edit_message
+                    if details and 'msg' in details:
+                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**\n\n**Tugas dibatalkan.**", None, False)
+                except: pass
+                # Membunuh rantai Fallback dan Loop secara total!
+                import asyncio
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Viking Upload Error: {e}")
         return None
