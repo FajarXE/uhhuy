@@ -211,7 +211,9 @@ class DirectUpload:
             try: return self.session.get("https://vikingfile.com/api/get-server", timeout=10).json()['server']
             except: return None
         srv = await asyncio.to_thread(get_srv)
-        if not srv: return None
+        if not srv: 
+            LOGGER.error("Viking Upload: Gagal mendapatkan server dari API.")
+            return None
 
         data = aiohttp.FormData()
         data.add_field('user', token)
@@ -223,26 +225,32 @@ class DirectUpload:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(srv, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
-                    # [FIX] Jangan gunakan resp.json() karena server Viking melempar HTML!
-                    # Kita baca sebagai teks biasa, lalu gali JSON-nya secara manual.
                     raw_text = await resp.text()
                     wrapper.close()
                     
+                    # --- [FIX PARSER & DIAGNOSTIK] ---
                     try:
                         res = json.loads(raw_text)
                         if res.get('url'): return res['url']
                     except:
-                        # Fallback: Gunakan mesin bor Regex jika bentuknya berantakan
-                        match = re.search(r'(\{.*\})', raw_text)
+                        # re.DOTALL (re.S) agar bisa melacak JSON multi-baris di dalam HTML
+                        import re
+                        match = re.search(r'(\{.*?\})', raw_text, re.DOTALL)
                         if match:
-                            res = json.loads(match.group(1))
-                            if res.get('url'): return res['url']
+                            try:
+                                res = json.loads(match.group(1))
+                                if res.get('url'): return res['url']
+                                else: LOGGER.warning(f"Viking Regex nemu JSON tapi tidak ada URL: {res}")
+                            except: pass
+                            
+                    # Jika sampai di baris ini, berarti server Vikingfile memberikan pesan error!
+                    LOGGER.error(f"Viking Response Mentah: {raw_text[:500]}")
+                    # ---------------------------------
                             
         except Exception as e:
             wrapper.close()
-            # [FIX] Filter Log Cancel
             if 'DIBATALKAN_PENGGUNA' in str(e):
-                LOGGER.warning(f"Vikingfiles Upload dibatalkan oleh pengguna: {filename}")
+                LOGGER.warning(f"Vikingfiles Upload dibatalkan: {filename}")
             else:
                 LOGGER.error(f"Viking Upload Error: {e}")
         return None
