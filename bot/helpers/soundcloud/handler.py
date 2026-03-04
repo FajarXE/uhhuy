@@ -37,26 +37,36 @@ except ImportError:
     lyrics_manager = None
 
 
-async def download_soundcloud_track(download_url: str, download_type: str, filepath: str):
+async def download_soundcloud_track(download_url: str, download_type: str, filepath: str, details: dict = None):
     """
-    Pengunduh file Soundcloud.
+    Pengunduh file Soundcloud terintegrasi dengan Aria2 & FFmpeg.
     """
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
+        # 1. Gunakan ARIA2 untuk file Original & Progressive
         if download_type == 'original' or download_type == 'progressive':
-            LOGGER.debug(f"Soundcloud: Mengunduh (progresif/asli) dari {download_url}")
-            async with aiohttp.ClientSession() as session:
-                async with session.get(download_url) as response:
-                    response.raise_for_status()
-                    async with aiofiles.open(filepath, "wb") as f:
-                        async for chunk in response.content.iter_chunked(8192):
-                            await f.write(chunk)
+            LOGGER.debug(f"Soundcloud: Mengunduh via Aria2 dari {download_url}")
+            from bot.helpers.utils import download_file
+            
+            err = await download_file(download_url, filepath, details=details)
+            if err:
+                LOGGER.error(f"Soundcloud Aria2 gagal: {err}")
+                if os.path.exists(filepath): os.remove(filepath)
+                return f"Aria2 gagal: {err}"
             return None 
 
+        # 2. Gunakan FFMPEG untuk Stream HLS (.m3u8)
         elif download_type == 'hls':
             LOGGER.debug(f"Soundcloud: Menggunakan ffmpeg (HLS) untuk {download_url}")
             
+            # Ubah UI sementara karena FFmpeg tidak punya radar live
+            if details and 'msg' in details:
+                try:
+                    from bot.helpers.message import edit_message
+                    await edit_message(details['msg'], f"⚙️ **Menggabungkan HLS Stream (FFmpeg)...**\n`{details.get('title', 'Unknown Track')}`", None, False)
+                except: pass
+
             args = [
                 'ffmpeg',
                 '-y',               
@@ -91,8 +101,7 @@ async def download_soundcloud_track(download_url: str, download_type: str, filep
         return f"Gagal mengunduh file: {e}"
 
 
-async def start_track(item_id: str, user: dict, pre_data: dict = None, upload=True, \
-    filepath=None, disable_link=False):
+async def start_track(item_id: str, user: dict, pre_data: dict = None, upload=True, filepath=None, disable_link=False):
     """Memulai alur kerja untuk satu track Soundcloud."""
     
     track_meta = None
@@ -131,10 +140,21 @@ async def start_track(item_id: str, user: dict, pre_data: dict = None, upload=Tr
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
+    # --- [SUNTIKAN KABEL RADAR UI TELEGRAM] ---
+    details = None
+    if upload and 'bot_msg' in user:
+        details = {
+            'msg': user['bot_msg'],
+            'title': track_meta.get('title', 'Unknown'),
+            'type': track_meta.get('type', 'Track').capitalize()
+        }
+    # ------------------------------------
+
     err = await download_soundcloud_track(
         download_url, 
         download_type, 
-        track_meta['filepath']
+        track_meta['filepath'],
+        details=details # <-- Kabel Radar masuk ke fungsi download
     )
     if err:
         LOGGER.error(f"Soundcloud dl_track gagal untuk {item_id}: {err}")
