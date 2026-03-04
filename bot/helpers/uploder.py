@@ -113,21 +113,39 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
             if 'bot_msg' in user: await edit_message(user['bot_msg'], f"🚀 Uploading to {mode}...")
             
             if mode == 'Buzzheavier':
-                root_id = await uploader.buzzheavier_get_root(token)
-                parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
+                # [FIX] Pelindung agar jika gagal buat folder API, file tetap dipaksa terunggah!
+                parent_id = None
+                try:
+                    root_id = await uploader.buzzheavier_get_root(token)
+                    parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
+                except Exception as e:
+                    from bot.logger import LOGGER
+                    LOGGER.warning(f"Buzzheavier Folder API lambat: {e}")
+                
                 res = await uploader.upload(os.path.basename(filepath), 0, 'buzzheavier', specific_folder_id=parent_id)
                 if res and parent_id: return f"https://buzzheavier.com/{parent_id}"
                 elif res: return list(res.values())[0]
                 
             elif mode == 'Gofile':
-                # [FIX] Wajib membuat/mengikat Token & Folder ID agar API Gofile tidak menolaknya!
-                root_id = await uploader.gofile_get_root(token)
-                new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
-                folder_id = new_folder['id'] if new_folder else None
+                # [FIX] Wajib membuat/mengikat Token & Folder ID dengan aman
+                new_folder = None
+                folder_id = None
+                try:
+                    root_id = await uploader.gofile_get_root(token)
+                    new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
+                    folder_id = new_folder['id'] if new_folder else None
+                except Exception as e:
+                    from bot.logger import LOGGER
+                    LOGGER.warning(f"Gofile Folder API lambat: {e}")
                 
                 res = await uploader.upload(os.path.basename(filepath), 0, 'gofile', specific_folder_id=folder_id)
                 if res and new_folder: return f"https://gofile.io/d/{new_folder['code']}"
                 elif res: return list(res.values())[0]
+            
+            elif mode == 'Vikingfiles':
+                # [FIX] Parameter server internal yang benar adalah 'viking', BUKAN 'vikingfiles'!
+                res = await uploader.upload(os.path.basename(filepath), 0, 'viking')
+                if res: return list(res.values())[0]
             
             else:
                 res = await uploader.upload(os.path.basename(filepath), 0, mode.lower())
