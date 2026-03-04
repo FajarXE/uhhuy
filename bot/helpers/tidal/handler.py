@@ -146,15 +146,15 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
 
         if type(urls) == list:
             # --- [FIX ARIA2 DASH TURBO PARALEL] ---
-            import asyncio, os, aiofiles
+            import asyncio
             temp_files = [f"{filepath}.{i}" for i in range(len(urls[0]))]
             
             # Turunkan sedikit ke 7 agar server Fastly CDN Tidal tidak memblokir IP
-            # (7 file bersamaan sudah sangat cepat dan jauh lebih stabil)
             sem = asyncio.Semaphore(7) 
 
             async def dl_segment(url, temp_path):
                 async with sem:
+                    # Parameter details=None agar UI tidak spam notif untuk file pecahan kecil
                     return await download_file(url, temp_path, details=None)
             
             if details and 'msg' in details:
@@ -163,6 +163,7 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                     await edit_message(details['msg'], f"⚡ Mengunduh `{details.get('title', 'Unknown')}`\n⚙️ **Aria2 Turbo**: Memproses {len(urls[0])} segmen DASH paralel...", None, False)
                 except: pass
 
+            # Eksekusi puluhan perintah Aria2 secara serentak
             tasks = [dl_segment(urls[0][i], temp_files[i]) for i in range(len(urls[0]))]
             results = await asyncio.gather(*tasks)
             
@@ -171,22 +172,9 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                 LOGGER.error("Aria2 gagal mengunduh salah satu list segmen DASH")
                 return None
                 
-            # --- [FIX METADATA HILANG: PENGGABUNGAN MANUAL KUNCI URUTAN] ---
-            # Kita TIDAK memakai await merge_tracks(temp_files, filepath) karena 
-            # fungsi itu bisa mengacak urutan file yang selesai didownload bersamaan.
-            try:
-                async with aiofiles.open(filepath, 'wb') as outfile:
-                    for f_path in temp_files: # Mengunci urutan mutlak dari 0 sampai akhir
-                        if os.path.exists(f_path):
-                            async with aiofiles.open(f_path, 'rb') as infile:
-                                chunk = await infile.read()
-                                await outfile.write(chunk)
-                            os.remove(f_path) # Bersihkan pecahan temp
-            except Exception as e:
-                from bot.logger import LOGGER
-                LOGGER.error(f"Gagal menggabungkan pecahan: {e}")
-                return None
-            # ---------------------------------------------------------------
+            # [KEMBALIKAN KE FUNGSI MERGE_TRACKS ASLI!]
+            # Fungsi ini terbukti aman untuk menstruktur ulang file fMP4 DASH
+            await merge_tracks(temp_files, filepath)
             
         else:
             # Unduhan Single File
