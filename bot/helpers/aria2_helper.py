@@ -82,16 +82,21 @@ async def aria2_download(url, filepath, details=None):
                     
                     if state == "complete":
                         ACTIVE_DOWNLOADS.pop(gid, None)
-                        LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
+                        # Sembunyikan log pecahan DASH (.0, .1) agar terminal tidak kotor/lag
+                        if not file_name.split('.')[-1].isdigit():
+                            LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
                         return True
+                        
                     elif state in ["error", "removed"]:
                         ACTIVE_DOWNLOADS.pop(gid, None)
                         err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
                         LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
                         return False
                         
-                await asyncio.sleep(2) 
-
+                # --- [FIX LATENSI ARIA2] ---
+                # Ganti dari 2 detik menjadi 0.5 detik agar respon Aria2 pada file kecil menjadi super kilat!
+                await asyncio.sleep(0.5) 
+ 
     except Exception as e:
         LOGGER.error(f"Aria2 RPC Exception: {e}")
         return False
