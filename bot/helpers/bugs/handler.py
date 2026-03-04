@@ -89,7 +89,6 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     # --- LOGIKA UNDUH BUGS ---
     try:
         # 1. Dapatkan URL Stream (Async)
-        #    (download_id = track_id, download_quality = 'flac', '320k', dll.)
         stream_data = await asyncio.to_thread(
             client.get_stream, 
             int(download_id), 
@@ -104,13 +103,22 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         # Pastikan direktori ada
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        # 2. Unduh file (Ini adalah unduhan HTTP sederhana)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(download_url) as response:
-                response.raise_for_status()
-                async with aiofiles.open(track_meta['filepath'], "wb") as f:
-                    async for chunk in response.content.iter_chunked(8192):
-                        await f.write(chunk)
+        # 2. Siapkan Kabel Radar UI Telegram (Hanya aktif untuk Single Track)
+        details = None
+        if upload and 'bot_msg' in user:
+            details = {
+                'msg': user['bot_msg'],
+                'title': track_meta.get('title', 'Unknown'),
+                'type': track_meta.get('type', 'Track').capitalize()
+            }
+
+        # 3. Lempar tugas unduhan ke mesin Aria2 yang super cepat!
+        from bot.helpers.utils import download_file
+        err = await download_file(download_url, track_meta['filepath'], details=details)
+        
+        if err:
+            LOGGER.error(f"Aria2 gagal mengunduh Bugs track {item_id}: {err}")
+            return False
 
     except Exception as e:
         LOGGER.error(f"Bugs dl_track gagal untuk {item_id}: {e}")
