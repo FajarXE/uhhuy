@@ -17,10 +17,6 @@ async def aria2_download(url, filepath, details=None):
     dir_path = os.path.dirname(filepath)
     file_name = os.path.basename(filepath)
     
-    # Deteksi pecahan DASH
-    is_dash_chunk = file_name.split('.')[-1].isdigit()
-    split_conn = "1" if is_dash_chunk else "16"
-    
     payload_add = {
         "jsonrpc": "2.0",
         "id": "bot_add",
@@ -30,12 +26,10 @@ async def aria2_download(url, filepath, details=None):
             {
                 "dir": dir_path,
                 "out": file_name,
-                "max-connection-per-server": split_conn,
-                "split": split_conn,
+                "max-connection-per-server": "16",
+                "split": "16",
                 "min-split-size": "1M",
-                "allow-overwrite": "true",
-                "file-allocation": "none", # <--- FIX UTAMA ANTI NULL BYTES!
-                "user-agent": "TIDAL_ANDROID/1039 okhttp/3.14.9"
+                "allow-overwrite": "true"
             }
         ]
     }
