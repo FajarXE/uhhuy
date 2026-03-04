@@ -118,6 +118,16 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                 res = await uploader.upload(os.path.basename(filepath), 0, 'buzzheavier', specific_folder_id=parent_id)
                 if res and parent_id: return f"https://buzzheavier.com/{parent_id}"
                 elif res: return list(res.values())[0]
+                
+            elif mode == 'Gofile':
+                # [FIX] Wajib membuat/mengikat Token & Folder ID agar API Gofile tidak menolaknya!
+                root_id = await uploader.gofile_get_root(token)
+                new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
+                folder_id = new_folder['id'] if new_folder else None
+                
+                res = await uploader.upload(os.path.basename(filepath), 0, 'gofile', specific_folder_id=folder_id)
+                if res and new_folder: return f"https://gofile.io/d/{new_folder['code']}"
+                elif res: return list(res.values())[0]
             
             else:
                 res = await uploader.upload(os.path.basename(filepath), 0, mode.lower())
@@ -420,8 +430,8 @@ async def playlist_upload(metadata, user):
     await cleanup(None, metadata, user)
 
 async def track_upload(metadata, user, disable_link=False):
-    # Tidak banyak berubah, hanya logging error
-    user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', 'Telegram')
+    # [FIX] Jangan hardcode 'Telegram', gunakan bot_set.upload_mode sebagai default!
+    user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', bot_set.upload_mode)
     upload_success = False
     
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
