@@ -102,24 +102,33 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         # Pastikan direktori ada
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        # 2. Unduh file (Ini adalah unduhan HTTP sederhana, tidak ada DRM)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(download_url) as response:
-                response.raise_for_status()
-                async with aiofiles.open(track_meta['filepath'], "wb") as f:
-                    async for chunk in response.content.iter_chunked(8192):
-                        await f.write(chunk)
+        # 2. Siapkan Kabel Radar UI Telegram (Hanya aktif untuk Single Track)
+        details = None
+        if upload and 'bot_msg' in user:
+            details = {
+                'msg': user['bot_msg'],
+                'title': track_meta.get('title', 'Unknown'),
+                'type': track_meta.get('type', 'Track').capitalize()
+            }
+
+        # 3. Lempar tugas unduhan ke mesin Aria2 yang super cepat!
+        from bot.helpers.utils import download_file
+        err = await download_file(download_url, track_meta['filepath'], details=details)
+        
+        if err:
+            raise Exception(f"Aria2 gagal: {err}") # Sengaja raise agar ditangkap oleh except di bawahnya
 
     # --- PERBAIKAN 1: Menyembunyikan Error 404 dari Log ---
     except Exception as e:
+        error_str = str(e)
         is_404_error = False
-        if isinstance(e, aiohttp.ClientResponseError):
-            if e.status == 404:
-                is_404_error = True
+        
+        # Deteksi 404 dari aiohttp (jika ada sisa) atau dari teks output Aria2
+        if getattr(e, 'status', None) == 404 or "404" in error_str or "Not Found" in error_str:
+            is_404_error = True
         
         if is_404_error:
             # Ini adalah error 404 yang ingin kita sembunyikan.
-            # Jangan log sebagai ERROR, cukup sebagai DEBUG (tersembunyi).
             LOGGER.debug(f"Napster dl_track 404 (diredam) untuk {item_id}: {e}")
         else:
             # Ini adalah error lain yang valid, log seperti biasa.
@@ -179,7 +188,7 @@ async def start_album(album_id: str, user: dict, upload=True):
         'type': album_meta['type']
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=8)
     
     successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
     album_meta['tracks'] = successful_tracks
