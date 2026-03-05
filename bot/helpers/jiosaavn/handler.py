@@ -220,8 +220,7 @@ async def process_album(token_id, user, session, api):
         tasks = [wrap_track(t, i) for i, t in enumerate(tracks)]
         update_details = {'msg': msg, 'title': title, 'type': 'Album', 'action': 'Download'}
         
-        # Gasak 4 Lagu Sekaligus!
-        results = await run_concurrent_tasks(tasks, update_details, limit=4)
+        results = await run_concurrent_tasks(worker_tasks, update_details, limit=Config.MAX_WORKERS)
         downloaded_tracks = [r for r in results if r]
 
         if not downloaded_tracks: raise Exception("❌ Gagal mengunduh semua lagu.")
@@ -301,7 +300,7 @@ async def process_playlist(token_id, user, session, api):
         tasks = [wrap_track(t, i) for i, t in enumerate(tracks)]
         update_details = {'msg': msg, 'title': title, 'type': 'Playlist', 'action': 'Download'}
         
-        results = await run_concurrent_tasks(tasks, update_details, limit=4)
+        results = await run_concurrent_tasks(worker_tasks, update_details, limit=Config.MAX_WORKERS)
         downloaded_tracks = [r for r in results if r]
 
         if not downloaded_tracks: raise Exception("❌ Gagal mengunduh playlist.")
