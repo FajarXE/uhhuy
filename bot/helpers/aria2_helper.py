@@ -17,20 +17,30 @@ async def aria2_download(url, filepath, details=None):
     dir_path = os.path.dirname(filepath)
     file_name = os.path.basename(filepath)
     
+    # --- [FIX ARIA2] KEMAMPUAN MEMAKAI TOPENG (HEADERS) ---
+    options = {
+        "dir": dir_path,
+        "out": file_name,
+        "max-connection-per-server": "16",
+        "split": "16",
+        "min-split-size": "1M",
+        "allow-overwrite": "true"
+    }
+    
+    # Jika ada headers dari layanan musik, pasangkan ke opsi Aria2!
+    if details and 'headers' in details and isinstance(details['headers'], dict):
+        header_list = [f"{k}: {v}" for k, v in details['headers'].items()]
+        if header_list:
+            options["header"] = header_list
+    # ------------------------------------------------------
+    
     payload_add = {
         "jsonrpc": "2.0",
         "id": "bot_add",
         "method": "aria2.addUri",
         "params": [
             [url],
-            {
-                "dir": dir_path,
-                "out": file_name,
-                "max-connection-per-server": "16",
-                "split": "16",
-                "min-split-size": "1M",
-                "allow-overwrite": "true"
-            }
+            options # <--- Masukkan opsi yang sudah ditambahkan headers
         ]
     }
     
