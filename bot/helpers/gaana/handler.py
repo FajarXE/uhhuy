@@ -1,19 +1,19 @@
+# [GANTI SELURUH FILE: bot/helpers/gaana/handler.py]
+
 import os
 import re
 import asyncio
 import shutil
 import aiofiles
+import aiohttp
 from bot.logger import LOGGER
 from bot.helpers.message import edit_message, send_message
 from .manager import gaana_manager
 from .metadata import set_gaana_metadata
 from bot.helpers.uploder import track_upload, album_upload, playlist_upload
 from bot import Config
-from bot.helpers.utils import fetch_zip_settings
-import yt_dlp 
-
-# Batas unduhan simultan (Paralel)
-SEM_LIMIT = 5
+from bot.helpers.utils import fetch_zip_settings, download_file, run_concurrent_tasks
+import yt_dlp
 
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "", str(name)).strip()
@@ -30,11 +30,17 @@ def ensure_download_dir(user, subdir=None):
         os.makedirs(user_dir)
     return user_dir
 
-async def download_with_ytdlp(url, output_path):
-    def run_ytdlp():
-        ydl_opts = {'format': 'bestaudio/best', 'outtmpl': output_path, 'quiet': True}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-    await asyncio.to_thread(run_ytdlp)
+# --- FUNGSI MENGUNDUH GAMBAR ---
+async def fetch_image(session, url, dest_path):
+    if not url: return False
+    try:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                async with aiofiles.open(dest_path, mode='wb') as f:
+                    await f.write(await resp.read())
+                return True
+    except: pass
+    return False
 
 async def start_gaana(link: str, user: dict):
     msg = user['bot_msg']
@@ -54,145 +60,205 @@ async def start_gaana(link: str, user: dict):
     elif content_type == 'playlist':
         await process_playlist_gaana(identifier, user, session, api)
 
+# --- WORKER: FULL ARIA2 + HYBRID FALLBACK ---
+async def _process_track_worker(track_info, i, total, dl_dir, user, session, api, is_batch=True):
+    title = track_info.get("track_title", f"Track {i}")
+    enc_path = track_info.get('urls', {}).get('auto', {}).get('message')
+    if not enc_path: 
+        LOGGER.warning(f"Gaana: Tidak ada stream URL untuk {title}")
+        return None
+    
+    try:
+        decrypted_url = api.decrypt_stream_path(enc_path)
+    except Exception as e:
+        LOGGER.error(e)
+        return None
+
+    final_url = decrypted_url
+    if "medium.mp4" in final_url: final_url = final_url.replace("medium.mp4", "320.mp4")
+    elif "128.mp4" in final_url: final_url = final_url.replace("128.mp4", "320.mp4")
+    elif "f.mp4" in final_url: final_url = final_url.replace("f.mp4", "320.mp4")
+    elif "64.mp4" in final_url: final_url = final_url.replace("64.mp4", "320.mp4")
+    elif "low.mp4" in final_url: final_url = final_url.replace("low.mp4", "320.mp4")
+    else: final_url = final_url.replace(".mp4", "_320.mp4")
+
+    track_num = track_info.get('track_number') or i
+    safe_title = sanitize_filename(title)
+    filename = f"{int(track_num):02d} - {safe_title}.m4a"
+    file_path = os.path.join(dl_dir, filename)
+
+    # 1. Unduh Cover Lagu
+    artwork_url = track_info.get('artwork', '')
+    if artwork_url:
+        artwork_url = re.sub(r'crop_\d+x\d+_', '', artwork_url)
+        artwork_url = artwork_url.replace("size_s", "size_xl").replace("size_m", "size_xl")
+
+    cover_path = os.path.join(dl_dir, f"{safe_title}.jpg")
+    if not os.path.exists(cover_path):
+        await fetch_image(session, artwork_url, cover_path)
+
+    # 2. Mesin Aria2 + Penyamaran Headers
+    headers_dict = api.headers
+    details_aria = {'msg': None, 'headers': headers_dict} if is_batch else {
+        'msg': user['bot_msg'], 'title': title, 'type': 'Track', 'headers': headers_dict
+    }
+
+    downloaded = False
+    urls_to_try = [final_url, decrypted_url]
+    for url in urls_to_try:
+        err = await download_file(url, file_path, retries=1, details=details_aria)
+        if not err and os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
+            downloaded = True
+            break
+        else:
+            LOGGER.warning(f"Gaana: Aria2 ditolak untuk {title}. Fallback ke YT-DLP...")
+            try:
+                def run_ytdlp():
+                    ydl_opts = {'format': 'bestaudio/best', 'outtmpl': file_path, 'quiet': True}
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
+                await asyncio.to_thread(run_ytdlp)
+                if os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
+                    downloaded = True
+                    break
+            except: pass
+
+    if not downloaded:
+        LOGGER.error(f"Gagal mengunduh track {title}")
+        return None
+
+    # 3. Pasang Metadata
+    dur = await set_gaana_metadata(file_path, track_info, cover_path if os.path.exists(cover_path) else None)
+
+    artist_name = "Unknown"
+    if track_info.get("artist"):
+        artist_name = track_info["artist"][0]['name']
+
+    return {
+        'filepath': file_path, 'title': title,
+        'artist': artist_name,
+        'album': track_info.get("album_title", "Unknown Album"), 
+        'cover': cover_path if os.path.exists(cover_path) else None, 
+        'duration': dur, 'quality': '320kbps', 'provider': 'Gaana'
+    }
+
 async def process_single_gaana(track, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "Mengunduh...")
+    await edit_message(msg, "⚙️ Mengambil data lagu...")
     try:
         track['track_number'] = 1
         track['track_count'] = 1
+        dl_dir = ensure_download_dir(user)
         
-        path, cover, dur = await download_gaana_track(track, user, session, api)
-        metadata = {
-            'filepath': path, 'title': track.get("track_title"),
-            'artist': track.get("artist")[0]['name'] if track.get("artist") else "",
-            'album': track.get("album_title"), 'cover': cover, 'provider': 'Gaana', 
-            'type': 'track', 'duration': dur, 'quality': '320kbps'
-        }
-        await track_upload(metadata, user)
-        await edit_message(msg, "Selesai!")
+        res = await _process_track_worker(track, 1, 1, dl_dir, user, session, api, is_batch=False)
+        if not res: raise Exception("Gagal mengunduh lagu.")
+        
+        res['type'] = 'track'
+        await edit_message(msg, "🚀 Memproses Upload...")
+        await track_upload(res, user)
     except Exception as e:
-        await edit_message(msg, f"Error: {e}")
+        await edit_message(msg, f"❌ Error: {e}")
 
 async def process_album_gaana(identifier, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "Mengambil data Album...")
+    await edit_message(msg, "⚙️ Mengambil data Album...")
     data = await api.get_metadata(session, identifier, 'albumDetail')
     
     if not data or 'tracks' not in data:
-        await edit_message(msg, "Album gagal.")
+        await edit_message(msg, "❌ Album gagal diambil.")
         return
 
     tracks = data['tracks']
-    album_title = data.get("title") or tracks[0].get("album_title")
+    album_title = data.get("title") or tracks[0].get("album_title") or "Unknown Album"
     dl_dir = ensure_download_dir(user, subdir=album_title)
     
     total = len(tracks)
     is_explicit = "False"
-    
-    await edit_message(msg, f"Album: {album_title}\nMemulai unduhan paralel ({total} tracks)...")
+    for t in tracks:
+        if t.get("parental_warning") == 1:
+            is_explicit = "True"
+            break
+            
+    release_date = data.get("release_date") or tracks[0].get("release_date", "Unknown")
 
-    # --- LOGIKA PARALLEL ---
-    sem = asyncio.Semaphore(SEM_LIMIT)
-    done_count = 0  # Counter untuk track yang selesai
-
-    async def worker(i, track):
-        nonlocal done_count, is_explicit
-        async with sem:
-            try:
-                if not track.get("track_number"):
-                    track["track_number"] = str(i + 1)
-                
-                track["track_count"] = str(total)
-                track["label_name"] = data.get("label_name")
-                
-                if track.get("parental_warning") == 1: is_explicit = "True"
-
-                path, cover, dur = await download_gaana_track(track, user, session, api, custom_dir=dl_dir)
-                
-                # Update progress setelah selesai download
-                done_count += 1
-                try:
-                    await edit_message(msg, f"[{done_count}/{total}] {track.get('track_title')}...")
-                except:
-                    pass # Abaikan jika gagal edit (kena rate limit)
-
-                return {
-                    'filepath': path, 'title': track.get("track_title"),
-                    'artist': track.get("artist")[0]['name'] if track.get("artist") else "Unknown",
-                    'album': album_title, 'cover': cover, 'duration': dur, 'quality': '320kbps'
-                }
-            except Exception as e:
-                LOGGER.error(f"Skip Gaana: {e}")
-                return None
-
-    tasks = [worker(i, track) for i, track in enumerate(tracks)]
-    results = await asyncio.gather(*tasks)
-    downloaded = [r for r in results if r is not None]
-
-    await edit_message(msg, "Memproses Album...")
+    # --- [FIX UI] UNDUH COVER UTAMA & KIRIM POSTER DI AWAL ---
+    final_cover_path = os.path.join(dl_dir, "cover.jpg")
+    artwork_url = data.get('artwork', '') or tracks[0].get('artwork', '')
+    if artwork_url:
+        artwork_url = re.sub(r'crop_\d+x\d+_', '', artwork_url)
+        artwork_url = artwork_url.replace("size_s", "size_xl").replace("size_m", "size_xl")
+        await fetch_image(session, artwork_url, final_cover_path)
+        
     _, is_album_zip, _, is_art_poster = fetch_zip_settings(user)
+    poster_msg = None
+    
+    artist_name = "Unknown"
+    if tracks and tracks[0].get("artist"):
+        artist_name = tracks[0]["artist"][0]['name']
+
+    if is_art_poster and os.path.exists(final_cover_path):
+        try:
+            caption = (
+                f"**ᴛɪᴛʟᴇ :** {album_title}\n**ᴀʀᴛɪsᴛ :** {artist_name}\n"
+                f"**ʀᴇʟᴇᴀsᴇ ᴅᴀᴛᴇ :** {release_date}\n**ᴛᴏᴛᴀʟ ᴛʀᴀᴄᴋs :** {total}\n"
+                f"**ᴛᴏᴛᴀʟ ᴠᴏʟᴜᴍᴇs :** 1\n**ǫᴜᴀʟɪᴛʏ :** 320kbps\n"
+                f"**ᴘʀᴏᴠɪᴅᴇʀ :** Gaana\n**ᴇxᴘʟɪᴄɪᴛ :** {is_explicit}"
+            )
+            poster_msg = await send_message(user, final_cover_path, 'pic', caption=caption)
+        except: pass
+    # ---------------------------------------------------------
+
+    # --- MESIN KONKURENSI ARIA2 ---
+    async def wrap_track(track_raw, i):
+        track_raw["track_number"] = i + 1
+        track_raw["track_count"] = total
+        track_raw["label_name"] = data.get("label_name", "Gaana")
+        return await _process_track_worker(track_raw, i+1, total, dl_dir, user, session, api, is_batch=True)
+
+    worker_tasks = [wrap_track(t, i) for i, t in enumerate(tracks)]
+    update_details = {'msg': msg, 'title': album_title, 'type': 'Album', 'action': 'Download'}
+    
+    results = await run_concurrent_tasks(worker_tasks, update_details, limit=4)
+    downloaded = [r for r in results if r]
+
+    if not downloaded:
+        await edit_message(msg, "❌ Gagal mengunduh semua lagu.")
+        return
+
+    await edit_message(msg, "📦 Memproses Album...")
     
     zip_path = None
-    final_cover_path = None
-    if downloaded and downloaded[0].get('cover'):
-        final_cover_path = downloaded[0]['cover']
-
-    # Jika ZIP aktif
     if is_album_zip:
-         await edit_message(msg, "Membersihkan & Membuat ZIP...")
-         
-         if final_cover_path and os.path.exists(final_cover_path):
-             clean_cover = os.path.join(dl_dir, "cover.jpg")
-             try:
-                shutil.copy(final_cover_path, clean_cover)
-                final_cover_path = clean_cover
-             except: pass
-         
+         await edit_message(msg, "🗜️ Membersihkan & Membuat ZIP...")
          for f in os.listdir(dl_dir):
-             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                 if f != "cover.jpg":
-                     try: os.remove(os.path.join(dl_dir, f))
-                     except: pass
+             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "cover.jpg":
+                 try: os.remove(os.path.join(dl_dir, f))
+                 except: pass
 
          parent_dir = os.path.dirname(dl_dir)
          zip_name = sanitize_filename(album_title)
          base_name = os.path.join(parent_dir, zip_name)
-         zip_path = shutil.make_archive(base_name, 'zip', dl_dir)
-
-    release_date = data.get("release_date")
-    if not release_date: release_date = tracks[0].get("release_date", "Unknown")
-
-    if is_art_poster and final_cover_path:
-        if os.path.exists(final_cover_path):
-            try:
-                caption = (
-                    f"**ᴛɪᴛʟᴇ :** {album_title}\n**ᴀʀᴛɪsᴛ :** {downloaded[0]['artist']}\n"
-                    f"**ʀᴇʟᴇᴀsᴇ ᴅᴀᴛᴇ :** {release_date}\n**ᴛᴏᴛᴀʟ ᴛʀᴀᴄᴋs :** {total}\n"
-                    f"**ᴛᴏᴛᴀʟ ᴠᴏʟᴜᴍᴇs :** 1\n**ǫᴜᴀʟɪᴛʏ :** 320kbps\n"
-                    f"**ᴘʀᴏᴠɪᴅᴇʀ :** Gaana\n**ᴇxᴘʟɪᴄɪᴛ :** {is_explicit}"
-                )
-                await send_message(user, final_cover_path, 'pic', caption=caption)
-            except: pass
+         zip_path = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
 
     metadata = {
-        'type': 'album', 'title': album_title, 'folderpath': dl_dir, 
-        'tracks': downloaded, 'cover': final_cover_path,
-        'zip_path': zip_path, 'poster_msg': False, 'provider': 'Gaana', 
-        'release_date': release_date, 'track_count': total, 'quality': '320kbps'
+        'type': 'album', 'title': album_title, 'artist': artist_name, 
+        'folderpath': dl_dir, 'tracks': downloaded, 'cover': final_cover_path if os.path.exists(final_cover_path) else None,
+        'zip_path': zip_path, 'poster_msg': poster_msg, 'provider': 'Gaana', 
+        'release_date': release_date, 'totaltracks': str(total), 'totalvolumes': '1', 
+        'explicit': is_explicit, 'quality': '320kbps'
     }
+    await edit_message(msg, "🚀 Mengunggah Album...")
     await album_upload(metadata, user)
 
 async def process_playlist_gaana(identifier, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "Mengambil data Playlist...")
+    await edit_message(msg, "⚙️ Mengambil data Playlist...")
     data = await api.get_metadata(session, identifier, 'playlistDetail')
     
     if not data or 'tracks' not in data:
-        await edit_message(msg, "Playlist gagal.")
+        await edit_message(msg, "❌ Playlist gagal diambil.")
         return
 
     tracks = data['tracks']
-    
     title_candidates = [data.get("title"), data.get("name"), data.get("playlist_title"), data.get("english_title")]
     valid_titles = [t for t in title_candidates if t and str(t).strip()]
     title = valid_titles[0] if valid_titles else "Unknown Playlist"
@@ -205,137 +271,67 @@ async def process_playlist_gaana(identifier, user, session, api):
     dl_dir = ensure_download_dir(user, subdir=title)
     total = len(tracks)
 
-    await edit_message(msg, f"Playlist: {title}\nMemulai unduhan paralel ({total} tracks)...")
-
-    # --- LOGIKA PARALLEL ---
-    sem = asyncio.Semaphore(SEM_LIMIT)
-    done_count = 0 # Counter
-
-    async def worker(i, track):
-        nonlocal done_count
-        async with sem:
-            try:
-                track["track_number"] = str(i + 1)
-                track["track_count"] = str(total)
-                
-                path, cover, dur = await download_gaana_track(track, user, session, api, custom_dir=dl_dir)
-                
-                # Update progress
-                done_count += 1
-                try:
-                    await edit_message(msg, f"[{done_count}/{total}] {track.get('track_title')}...")
-                except:
-                    pass
-
-                return {
-                    'filepath': path, 'title': track.get("track_title"),
-                    'artist': track.get("artist")[0]['name'] if track.get("artist") else "Unknown",
-                    'album': title, 
-                    'cover': cover, 
-                    'duration': dur, 'quality': '320kbps'
-                }
-            except Exception as e:
-                LOGGER.error(f"Skip Gaana: {e}")
-                return None
-
-    tasks = [worker(i, track) for i, track in enumerate(tracks)]
-    results = await asyncio.gather(*tasks)
-    downloaded = [r for r in results if r is not None]
-
-    await edit_message(msg, "Memproses Playlist...")
+    # --- [FIX UI] POSTER PLAYLIST ---
+    playlist_cover_path = os.path.join(dl_dir, "playlist_cover.jpg")
+    artwork_url = data.get('artwork', '')
+    if artwork_url:
+        artwork_url = re.sub(r'crop_\d+x\d+_', '', artwork_url)
+        artwork_url = artwork_url.replace("size_s", "size_xl").replace("size_m", "size_xl")
+        await fetch_image(session, artwork_url, playlist_cover_path)
+        
+    _, is_pl_zip, _, is_art_poster = fetch_zip_settings(user)
+    poster_msg = None
     
-    is_pl_zip, _, _, is_art_poster = fetch_zip_settings(user)
+    # Fallback jika playlist tidak punya cover
+    if not os.path.exists(playlist_cover_path):
+        siesta_jpg = "project-siesta.jpg"
+        siesta_png = "project-siesta.png"
+        if os.path.exists(siesta_jpg): shutil.copy(siesta_jpg, playlist_cover_path)
+        elif os.path.exists(siesta_png): shutil.copy(siesta_png, playlist_cover_path)
+
+    if is_art_poster and os.path.exists(playlist_cover_path):
+        try:
+            caption = f"**ᴛɪᴛʟᴇ :** {title}\n**ᴛᴏᴛᴀʟ ᴛʀᴀᴄᴋs :** {total}\n**ǫᴜᴀʟɪᴛʏ :** 320kbps\n**ᴘʀᴏᴠɪᴅᴇʀ :** Gaana"
+            poster_msg = await send_message(user, playlist_cover_path, 'pic', caption=caption)
+        except: pass
+    # --------------------------------
+
+    # --- MESIN KONKURENSI ARIA2 ---
+    async def wrap_track(track_raw, i):
+        track_raw["track_number"] = i + 1
+        track_raw["track_count"] = total
+        return await _process_track_worker(track_raw, i+1, total, dl_dir, user, session, api, is_batch=True)
+
+    worker_tasks = [wrap_track(t, i) for i, t in enumerate(tracks)]
+    update_details = {'msg': msg, 'title': title, 'type': 'Playlist', 'action': 'Download'}
     
-    siesta_jpg = "project-siesta.jpg"
-    siesta_png = "project-siesta.png"
-    poster_img = None
-    if os.path.exists(siesta_jpg): poster_img = siesta_jpg
-    elif os.path.exists(siesta_png): poster_img = siesta_png
+    results = await run_concurrent_tasks(worker_tasks, update_details, limit=4)
+    downloaded = [r for r in results if r]
+
+    if not downloaded:
+        await edit_message(msg, "❌ Gagal mengunduh playlist.")
+        return
+
+    await edit_message(msg, "📦 Memproses Playlist...")
     
+    zip_path = None
     if is_pl_zip:
-         await edit_message(msg, "Membersihkan & Membuat ZIP...")
+         await edit_message(msg, "🗜️ Membersihkan & Membuat ZIP...")
          for f in os.listdir(dl_dir):
-             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "playlist_cover.jpg":
                  try: os.remove(os.path.join(dl_dir, f))
                  except: pass
-         
-         if poster_img:
-             try: shutil.copy(poster_img, os.path.join(dl_dir, "project-siesta.jpg"))
-             except: pass
 
          parent_dir = os.path.dirname(dl_dir)
          zip_name = sanitize_filename(title)
          base_name = os.path.join(parent_dir, zip_name)
-         zip_path = shutil.make_archive(base_name, 'zip', dl_dir)
-
-    if is_art_poster and poster_img:
-        try:
-            caption = (
-                f"**ᴛɪᴛʟᴇ :** {title}\n"
-                f"**ᴛᴏᴛᴀʟ ᴛʀᴀᴄᴋs :** {total}\n"
-                f"**ǫᴜᴀʟɪᴛʏ :** 320kbps\n"
-                f"**ᴘʀᴏᴠɪᴅᴇʀ :** Gaana"
-            )
-            await send_message(user, poster_img, 'pic', caption=caption)
-        except Exception as e:
-            LOGGER.error(f"Gagal kirim art poster playlist: {e}")
+         zip_path = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
 
     metadata = {
         'type': 'playlist', 'title': title, 'folderpath': dl_dir, 
-        'tracks': downloaded, 'cover': poster_img, 
-        'zip_path': zip_path, 'poster_msg': False, 'provider': 'Gaana', 
-        'track_count': total, 'quality': '320kbps'
+        'tracks': downloaded, 'cover': playlist_cover_path if os.path.exists(playlist_cover_path) else None, 
+        'zip_path': zip_path, 'poster_msg': poster_msg, 'provider': 'Gaana', 
+        'track_count': total, 'totaltracks': str(total), 'quality': '320kbps'
     }
+    await edit_message(msg, "🚀 Mengunggah Playlist...")
     await playlist_upload(metadata, user)
-
-async def download_gaana_track(track_info, user, session, api, custom_dir=None):
-    title = track_info.get("track_title")
-    enc_path = track_info.get('urls', {}).get('auto', {}).get('message')
-    if not enc_path: raise Exception("No stream")
-    
-    decrypted_url = api.decrypt_stream_path(enc_path)
-    final_url = decrypted_url
-    if "medium.mp4" in final_url: final_url = final_url.replace("medium.mp4", "320.mp4")
-    elif "128.mp4" in final_url: final_url = final_url.replace("128.mp4", "320.mp4")
-    elif "f.mp4" in final_url: final_url = final_url.replace("f.mp4", "320.mp4")
-    elif "64.mp4" in final_url: final_url = final_url.replace("64.mp4", "320.mp4")
-    elif "low.mp4" in final_url: final_url = final_url.replace("low.mp4", "320.mp4")
-    else: final_url = final_url.replace(".mp4", "_320.mp4")
-
-    track_num = track_info.get('track_number')
-    safe_title = sanitize_filename(title)
-    
-    if track_num: 
-        filename = f"{int(track_num)} - {safe_title}.m4a"
-    else: 
-        filename = f"{safe_title}.m4a"
-
-    dl_dir = custom_dir if custom_dir else ensure_download_dir(user)
-    path = os.path.join(dl_dir, filename)
-    
-    if os.path.exists(path): os.remove(path)
-    try:
-        await download_with_ytdlp(final_url, path)
-    except: pass
-    
-    if not os.path.exists(path) or os.path.getsize(path) < 10000:
-         await download_with_ytdlp(decrypted_url, path)
-
-    if not os.path.exists(path): raise Exception("Fail DL")
-
-    artwork_url = track_info.get('artwork', '')
-    if artwork_url:
-        artwork_url = re.sub(r'crop_\d+x\d+_', '', artwork_url)
-        artwork_url = artwork_url.replace("size_s", "size_xl").replace("size_m", "size_xl")
-
-    cover_filename = f"{safe_title}.jpg"
-    cover_path = os.path.join(dl_dir, cover_filename)
-    
-    if artwork_url and not os.path.exists(cover_path):
-        async with session.get(artwork_url) as resp:
-            if resp.status == 200:
-                async with aiofiles.open(cover_path, mode='wb') as f:
-                     await f.write(await resp.read())
-    
-    dur = await set_gaana_metadata(path, track_info, cover_path)
-    return path, cover_path, dur
