@@ -362,6 +362,14 @@ async def start_livephish(link: str, user: dict):
         'label': final_label,
         'explicit': False
     }
+
+    # --- [FIX UI] KIRIM POSTER DI AWAL SEBELUM DOWNLOAD ---
+    if upload:
+        try:
+            base_meta['poster_msg'] = await post_art_poster(user, base_meta)
+        except Exception as e:
+            LOGGER.error(f"Gagal mengirim poster: {e}")
+    # ------------------------------------------------------
     
     # --- [SUNTIKAN MESIN KONKURENSI ARIA2] ---
     tasks = []
@@ -390,13 +398,6 @@ async def start_livephish(link: str, user: dict):
         if album_zip:
             await edit_message(user['bot_msg'], f"Membuat file ZIP...\n{album_name}")
             base_meta['zip_path'] = await zip_handler(base_meta['folderpath'])
-
-        if art_poster:
-            if base_meta.get('cover') and os.path.exists(base_meta['cover']):
-                try:
-                    base_meta['poster_msg'] = await post_art_poster(user, base_meta)
-                except Exception as e:
-                    LOGGER.error(f"Gagal poster: {e}")
 
         await edit_message(user['bot_msg'], f"Mengunggah...\n{album_name}")
         await album_upload(base_meta, user)
