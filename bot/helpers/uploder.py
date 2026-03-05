@@ -527,26 +527,33 @@ async def telegram_upload(track, user, batch_mode=False):
 
 async def batch_telegram_upload(metadata, user):
     import time, hashlib
+    from bot.logger import LOGGER
+    
     tracks_to_upload = []
     
     # --- [FIX UI] Buat SATU ID Cancel Master untuk seluruh album ---
     batch_cancel_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:16]
     # ---------------------------------------------------------------
     
+    # [FIX] Jadikan pembacaan tipe huruf kecil semua (case-insensitive)
+    m_type = str(metadata.get('type', '')).lower()
+    
     # 1. Kumpulkan semua track yang siap diunggah
-    if metadata['type'] in ['album', 'playlist']:
-        for track in metadata['tracks']:
+    if m_type in ['album', 'playlist']:
+        for track in metadata.get('tracks', []):
             if track.get('filepath'):
                 track['task_id'] = batch_cancel_id # Sisipkan ID Master ke lagu
                 tracks_to_upload.append(track)
-    elif metadata['type'] == 'artist':
+    elif m_type == 'artist':
         for album in metadata.get('albums', []):
-            for track in album['tracks']:
+            for track in album.get('tracks', []):
                 if track.get('filepath'):
-                    track['task_id'] = batch_cancel_id # Sisipkan ID Master ke lagu
+                    track['task_id'] = batch_cancel_id 
                     tracks_to_upload.append(track)
                     
-    if not tracks_to_upload: return
+    if not tracks_to_upload: 
+        LOGGER.warning("⚠️ [DEBUG] Antrean kosong! Tidak ada track yang valid untuk diunggah.")
+        return
 
     # --- [FIX UI] UPLOAD BERURUTAN (SEQUENTIAL) ---
     for track in tracks_to_upload:
@@ -557,7 +564,7 @@ async def batch_telegram_upload(metadata, user):
             # Lempar sinyal batal agar seluruh sisa antrean otomatis berhenti!
             raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         except FileNotFoundError:
-            pass
+            pass # Lewati diam-diam jika file fisik tidak ditemukan
         except Exception as e:
             LOGGER.error(f"Gagal mengunggah track: {e}")
     # ----------------------------------------------
