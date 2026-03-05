@@ -1,14 +1,18 @@
+# [GANTI SELURUH FILE: bot/helpers/bandcamp/handler.py]
+
 import os
 import re
 import shutil
+import asyncio
+import aiohttp
 import aiofiles
 from bot.logger import LOGGER
 from bot.helpers.message import edit_message, send_message
 from .manager import bandcamp_manager
 from .metadata import set_bandcamp_metadata
-from bot.helpers.uploder import track_upload, album_upload
+from bot.helpers.uploder import track_upload, album_upload, post_art_poster
 from bot import Config
-from bot.helpers.utils import fetch_zip_settings
+from bot.helpers.utils import fetch_zip_settings, download_file, run_concurrent_tasks
 
 BANDCAMP_REGEX = re.compile(r'https?://[^/]+\.bandcamp\.com/(track|album)/[^/?#]+')
 
@@ -34,29 +38,26 @@ async def start_bandcamp(link: str, user: dict):
         await edit_message(msg, "Link Bandcamp tidak valid.")
         return
 
-    await edit_message(msg, "Mengambil data dari Bandcamp...")
+    await edit_message(msg, "⚙️ Mengambil data dari Bandcamp...")
     
     data = await api.get_track_or_album(session, link)
     if not data:
-        await edit_message(msg, "Gagal mengambil metadata (Mungkin Geo-blocked atau URL salah).")
+        await edit_message(msg, "❌ Gagal mengambil metadata (Mungkin Geo-blocked atau URL salah).")
         return
 
     artist = data['artist']
     album_title = data['album_title']
     tracks = data['tracks']
     is_album = data['is_album']
-    release_date = data['release_date'] # Format YYYY-MM-DD
+    release_date = data['release_date'] 
     genre = data['genre']
     label = data['label']
     is_explicit = data['explicit'] 
     
     json_raw = data.get('raw', {})
     
-    # 1. Copyright
-    # Biasanya format "YYYY Label"
-    copyright_text = json_raw.get('copyright') or f"{release_date[:4]} {label or artist}"
+    copyright_text = json_raw.get('copyright') or f"{release_date[:4] if release_date else ''} {label or artist}".strip()
     
-    # 2. Credits / Composer
     credits = json_raw.get('credits', "")
     composer = artist
     if credits and len(credits) < 50:
@@ -69,63 +70,88 @@ async def start_bandcamp(link: str, user: dict):
     
     if cover_url:
         try:
-            async with session.get(cover_url) as r:
-                if r.status == 200:
-                    async with aiofiles.open(cover_path, mode='wb') as f:
-                        await f.write(await r.read())
-                else: cover_path = None
-        except: cover_path = None
+            # Gunakan Aria2 untuk menarik Cover agar cepat!
+            await download_file(cover_url, cover_path)
+        except: 
+            cover_path = None
 
-    downloaded_tracks = []
-    total = len(tracks)
+    total_tracks = len(tracks)
 
-    await edit_message(msg, f"Ditemukan: {album_title} ({total} tracks)")
+    # --- PERSIAPAN BUNGKUSAN METADATA UNTUK POSTER ---
+    album_meta = {
+        'type': 'album' if is_album else 'track',
+        'title': album_title,
+        'artist': artist,
+        'albumartist': artist,
+        'folderpath': dl_dir,
+        'cover': cover_path,
+        'provider': 'Bandcamp',
+        'quality': '128kbps',
+        'release_date': release_date,
+        'date': release_date[:4] if release_date else '',
+        'totaltracks': str(total_tracks),
+        'totalvolumes': '1',
+        'explicit': str(is_explicit),
+        'tracks': []
+    }
 
-    for i, track in enumerate(tracks):
+    # --- [FIX UI] KIRIM POSTER DI AWAL SEBELUM DOWNLOAD MULTIPLE ---
+    try:
+        album_meta['poster_msg'] = await post_art_poster(user, album_meta)
+    except Exception as e:
+        LOGGER.error(f"Gagal mengirim poster Bandcamp: {e}")
+    # ---------------------------------------------------------------
+
+    # --- FUNGSI WORKER CONCURRENT ---
+    async def _process_track(track, i):
         file_info = track.get('file')
         if not file_info or 'mp3-128' not in file_info:
             LOGGER.warning(f"Track {track.get('title')} tidak memiliki stream gratis.")
-            continue
+            return None
 
         track_url = file_info['mp3-128']
         track_title = track.get('title', f"Track {i+1}")
         
         raw_track_num = track.get('track_num')
-        track_num = i + 1 
-        if raw_track_num is not None:
-            try:
-                track_num = int(raw_track_num)
-            except ValueError:
-                track_num = i + 1
-        
-        await edit_message(msg, f"[{i+1}/{total}] Mengunduh: {track_title}...")
+        track_num = int(raw_track_num) if raw_track_num is not None else i + 1
         
         filename = f"{track_num:02d} - {sanitize_filename(track_title)}.mp3"
         file_path = os.path.join(dl_dir, filename)
         
-        try:
-            async with session.get(track_url) as r:
-                if r.status == 200:
-                    async with aiofiles.open(file_path, mode='wb') as f:
-                        await f.write(await r.read())
-                else: continue
-        except: continue
+        # --- FULL ARIA2 + HYBRID AIOHTTP FALLBACK ---
+        # Pasang User-Agent umum agar Aria2 tidak ditolak
+        headers_dict = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'}
+        details_aria = {'headers': headers_dict}
+        
+        # Jika Single Track, hidupkan radar langsung ke UI
+        if not is_album:
+            details_aria['msg'] = msg
+            details_aria['title'] = track_title
+            details_aria['type'] = 'Track'
 
-        # Lyrics
+        err = await download_file(track_url, file_path, retries=1, details=details_aria)
+        
+        if err:
+            LOGGER.warning(f"Bandcamp: Aria2 ditolak. Mengaktifkan AIOHTTP Turbo Fallback untuk {track_title}")
+            async with aiohttp.ClientSession(headers=headers_dict) as fallback_session:
+                async with fallback_session.get(track_url) as r:
+                    if r.status == 200:
+                        async with aiofiles.open(file_path, 'wb') as f:
+                            async for chunk in r.content.iter_chunked(256 * 1024):
+                                if chunk: await f.write(chunk)
+        # ---------------------------------------------
+        
         lyrics_text = track.get('lyrics') or None
         
-        # --- UPDATE METADATA PAYLOAD ---
-        # 1. Hapus 'comment' dan 'url' sesuai request
-        # 2. Ganti 'year' menjadi 'date' (isi full YYYY-MM-DD)
         meta_payload = {
             'filepath': file_path,
             'title': track_title,
             'artist': artist,
             'album': album_title,
             'track_num': track_num,
-            'total_tracks': total,
+            'total_tracks': total_tracks,
             'cover_path': cover_path,
-            'date': release_date, # Masukkan Tanggal Lengkap
+            'date': release_date, 
             'genre': genre,
             'label': label,
             'album_artist': artist,
@@ -134,70 +160,65 @@ async def start_bandcamp(link: str, user: dict):
             'lyrics': lyrics_text,
             'isrc': None 
         }
-        await set_bandcamp_metadata(file_path, meta_payload)
-        # ------------------------
+        await asyncio.to_thread(set_bandcamp_metadata, file_path, meta_payload)
         
-        try:
-            duration = int(float(track.get('duration') or 0))
-        except:
-            duration = 0
+        duration = int(float(track.get('duration') or 0))
 
-        downloaded_tracks.append({
+        return {
             'filepath': file_path,
             'title': track_title,
             'artist': artist,
             'album': album_title,
             'cover': cover_path,
             'duration': duration,
-            'quality': '128kbps'
-        })
+            'quality': '128kbps',
+            'provider': 'Bandcamp',
+            'type': 'track'
+        }
+    # --------------------------------
+
+    # --- EKSEKUSI ---
+    if is_album:
+        tasks = [_process_track(t, i) for i, t in enumerate(tracks)]
+        update_details = {
+            'msg': msg, 
+            'title': album_title, 
+            'type': 'Album',
+            'action': 'Download'
+        }
+        
+        # Eksekusi 4 Lagu Sekaligus secara paralel!
+        results = await run_concurrent_tasks(tasks, update_details, limit=4)
+        downloaded_tracks = [r for r in results if r]
+    else:
+        # Mode Single Track
+        res = await _process_track(tracks[0], 0)
+        downloaded_tracks = [res] if res else []
 
     if not downloaded_tracks:
-        raise Exception("Gagal mengunduh track apapun.")
+        raise Exception("❌ Gagal mengunduh track apapun.")
 
-    def get_poster_caption():
-        return (
-            f"**ᴛɪᴛʟᴇ :** {album_title}\n"
-            f"**ᴀʀᴛɪsᴛ :** {artist}\n"
-            f"**ʀᴇʟᴇᴀsᴇ ᴅᴀᴛᴇ :** {release_date}\n"
-            f"**ᴛᴏᴛᴀʟ ᴛʀᴀᴄᴋs :** {total}\n"
-            f"**ᴛᴏᴛᴀʟ ᴠᴏʟᴜᴍᴇs :** 1\n"
-            f"**ǫᴜᴀʟɪᴛʏ :** 128kbps\n"
-            f"**ᴘʀᴏᴠɪᴅᴇʀ :** Bandcamp\n"
-            f"**ᴇxᴘʟɪᴄɪᴛ :** {is_explicit}"
-        )
-
+    # --- UPLOAD ---
     if len(downloaded_tracks) == 1 and not is_album:
         track_meta = downloaded_tracks[0]
-        track_meta['provider'] = 'Bandcamp'
-        track_meta['type'] = 'track'
+        await edit_message(msg, "🚀 Memproses Upload Track...")
         await track_upload(track_meta, user)
-        await edit_message(msg, "Selesai!")
     else:
-        await edit_message(msg, "Memproses Album...")
-        _, is_album_zip, _, is_art_poster = fetch_zip_settings(user)
+        await edit_message(msg, "📦 Memproses Album...")
+        album_meta['tracks'] = downloaded_tracks
         
-        zip_path = None
+        _, is_album_zip, _, _ = await asyncio.to_thread(fetch_zip_settings, user)
+        
         if is_album_zip:
-            await edit_message(msg, "Membuat ZIP...")
-            parent_dir = os.path.dirname(dl_dir)
-            zip_name = sanitize_filename(album_title)
-            base_name = os.path.join(parent_dir, zip_name)
-            zip_path = shutil.make_archive(base_name, 'zip', dl_dir)
+            await edit_message(msg, "🗜️ Membuat ZIP...")
+            try:
+                from bot.helpers.utils import zip_folder
+                album_meta['zip_path'] = await asyncio.to_thread(zip_folder, dl_dir)
+            except ImportError:
+                parent_dir = os.path.dirname(dl_dir)
+                zip_name = sanitize_filename(album_title)
+                base_name = os.path.join(parent_dir, zip_name)
+                album_meta['zip_path'] = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
 
-        if is_art_poster and cover_path:
-            try: 
-                await send_message(user, cover_path, 'pic', caption=get_poster_caption())
-            except Exception as e:
-                LOGGER.error(f"Gagal kirim poster: {e}")
-
-        metadata = {
-            'type': 'album', 'title': album_title, 'artist': artist,
-            'folderpath': dl_dir, 'tracks': downloaded_tracks,
-            'cover': cover_path, 'zip_path': zip_path,
-            'poster_msg': False,
-            'provider': 'Bandcamp',
-            'track_count': len(downloaded_tracks), 'quality': '128kbps',
-            'release_date': release_date
-        }
-        await album_upload(metadata, user)
+        await edit_message(msg, "🚀 Mengunggah Album...")
+        await album_upload(album_meta, user)
