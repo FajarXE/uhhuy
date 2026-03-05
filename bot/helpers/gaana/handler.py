@@ -144,10 +144,18 @@ async def _process_track_worker(track_info, i, total, dl_dir, user, session, api
                             'format': 'bestaudio/best', 
                             'outtmpl': file_path, 
                             'quiet': True,
-                            'http_headers': headers_dict # Wajib pasang topeng di YT-DLP juga!
+                            'http_headers': headers_dict,
+                            # --- [FIX KECEPATAN] SUNTIKKAN ARIA2 KE DALAM YT-DLP ---
+                            'external_downloader': 'aria2c',
+                            'external_downloader_args': {
+                                'aria2c': ['-x', '16', '-s', '16', '-k', '1M', '--allow-overwrite=true']
+                            }
+                            # --------------------------------------------------------
                         }
                         with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
+                        
                     await asyncio.to_thread(run_ytdlp)
+                    
                     if os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
                         downloaded = True
                         break
