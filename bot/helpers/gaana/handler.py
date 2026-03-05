@@ -146,11 +146,10 @@ async def _process_track_worker(track_info, i, total, dl_dir, user, session, api
                             'quiet': True,
                             'http_headers': headers_dict,
                             
-                            # --- [KUNCI 1] ARIA2 UNTUK KECEPATAN BRUTAL ---
-                            'external_downloader': 'aria2c',
-                            'external_downloader_args': {
-                                'aria2c': ['-x', '16', '-s', '16', '-k', '1M', '--allow-overwrite=true']
-                            },
+                            # --- [KUNCI 1] MENURUTI PERMINTAAN YT-DLP UNTUK LIVE HLS ---
+                            # Menggunakan FFmpeg sebagai mesin sedot utama untuk HLS
+                            'external_downloader': 'ffmpeg',
+                            'hls_use_mpegts': True,
                             
                             # --- [KUNCI 2] FFMPEG UNTUK MENJAHIT FORMAT M4A ---
                             'postprocessors': [{
@@ -165,7 +164,9 @@ async def _process_track_worker(track_info, i, total, dl_dir, user, session, api
                     if os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
                         downloaded = True
                         break
-                except: pass
+                except Exception as e:
+                    LOGGER.error(f"YT-DLP Error: {e}")
+                    pass
 
     if not downloaded:
         LOGGER.error(f"Gagal mengunduh track {title}")
