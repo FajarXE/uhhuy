@@ -106,21 +106,52 @@ async def _process_track_worker(track_info, i, total, dl_dir, user, session, api
     downloaded = False
     urls_to_try = [final_url, decrypted_url]
     for url in urls_to_try:
+        # [KUNCI 1] Bersihkan file sampah dari percobaan sebelumnya!
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            
         err = await download_file(url, file_path, retries=1, details=details_aria)
+        
         if not err and os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
             downloaded = True
             break
         else:
-            LOGGER.warning(f"Gaana: Aria2 ditolak untuk {title}. Fallback ke YT-DLP...")
+            LOGGER.warning(f"Gaana: Aria2 ditolak untuk {title}. Fallback ke AIOHTTP Turbo...")
+            # [KUNCI 2] Hapus file sampah 301 bytes buatan Aria2 agar tidak menipu mesin fallback!
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                
+            # --- Fallback 1: AIOHTTP Turbo ---
             try:
-                def run_ytdlp():
-                    ydl_opts = {'format': 'bestaudio/best', 'outtmpl': file_path, 'quiet': True}
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-                await asyncio.to_thread(run_ytdlp)
-                if os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
-                    downloaded = True
-                    break
+                async with session.get(url, headers=headers_dict) as resp:
+                    if resp.status == 200:
+                        async with aiofiles.open(file_path, mode='wb') as f:
+                            async for chunk in resp.content.iter_chunked(256 * 1024):
+                                if chunk: await f.write(chunk)
+                        if os.path.getsize(file_path) > 10000:
+                            downloaded = True
+                            break
             except: pass
+            
+            # --- Fallback 2: YT-DLP Terakhir ---
+            if not downloaded:
+                LOGGER.warning(f"Gaana: AIOHTTP gagal. Fallback terakhir ke YT-DLP...")
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                try:
+                    def run_ytdlp():
+                        ydl_opts = {
+                            'format': 'bestaudio/best', 
+                            'outtmpl': file_path, 
+                            'quiet': True,
+                            'http_headers': headers_dict # Wajib pasang topeng di YT-DLP juga!
+                        }
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
+                    await asyncio.to_thread(run_ytdlp)
+                    if os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
+                        downloaded = True
+                        break
+                except: pass
 
     if not downloaded:
         LOGGER.error(f"Gagal mengunduh track {title}")
