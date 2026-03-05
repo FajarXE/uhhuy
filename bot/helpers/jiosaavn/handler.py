@@ -130,7 +130,16 @@ async def _process_track_worker(track_data, i, total, dl_dir, user, session, api
 
     # 5. Pasang Metadata
     lyrics = await api.get_lyrics(session, track_data.get("id")) if track_data.get("has_lyrics") == "true" else None
-    duration = await asyncio.to_thread(set_jiosaavn_metadata, file_path, track_data, cover_path if os.path.exists(cover_path) else None, lyrics)
+    
+    # --- [FIX] PANGGIL FUNGSI ASYNC SECARA LANGSUNG ---
+    # Jangan gunakan asyncio.to_thread agar fungsi benar-benar dieksekusi dan mengembalikan angka!
+    duration = await set_jiosaavn_metadata(
+        file_path, 
+        track_data, 
+        cover_path if os.path.exists(cover_path) else None, 
+        lyrics
+    )
+    # ---------------------------------------------------
 
     return {
         'filepath': file_path, 'title': title,
