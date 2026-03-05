@@ -141,15 +141,18 @@ async def _process_track_worker(track_info, i, total, dl_dir, user, session, api
                 try:
                     def run_ytdlp():
                         ydl_opts = {
-                            'format': 'bestaudio/best', 
+                            # Utamakan format m4a secara native
+                            'format': 'bestaudio[ext=m4a]/bestaudio/best', 
                             'outtmpl': file_path, 
                             'quiet': True,
                             'http_headers': headers_dict,
-                            # --- [FIX KECEPATAN] SUNTIKKAN ARIA2 KE DALAM YT-DLP ---
-                            'external_downloader': 'aria2c',
-                            'external_downloader_args': {
-                                'aria2c': ['-x', '16', '-s', '16', '-k', '1M', '--allow-overwrite=true']
-                            }
+                            # --- [FIX METADATA] GUNAKAN FFMPEG UNTUK MENJAHIT HLS ---
+                            # Ini akan memastikan serpihan HLS disatukan menjadi M4A yang sah!
+                            'postprocessors': [{
+                                'key': 'FFmpegExtractAudio',
+                                'preferredcodec': 'm4a',
+                            }],
+                            # (Kita hapus external_downloader Aria2 agar tidak merusak format)
                             # --------------------------------------------------------
                         }
                         with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
