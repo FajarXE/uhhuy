@@ -274,7 +274,7 @@ async def process_album_gaana(identifier, user, session, api):
     worker_tasks = [wrap_track(t, i) for i, t in enumerate(tracks)]
     update_details = {'msg': msg, 'title': album_title, 'type': 'Album', 'action': 'Download'}
     
-    results = await run_concurrent_tasks(worker_tasks, update_details, limit=Config.MAX_WORKERS)
+    results = await run_concurrent_tasks(worker_tasks, update_details, limit=8)
     downloaded = [r for r in results if r]
 
     if not downloaded:
@@ -362,7 +362,7 @@ async def process_playlist_gaana(identifier, user, session, api):
     worker_tasks = [wrap_track(t, i) for i, t in enumerate(tracks)]
     update_details = {'msg': msg, 'title': title, 'type': 'Playlist', 'action': 'Download'}
     
-    results = await run_concurrent_tasks(worker_tasks, update_details, limit=Config.MAX_WORKERS)
+    results = await run_concurrent_tasks(worker_tasks, update_details, limit=8)
     downloaded = [r for r in results if r]
 
     if not downloaded:
