@@ -147,6 +147,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         is_local = False
         if isinstance(text, str):
             try:
+                # Membaca path lokal untuk trigger radar UI
                 if not text.startswith("http") and not text.startswith("tg://"):
                     is_local = True
             except: pass
@@ -154,25 +155,29 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         msg = None
         msg_created = False 
 
+        # JANGAN DIHAPUS, INI ADALAH MESIN RADARNYA!
         async def progress(current, total):
-            # [FIX 1] Tambahkan 'start_time' ke dalam nonlocal agar bisa kita ubah dari dalam fungsi
             nonlocal msg, last_update_time, msg_created, start_time 
             if cancel_id in GLOBAL_CANCEL_DICT:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
+            # --- [FIX UI] GUNAKAN PESAN UTAMA (bot_msg) SEBAGAI RADAR ---
             if is_local and not msg_created:
                 msg_created = True
-                # [FIX 2] Reset stopwatch (waktu mulai) ke detik ini juga!
-                start_time = time.time() 
+                start_time = time.time() # Reset stopwatch agar kecepatan akurat
                 last_update_time = start_time 
                 
-                try:
-                    from bot.tgclient import aio
-                    msg = await aio.send_message(chat_id, f"🔄 Mengunggah file... `/cancel_{cancel_id}`")
-                except: pass
+                if isinstance(user, dict) and user.get('bot_msg'):
+                    msg = user['bot_msg']
+                else:
+                    try:
+                        from bot.tgclient import aio
+                        msg = await aio.send_message(chat_id, f"🔄 Mengunggah file... `/cancel_{cancel_id}`")
+                    except: pass
+            # ------------------------------------------------------------
                 
             if not msg:
-                return
+                return 
 
             now = time.time()
             if msg and (now - last_update_time > 2.5 or current == total):
@@ -272,10 +277,19 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     from bot.helpers.message import copy_to_channel
                     await copy_to_channel(client, res)
                 except: pass
+                
+            # --- [FIX UI] JANGAN HAPUS RADAR JIKA ITU ADALAH PESAN UTAMA ---
             if msg:
-                from bot.tgclient import aio
-                try: await aio.delete_messages(chat_id, msg.id)
-                except: pass
+                is_bot_msg = False
+                if isinstance(user, dict) and user.get('bot_msg'):
+                    if msg.id == user['bot_msg'].id:
+                        is_bot_msg = True
+                
+                if not is_bot_msg:
+                    from bot.tgclient import aio
+                    try: await aio.delete_messages(chat_id, msg.id)
+                    except: pass
+            # ---------------------------------------------------------------
             return res
 
         # [FIX] Tangkap CancelledError, update Radar UI, update pesan "UPLOADING...", lalu lempar sinyal!
