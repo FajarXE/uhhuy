@@ -510,49 +510,50 @@ async def telegram_upload(track, user, batch_mode=False):
     meta = track.copy()
     meta['batch_mode'] = batch_mode
     if 'cover' in meta and (not meta['cover'] or not os.path.exists(meta['cover'])): meta['cover'] = None 
-    user_copy = user
-    if batch_mode and 'bot_msg' in user:
-        user_copy = user.copy()
-        del user_copy['bot_msg']
+    
     filepath = track.get('filepath')
     if not filepath or not os.path.exists(filepath):
         LOGGER.error(f"[UPLOAD FAIL] Path does not exist: '{filepath}'")
         raise FileNotFoundError(f"File not found: {filepath}")
-    try: await send_message(user_copy, filepath, 'audio', meta=meta)
+        
+    try: 
+        # --- [FIX UI] JANGAN HAPUS bot_msg ---
+        # Kita membiarkan `user` tetap utuh agar message.py bisa mendeteksi bot_msg 
+        # dan menjadikannya sebagai satu-satunya Radar Kecepatan yang permanen!
+        await send_message(user, filepath, 'audio', meta=meta)
     except Exception as e:
         LOGGER.error(f"[UPLOAD ERROR] send_message failed for {filepath}: {e}")
         raise e
 
 async def batch_telegram_upload(metadata, user):
-    tasks = []
+    tracks_to_upload = []
+    
+    # 1. Kumpulkan semua track yang siap diunggah
     if metadata['type'] in ['album', 'playlist']:
         for track in metadata['tracks']:
-            if not track.get('filepath'): continue
-            tasks.append(telegram_upload(track, user, batch_mode=True)) 
+            if track.get('filepath'):
+                tracks_to_upload.append(track)
     elif metadata['type'] == 'artist':
-        for album in metadata['albums']:
+        for album in metadata.get('albums', []):
             for track in album['tracks']:
-                if not track.get('filepath'): continue
-                tasks.append(telegram_upload(track, user, batch_mode=True))
-    if not tasks: return
+                if track.get('filepath'):
+                    tracks_to_upload.append(track)
+                    
+    if not tracks_to_upload: return
 
-    # --- PENYAMBUNG UI BARU (YANG LAMA DIHAPUS) ---
-    if 'bot_msg' in user:
-        update_details = {
-            'action': 'Upload', 
-            'type': metadata.get('type', 'Task').capitalize(),
-            'title': metadata.get('title', 'Unknown'),
-            'msg': user['bot_msg']
-        }
-        # Mengirim data ke Radar Pintar kita di utils.py
-        from .utils import run_concurrent_tasks
-        await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
-    else:
-        # Fallback rahasia jika pesan tidak ada
-        semaphore = asyncio.Semaphore(Config.MAX_WORKERS)
-        async def sem_task(task):
-            async with semaphore:
-                try: await task 
-                except FileNotFoundError: pass
-                except Exception as e: LOGGER.error(f"Failed to upload: {e}")
-        await asyncio.gather(*(sem_task(task) for task in tasks))
+    # --- [FIX UI] UPLOAD BERURUTAN (SEQUENTIAL) ---
+    # Mengunggah satu per satu akan menjamin 2 hal penting:
+    # 1. Urutan lagu (Track 1, 2, 3...) di Telegram akan berjejer rapi, tidak melompat-lompat.
+    # 2. Radar UI (bot_msg) hanya akan memperbarui 1 lagu dalam satu waktu, menghindari flicker/spam.
+    for track in tracks_to_upload:
+        try:
+            await telegram_upload(track, user, batch_mode=True)
+        except asyncio.CancelledError:
+            LOGGER.info("Batch upload dibatalkan oleh pengguna.")
+            # Lempar ke sistem utama jika dibatalkan
+            raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            LOGGER.error(f"Gagal mengunggah track: {e}")
+    # ----------------------------------------------
