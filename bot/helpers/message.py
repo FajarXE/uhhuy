@@ -153,14 +153,24 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             except: pass
             
         msg = None
-        if is_local:
-            msg = await client.send_message(chat_id, f"🔄 Menyiapkan Upload... `/cancel_{cancel_id}`")
+        msg_created = False # Indikator pengaman anti-spam
 
         async def progress(current, total):
-            nonlocal last_update_time
+            nonlocal msg, last_update_time, msg_created
             if cancel_id in GLOBAL_CANCEL_DICT:
-                # Sengaja lempar CancelledError agar langsung ditangkap bawahnya
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+
+            # --- [FIX SPAM UI] Lazy Load Radar ---
+            # Hanya buat pesan radar saat file ini BENAR-BENAR mulai diunggah oleh Telegram!
+            if is_local and not msg_created:
+                msg_created = True
+                try:
+                    from bot.tgclient import aio
+                    msg = await aio.send_message(chat_id, f"🔄 Mengunggah file... `/cancel_{cancel_id}`")
+                except: pass
+                
+            if not msg:
+                return # Lewati update jika pesan di layar belum siap
 
             now = time.time()
             if msg and (now - last_update_time > 2.5 or current == total):
