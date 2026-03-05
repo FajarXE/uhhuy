@@ -190,7 +190,7 @@ async def start_album(album_url: str, user: dict, upload=True):
         'type': album_meta['type']
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
+    results = await run_concurrent_tasks(worker_tasks, update_details, limit=Config.MAX_WORKERS)
     
     successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
     album_meta['tracks'] = successful_tracks
