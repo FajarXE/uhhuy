@@ -12,7 +12,7 @@ from bot.helpers.livephish.manager import livephish_manager
 from bot.helpers.metadata import set_metadata, create_cover_file
 
 # Import Helper standar
-from bot.helpers.utils import download_file, zip_handler, fetch_zip_settings
+from bot.helpers.utils import download_file, zip_handler, fetch_zip_settings, run_concurrent_tasks
 from bot.helpers.uploder import track_upload, album_upload, post_art_poster
 from bot.helpers.message import edit_message
 from bot.logger import LOGGER
@@ -26,25 +26,6 @@ BRANDING_TAG = "powered by livephish.com"
 def sanitize_name(name):
     """Membersihkan nama file/folder."""
     return re.sub(r'[\\/*?:"<>|]', "", str(name)).strip()
-
-def get_progress_bar_text(current, total, title, type_str):
-    """Visual Progress Bar."""
-    percentage = current / total
-    filled_length = int(10 * percentage)
-    bar = '▰' * filled_length + '▱' * (10 - filled_length)
-    
-    text = (
-        f"╭─ ᴘʀᴏɢʀᴇss\n"
-        f"│\n"
-        f"├ {bar}\n"
-        f"│\n"
-        f"├ ᴅᴏɴᴇ : {current} / {total}\n"
-        f"│\n"
-        f"├ ᴛɪᴛʟᴇ : {title}\n"
-        f"│\n"
-        f"╰─ ᴛʏᴘᴇ : {type_str}"
-    )
-    return text
 
 def format_date_standard(date_str):
     """Mengubah format tanggal LivePhish menjadi standar ISO (YYYY-MM-DD)."""
@@ -116,7 +97,6 @@ async def get_audio_duration(file_path):
         stdout, stderr = await process.communicate()
         
         if stdout:
-            # Output ffprobe biasanya float (e.g. 245.432000)
             return int(float(stdout.decode().strip()))
     except Exception as e:
         LOGGER.warning(f"Gagal get duration ffprobe: {e}")
@@ -147,7 +127,6 @@ async def fetch_website_cover_hd(url):
                         if candidate.startswith("//"): candidate = "https:" + candidate
                         clean_url = re.sub(r'(_\d+|_v\d+|_mini|_med|_small|_large)(\.jpg)$', r'\2', candidate)
                         if clean_url != candidate:
-                            LOGGER.info(f"Mencoba URL Master: {clean_url}")
                             try:
                                 async with session.head(clean_url) as hd_resp:
                                     if hd_resp.status == 200: return clean_url
@@ -179,6 +158,109 @@ async def clean_audio_metadata(input_path):
         if os.path.exists(temp_output): os.remove(temp_output)
     return False
 
+# --- FUNGSI WORKER (UNTUK ARIA2 CONCURRENT) ---
+async def process_livephish_track(t, i, total_tracks, base_meta, client, user, max_disc, album_copyright, final_label, genre, release_date):
+    """Fungsi mandiri untuk memproses dan mengunduh 1 lagu."""
+    track_id = t.get("trackID") or t.get("songID")
+    title = t.get("songTitle", f"Track {i+1}")
+    
+    raw_track_num = t.get("trackNum", i+1)
+    track_num_padded = f"{int(raw_track_num):02d}"
+    disc_num = t.get("discNum", 1)
+    
+    try: api_duration = int(float(t.get("length", 0)))
+    except: api_duration = 0
+        
+    composer = t.get("author") or t.get("composer") or t.get("writer") or ""
+    isrc_val = t.get("isrc") or t.get("ISRC") or ""
+    track_c = find_deep_value(t, ["copyright", "copyRight", "rights", "license"]) or album_copyright
+
+    try: stream_url = await client.get_stream_url(track_id, livephish_manager.quality)
+    except: stream_url = None
+
+    if not stream_url:
+        LOGGER.error(f"Stream URL kosong: {title}")
+        return None
+
+    ext = ".m4a"
+    if livephish_manager.quality == "FLAC": ext = ".flac"
+
+    clean_title = sanitize_name(title)
+    
+    if int(base_meta['totalvolume']) > 1:
+        disc_folder = os.path.join(base_meta['tempfolder'], f"Disc {disc_num}")
+        os.makedirs(disc_folder, exist_ok=True)
+        current_save_path = disc_folder
+    else:
+        current_save_path = base_meta['tempfolder']
+
+    fname = f"{track_num_padded} - {clean_title}{ext}"
+    full_file_path = os.path.join(current_save_path, fname)
+    
+    # --- PROSES DOWNLOAD ARIA2 ---
+    err = await download_file(stream_url, full_file_path)
+    if err:
+        LOGGER.error(f"Download error {title}: {err}")
+        return None
+
+    # Cleaning & Metadata
+    await clean_audio_metadata(full_file_path)
+    real_duration = await get_audio_duration(full_file_path)
+    final_duration = real_duration if real_duration > 0 else api_duration
+
+    track_meta = base_meta.copy()
+    track_meta.update({
+        'title': title,
+        'tracknumber': str(raw_track_num),
+        'volume': str(disc_num),
+        'filepath': full_file_path,
+        'itemid': str(track_id),
+        'duration': final_duration,
+        'extension': ext.replace(".", ""),
+        'isrc': isrc_val,
+        'composer': composer,
+        'label': final_label,
+        'genre': genre
+    })
+
+    branding_dict = {
+        'comment': BRANDING_TAG, 'COMMENT': BRANDING_TAG,
+        'description': BRANDING_TAG, 'DESCRIPTION': BRANDING_TAG,
+        'encoded_by': BRANDING_TAG, 'ENCODED_BY': BRANDING_TAG
+    }
+    track_meta.update(branding_dict)
+
+    if ext == ".flac":
+        track_meta['discnumber'] = f"{disc_num}/{max_disc}"
+        track_meta['DISCNUMBER'] = f"{disc_num}/{max_disc}"
+        track_meta['tracknumber'] = f"{raw_track_num}/{total_tracks}"
+        track_meta['TRACKNUMBER'] = f"{raw_track_num}/{total_tracks}"
+        track_meta['ORGANIZATION'] = final_label
+        track_meta['LABEL'] = final_label
+        track_meta['COMPOSER'] = composer
+        track_meta['ISRC'] = isrc_val
+        track_meta['GENRE'] = genre
+        track_meta['COPYRIGHT'] = track_c
+        track_meta['cpr'] = track_c
+        track_meta['DATE'] = release_date
+        track_meta['totaldiscs'] = str(max_disc)
+        track_meta['totaltracks'] = str(total_tracks)
+        
+    elif ext == ".m4a":
+        track_meta['discnumber'] = str(disc_num)
+        track_meta['totaldiscs'] = str(max_disc)
+        track_meta['tracknumber'] = str(raw_track_num)
+        track_meta['totaltracks'] = str(total_tracks)
+        track_meta['copyright'] = track_c
+        track_meta['label'] = final_label
+        track_meta['composer'] = composer
+        track_meta['genre'] = genre
+        track_meta['date'] = release_date
+
+    await set_metadata(track_meta, user['user_id'])
+    return track_meta
+
+
 async def start_livephish(link: str, user: dict):
     client = user.get('livephish_api')
     if not client: raise Exception("Internal Error: LivePhish Client not passed.")
@@ -207,10 +289,7 @@ async def start_livephish(link: str, user: dict):
     release_date = format_date_standard(raw_date)
     year = release_date[:4] if len(release_date) >= 4 else ""
 
-    # Genre (Deep Search)
     genre = find_deep_genre(resp)
-
-    # Copyright & Label (Deep Search)
     album_copyright = find_deep_value(resp, ["copyright", "copyRight", "rights", "license"])
     label = find_deep_value(resp, ["recordLabel", "label"])
 
@@ -284,123 +363,22 @@ async def start_livephish(link: str, user: dict):
         'explicit': False
     }
     
-    completed_tracks = []
-    
-    init_txt = get_progress_bar_text(0, total_tracks, album_name, "Album")
-    await edit_message(user['bot_msg'], init_txt)
-
+    # --- [SUNTIKAN MESIN KONKURENSI ARIA2] ---
+    tasks = []
     for i, t in enumerate(tracks):
-        track_id = t.get("trackID") or t.get("songID")
-        title = t.get("songTitle", f"Track {i+1}")
-        
-        raw_track_num = t.get("trackNum", i+1)
-        track_num_padded = f"{int(raw_track_num):02d}"
-        disc_num = t.get("discNum", 1)
-        
-        # --- FIX DURASI API ---
-        # Kita ambil dari API dulu sebagai cadangan
-        try: api_duration = int(float(t.get("length", 0)))
-        except: api_duration = 0
-            
-        composer = t.get("author") or t.get("composer") or t.get("writer") or ""
-        isrc_val = t.get("isrc") or t.get("ISRC") or ""
-        track_c = find_deep_value(t, ["copyright", "copyRight", "rights", "license"]) or album_copyright
+        tasks.append(process_livephish_track(t, i, total_tracks, base_meta, client, user, max_disc, album_copyright, final_label, genre, release_date))
 
-        prog_txt = get_progress_bar_text(i+1, total_tracks, title, "Album")
-        try: await edit_message(user['bot_msg'], prog_txt)
-        except: pass
-
-        try: stream_url = await client.get_stream_url(track_id, livephish_manager.quality)
-        except: stream_url = None
-
-        if not stream_url:
-            LOGGER.error(f"Stream URL kosong: {title}")
-            continue
-
-        ext = ".m4a"
-        if livephish_manager.quality == "FLAC": ext = ".flac"
-
-        clean_title = sanitize_name(title)
-        
-        if int(base_meta['totalvolume']) > 1:
-            disc_folder = os.path.join(base_meta['tempfolder'], f"Disc {disc_num}")
-            if not os.path.exists(disc_folder):
-                os.makedirs(disc_folder, exist_ok=True)
-            current_save_path = disc_folder
-        else:
-            current_save_path = base_meta['tempfolder']
-
-        fname = f"{track_num_padded} - {clean_title}{ext}"
-        full_file_path = os.path.join(current_save_path, fname)
-        
-        # Download
-        err = await download_file(stream_url, full_file_path)
-        if err:
-            LOGGER.error(f"Download error {title}: {err}")
-            continue
-
-        # Nuklir Metadata (Cleaning)
-        await clean_audio_metadata(full_file_path)
-
-        # --- FIX DURASI REAL (FFPROBE) ---
-        # Baca durasi file yang sudah didownload
-        real_duration = await get_audio_duration(full_file_path)
-        
-        # Gunakan durasi asli jika ada, jika tidak fallback ke API
-        final_duration = real_duration if real_duration > 0 else api_duration
-
-        # Set Metadata
-        track_meta = base_meta.copy()
-        track_meta.update({
-            'title': title,
-            'tracknumber': str(raw_track_num),
-            'volume': str(disc_num),
-            'filepath': full_file_path,
-            'itemid': str(track_id),
-            'duration': final_duration, # DURATION VALID
-            'extension': ext.replace(".", ""),
-            'isrc': isrc_val,
-            'composer': composer,
-            'label': final_label,
-            'genre': genre
-        })
-
-        branding_dict = {
-            'comment': BRANDING_TAG, 'COMMENT': BRANDING_TAG,
-            'description': BRANDING_TAG, 'DESCRIPTION': BRANDING_TAG,
-            'encoded_by': BRANDING_TAG, 'ENCODED_BY': BRANDING_TAG
-        }
-        track_meta.update(branding_dict)
-
-        if ext == ".flac":
-            track_meta['discnumber'] = f"{disc_num}/{max_disc}"
-            track_meta['DISCNUMBER'] = f"{disc_num}/{max_disc}"
-            track_meta['tracknumber'] = f"{raw_track_num}/{total_tracks}"
-            track_meta['TRACKNUMBER'] = f"{raw_track_num}/{total_tracks}"
-            track_meta['ORGANIZATION'] = final_label
-            track_meta['LABEL'] = final_label
-            track_meta['COMPOSER'] = composer
-            track_meta['ISRC'] = isrc_val
-            track_meta['GENRE'] = genre
-            track_meta['COPYRIGHT'] = track_c
-            track_meta['cpr'] = track_c
-            track_meta['DATE'] = release_date
-            track_meta['totaldiscs'] = str(max_disc)
-            track_meta['totaltracks'] = str(total_tracks)
-            
-        elif ext == ".m4a":
-            track_meta['discnumber'] = str(disc_num)
-            track_meta['totaldiscs'] = str(max_disc)
-            track_meta['tracknumber'] = str(raw_track_num)
-            track_meta['totaltracks'] = str(total_tracks)
-            track_meta['copyright'] = track_c
-            track_meta['label'] = final_label
-            track_meta['composer'] = composer
-            track_meta['genre'] = genre
-            track_meta['date'] = release_date
-
-        await set_metadata(track_meta, user['user_id'])
-        completed_tracks.append(track_meta)
+    update_details = {
+        'text': "Mengunduh...",
+        'msg': user['bot_msg'],
+        'title': album_name,
+        'type': 'Album'
+    }
+    
+    # Gunakan batas limit=4 agar koneksi ke LivePhish aman dari blokir
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
+    completed_tracks = [res for res in task_results if res]
+    # ----------------------------------------
 
     # --- UPLOAD ---
     if completed_tracks:
@@ -424,3 +402,4 @@ async def start_livephish(link: str, user: dict):
         await album_upload(base_meta, user)
     else:
         raise Exception("Tidak ada track yang berhasil diunduh.")
+
