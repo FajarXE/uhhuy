@@ -147,30 +147,32 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         is_local = False
         if isinstance(text, str):
             try:
-                # Membaca path lokal untuk trigger radar UI
                 if not text.startswith("http") and not text.startswith("tg://"):
                     is_local = True
             except: pass
             
         msg = None
-        msg_created = False # Indikator pengaman anti-spam
+        msg_created = False 
 
         async def progress(current, total):
-            nonlocal msg, last_update_time, msg_created
+            # [FIX 1] Tambahkan 'start_time' ke dalam nonlocal agar bisa kita ubah dari dalam fungsi
+            nonlocal msg, last_update_time, msg_created, start_time 
             if cancel_id in GLOBAL_CANCEL_DICT:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
-            # --- [FIX SPAM UI] Lazy Load Radar ---
-            # Hanya buat pesan radar saat file ini BENAR-BENAR mulai diunggah oleh Telegram!
             if is_local and not msg_created:
                 msg_created = True
+                # [FIX 2] Reset stopwatch (waktu mulai) ke detik ini juga!
+                start_time = time.time() 
+                last_update_time = start_time 
+                
                 try:
                     from bot.tgclient import aio
                     msg = await aio.send_message(chat_id, f"🔄 Mengunggah file... `/cancel_{cancel_id}`")
                 except: pass
                 
             if not msg:
-                return # Lewati update jika pesan di layar belum siap
+                return
 
             now = time.time()
             if msg and (now - last_update_time > 2.5 or current == total):
