@@ -242,10 +242,20 @@ async def process_album(token_id, user, session, api):
              zip_path = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
 
         metadata = {
-            'type': 'album', 'title': title, 'artist': album_data.get("primary_artists"), 
-            'folderpath': dl_dir, 'tracks': downloaded_tracks, 'cover': final_cover_path if os.path.exists(final_cover_path) else None,
-            'zip_path': zip_path, 'poster_msg': poster_msg, 'provider': 'JioSaavn', 
-            'release_date': release_date, 'track_count': total, 'quality': '320kbps'
+            'type': 'album', 
+            'title': title, 
+            'artist': album_data.get("primary_artists"), 
+            'folderpath': dl_dir, 
+            'tracks': downloaded_tracks, 
+            'cover': final_cover_path if os.path.exists(final_cover_path) else None,
+            'zip_path': zip_path, 
+            'poster_msg': poster_msg, 
+            'provider': 'JioSaavn', 
+            'release_date': release_date, 
+            'totaltracks': str(total),     # <-- Memperbaiki total tracks kosong
+            'totalvolumes': '1',           # <-- Memperbaiki total volumes kosong
+            'explicit': is_explicit,       # <-- Memperbaiki explicit kosong
+            'quality': '320kbps'
         }
         await edit_message(msg, "🚀 Mengunggah Album...")
         await album_upload(metadata, user)
@@ -312,10 +322,16 @@ async def process_playlist(token_id, user, session, api):
              zip_path = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
 
         metadata = {
-            'type': 'playlist', 'title': title, 'folderpath': dl_dir, 
-            'tracks': downloaded_tracks, 'cover': playlist_cover_path if os.path.exists(playlist_cover_path) else None, 
-            'zip_path': zip_path, 'poster_msg': poster_msg, 'provider': 'JioSaavn', 
-            'track_count': total, 'quality': '320kbps'
+            'type': 'playlist', 
+            'title': title, 
+            'folderpath': dl_dir, 
+            'tracks': downloaded_tracks, 
+            'cover': playlist_cover_path if os.path.exists(playlist_cover_path) else None, 
+            'zip_path': zip_path, 
+            'poster_msg': poster_msg, 
+            'provider': 'JioSaavn', 
+            'totaltracks': str(total),     # <-- Memperbaiki total tracks kosong
+            'quality': '320kbps'
         }
         await edit_message(msg, "🚀 Mengunggah Playlist...")
         await playlist_upload(metadata, user)
