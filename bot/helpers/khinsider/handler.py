@@ -152,11 +152,12 @@ async def start_khinsider(url, user):
             filepath = f"{album_folder_path}/{filename}"
             
             # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
-            # Kita 'mencuri' User-Agent milik KhinsiderManager agar Aria2 tidak diblokir
             headers_dict = {"User-Agent": khinsider_manager.headers["User-Agent"]}
-            details_aria = {'headers': headers_dict}
             
-            # Coba unduh dengan Aria2 (beri retries=1 agar cepat fallback kalau ditolak)
+            # [FIX] Kosongkan details_aria agar Aria2 tidak crash mencari 'msg' di mode Album
+            details_aria = None 
+            
+            # Coba unduh dengan Aria2 
             err = await download_file(dl_url, filepath, retries=1, details=details_aria)
             
             if err:
