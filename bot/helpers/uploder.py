@@ -513,70 +513,47 @@ async def telegram_upload(track, user, batch_mode=False):
     
     filepath = track.get('filepath')
     if not filepath or not os.path.exists(filepath):
-        # [FIX] Jangan sembunyikan error ini! Biar kita tahu jika filenya hilang/salah nama
-        from bot.logger import LOGGER
-        LOGGER.error(f"❌ [FATAL] File tidak ditemukan di sistem: '{filepath}'")
+        LOGGER.error(f"[UPLOAD FAIL] Path does not exist: '{filepath}'")
         raise FileNotFoundError(f"File not found: {filepath}")
         
     try: 
         # --- [FIX UI] JANGAN HAPUS bot_msg ---
+        # Kita membiarkan `user` tetap utuh agar message.py bisa mendeteksi bot_msg 
+        # dan menjadikannya sebagai satu-satunya Radar Kecepatan yang permanen!
         await send_message(user, filepath, 'audio', meta=meta)
     except Exception as e:
-        from bot.logger import LOGGER
-        LOGGER.error(f"[UPLOAD ERROR] Gagal mengirim file {filepath}: {e}")
+        LOGGER.error(f"[UPLOAD ERROR] send_message failed for {filepath}: {e}")
         raise e
 
 async def batch_telegram_upload(metadata, user):
-    import time, hashlib
-    from bot.logger import LOGGER
-    from bot.helpers.message import edit_message
-    
-    batch_cancel_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:16]
     tracks_to_upload = []
     
-    # --- [FIX 1] EKSTRAKSI BRUTAL (ANTI-GAGAL) ---
-    # Ambil semua lagu tanpa mempedulikan label tipe metadata layanannya!
-    if 'tracks' in metadata:
+    # 1. Kumpulkan semua track yang siap diunggah
+    if metadata['type'] in ['album', 'playlist']:
         for track in metadata['tracks']:
             if track.get('filepath'):
-                track['task_id'] = batch_cancel_id
                 tracks_to_upload.append(track)
-                
-    if 'albums' in metadata:
-        for album in metadata['albums']:
-            for track in album.get('tracks', []):
+    elif metadata['type'] == 'artist':
+        for album in metadata.get('albums', []):
+            for track in album['tracks']:
                 if track.get('filepath'):
-                    track['task_id'] = batch_cancel_id
                     tracks_to_upload.append(track)
                     
-    if not tracks_to_upload:
-        LOGGER.error("❌ [FATAL] Antrean kosong! Tidak ada metadata lagu yang valid.")
-        if 'bot_msg' in user:
-            try: await edit_message(user['bot_msg'], "❌ **Gagal: Antrean kosong, tidak ada lagu yang siap diunggah!**", None, False)
-            except: pass
-        return
+    if not tracks_to_upload: return
 
-    # --- [FIX 2] INDIKATOR VISUAL BAHWA UPLOAD DIMULAI ---
-    if 'bot_msg' in user:
-        try: await edit_message(user['bot_msg'], f"🔄 **Menyiapkan {len(tracks_to_upload)} lagu untuk diunggah...**", None, False)
-        except: pass
-
-    # --- [FIX 3] UPLOAD BERURUTAN ---
-    for index, track in enumerate(tracks_to_upload, 1):
+    # --- [FIX UI] UPLOAD BERURUTAN (SEQUENTIAL) ---
+    # Mengunggah satu per satu akan menjamin 2 hal penting:
+    # 1. Urutan lagu (Track 1, 2, 3...) di Telegram akan berjejer rapi, tidak melompat-lompat.
+    # 2. Radar UI (bot_msg) hanya akan memperbarui 1 lagu dalam satu waktu, menghindari flicker/spam.
+    for track in tracks_to_upload:
         try:
             await telegram_upload(track, user, batch_mode=True)
-            
         except asyncio.CancelledError:
             LOGGER.info("Batch upload dibatalkan oleh pengguna.")
+            # Lempar ke sistem utama jika dibatalkan
             raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
-            
-        except FileNotFoundError as e:
-            # Jika file hilang, beritahu langsung di Telegram, jangan dilewati diam-diam!
-            LOGGER.error(f"Track {index} dilewati: {e}")
-            if 'bot_msg' in user:
-                try: await edit_message(user['bot_msg'], f"⚠️ **Track {index} dilewati (File tidak ditemukan di server)**", None, False)
-                except: pass
-                await asyncio.sleep(2) # Beri jeda 2 detik agar pesan peringatannya sempat terbaca
-                
+        except FileNotFoundError:
+            pass
         except Exception as e:
-            LOGGER.error(f"Gagal mengunggah track {index}: {e}")
+            LOGGER.error(f"Gagal mengunggah track: {e}")
+    # ----------------------------------------------
