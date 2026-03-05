@@ -21,7 +21,7 @@ from .manager import HighResAudioError, highresaudio_manager
 from ..uploder import *
 from ..metadata import set_metadata
 from ..message import edit_message
-from ..utils import fetch_zip_settings, run_concurrent_tasks, format_string, zip_handler
+from ..utils import fetch_zip_settings, run_concurrent_tasks, format_string, zip_handler, download_file
 from ...settings import bot_set 
 import bot.helpers.translations as lang
 from bot.logger import LOGGER
@@ -29,36 +29,30 @@ from bot.logger import LOGGER
 
 async def start_highresaudio(url: str, user: dict):
     # --- [MODIFIKASI] RE-LOGIN OTOMATIS ---
-    # Sebelum memproses link, kita paksa client untuk login ulang 
-    # agar mendapatkan sesi baru (mencegah error 404/expired session).
     try:
         user_id = user.get('user_id')
         client = highresaudio_manager.get_client(user_id)
         
         if client:
-            # Jalankan re_login di thread terpisah agar tidak memblokir bot
-            # Fungsi re_login() harus sudah ada di api.py (sesuai instruksi sebelumnya)
             if hasattr(client, 're_login'):
                 await asyncio.to_thread(client.re_login)
             else:
                 LOGGER.warning(f"HighResAudio: Client {user_id} tidak memiliki method 're_login'.")
     except Exception as e:
         LOGGER.error(f"HighResAudio: Gagal menyegarkan sesi (Re-login): {e}")
-        # Kita lanjut saja, siapa tahu sesi masih valid.
     # --------------------------------------
 
     try:
         media_type, item_id, extra_kwargs = custom_url_parse(url)
         if media_type == 'album':
-            await start_album(item_id, user)
+            await start_album(url, user)
         else:
             raise NotImplementedError(f"Tipe media HighResAudio '{media_type}' belum didukung.")
     except Exception as e:
         LOGGER.error(f"Error fatal di HighResAudio handler: {e}\n{traceback.format_exc()}")
         raise e 
 
-async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, \
-    filepath=None, disable_link=False):
+async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
     
     client = highresaudio_manager.get_client(user.get('user_id'))
     
@@ -68,8 +62,9 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     if not track_meta:
         raise HighResAudioError("start_track dipanggil tanpa track_meta.")
             
-    filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
-    filepath = sanitize_filepath(filepath)
+    if not filepath:
+        filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
+        filepath = sanitize_filepath(filepath)
 
     download_url = track_meta.get('download_url')
     album_id_referer = track_meta.get('album_id_referer') 
@@ -85,16 +80,37 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
+    # --- SUNTIKAN KABEL RADAR UI TELEGRAM ---
+    details = None
+    if upload and 'bot_msg' in user:
+        details = {
+            'msg': user['bot_msg'],
+            'title': track_meta.get('title', 'Unknown'),
+            'type': track_meta.get('type', 'Track').capitalize()
+        }
+    # ----------------------------------------
+
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        await asyncio.to_thread(
-            download_track_unencrypted,
-            client, 
-            download_url,
-            album_id_referer,
-            track_meta['filepath']
-        )
+        # --- MESIN PENGUNDUH FULL ARIA2 ---
+        # Menyiapkan Cookie dan Referer secara spesifik agar server HRA tidak memblokir Aria2
+        cookie_str = "; ".join([f"{k}={v}" for k, v in client.s.cookies.items()])
+        headers_dict = {
+            "Referer": f"https://stream-app.highresaudio.com/album/{album_id_referer}",
+            "Cookie": cookie_str
+        }
+        
+        if details:
+            details['headers'] = headers_dict
+        else:
+            details = {'headers': headers_dict}
+
+        err = await download_file(download_url, track_meta['filepath'], details=details)
+        if err:
+            raise HighResAudioError(f"Aria2 gagal mengunduh track: {err}")
+        # ----------------------------------
+        
     except Exception as e:
         LOGGER.error(f"HighResAudio dl_track gagal: {e}")
         return False
@@ -112,23 +128,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
 
     return True
 
-
-def download_track_unencrypted(client, url, album_id_referer, temp_location):
-    try:
-        r = client.get_track_stream(url, album_id_referer)
-        r.raise_for_status()
-
-        with open(temp_location, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=32 * 1024):
-                if chunk:
-                    f.write(chunk)
-    except Exception as e:
-        if os.path.isfile(temp_location):
-            os.remove(temp_location)
-        raise e
-    
-    LOGGER.info(f"HighResAudio: Berhasil mengunduh ke {temp_location}")
-
+# Fungsi booklet dipertahankan (Tidak perlu Aria2 karena ini hanya file PDF/Gambar kecil)
 def download_booklet(client, url, temp_location):
     try:
         r = client.get_booklet_stream(url) 
@@ -142,8 +142,6 @@ def download_booklet(client, url, temp_location):
             os.remove(temp_location)
         LOGGER.error(f"HighResAudio: Gagal mengunduh booklet: {e}")
     
-    LOGGER.info(f"HighResAudio: Berhasil mengunduh booklet ke {temp_location}")
-
 
 async def start_album(album_url: str, user: dict, upload=True):
     try:
@@ -158,45 +156,25 @@ async def start_album(album_url: str, user: dict, upload=True):
     if upload:
         album_meta['poster_msg'] = await post_art_poster(user, album_meta)
 
-    sem = asyncio.Semaphore(1) 
-    total_tracks = len(album_meta['tracks'])
-    completed_count = 0
-    
-    async def run_task_with_limit(task_coro, track_meta):
-        nonlocal completed_count
-        async with sem:
-            result = await task_coro
-            completed_count += 1
-            if completed_count % 1 == 0 or completed_count == total_tracks:
-                try:
-                    percentage_int = int((completed_count/total_tracks)*100)
-                    bar = "{0}{1}".format(
-                        ''.join(["▰" for _ in range(math.floor(percentage_int / 10))]),
-                        ''.join(["▱" for _ in range(10 - math.floor(percentage_int / 10))])
-                    )
-                    await edit_message(
-                        user['bot_msg'],
-                        lang.s.DOWNLOAD_PROGRESS.format(
-                            bar, completed_count, total_tracks, album_meta['title'], "Tracks"
-                        )
-                    )
-                except: pass
-            return result, track_meta
-
-    task_coroutines = []
+    # --- SUNTIKAN KONKURENSI CERDAS ---
+    tasks = []
     for track in album_meta['tracks']:
-        task_coro = start_track(None, user, track, False, album_folder) 
-        task_coroutines.append(run_task_with_limit(task_coro, track))
+        tasks.append(start_track(None, user, track, False, album_folder))
 
-    task_results_with_meta = await asyncio.gather(*task_coroutines)
+    update_details = {
+        'text': lang.s.DOWNLOAD_PROGRESS,
+        'msg': user['bot_msg'],
+        'title': album_meta['title'],
+        'type': album_meta['type']
+    }
     
-    successful_tracks = []
-    for result, track_meta in task_results_with_meta:
-        if result: 
-            successful_tracks.append(track_meta)
-            
+    # Eksekusi dengan limit=4 agar koneksi ke HRA super cepat tapi anti blokir!
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
+    
+    successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
     album_meta['tracks'] = successful_tracks
     album_meta['totaltracks'] = len(successful_tracks)
+    # ----------------------------------
 
     if not successful_tracks:
         raise Exception(f"Tidak ada lagu HighResAudio yang berhasil diunduh.")
@@ -205,8 +183,6 @@ async def start_album(album_url: str, user: dict, upload=True):
     if 'booklet_url' in album_meta:
         LOGGER.info("HighResAudio: Mengunduh booklet...")
         booklet_path = os.path.join(album_folder, "booklet.pdf")
-        
-        # [MODIFIKASI] Gunakan klien user juga untuk booklet
         dl_client = highresaudio_manager.get_client(user.get('user_id'))
         if dl_client:
             await asyncio.to_thread(download_booklet, dl_client, album_meta['booklet_url'], booklet_path)
