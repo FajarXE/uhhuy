@@ -161,20 +161,28 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             if cancel_id in GLOBAL_CANCEL_DICT:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
-            # --- [FIX UI] GUNAKAN PESAN UTAMA (bot_msg) SEBAGAI RADAR ---
+            # --- [FIX UI] TAKTIK RADAR PERMANEN (ANTI-LOMPAT) ---
             if is_local and not msg_created:
                 msg_created = True
                 start_time = time.time() # Reset stopwatch agar kecepatan akurat
                 last_update_time = start_time 
                 
-                if isinstance(user, dict) and user.get('bot_msg'):
-                    msg = user['bot_msg']
-                else:
-                    try:
-                        from bot.tgclient import aio
-                        msg = await aio.send_message(chat_id, f"🔄 Mengunggah file... `/cancel_{cancel_id}`")
-                    except: pass
-            # ------------------------------------------------------------
+                if isinstance(user, dict):
+                    # 1. Jika radar permanen sudah dibuat di lagu sebelumnya, pakai itu terus!
+                    if user.get('radar_msg'):
+                        msg = user['radar_msg']
+                    # 2. Jika belum ada, coba pakai bot_msg
+                    elif user.get('bot_msg'):
+                        msg = user['bot_msg']
+                        user['radar_msg'] = msg # Simpan di memori
+                    # 3. Jika bot_msg ternyata sudah dihapus oleh sistem uploader, BUAT BARU SEKALI SAJA!
+                    else:
+                        try:
+                            from bot.tgclient import aio
+                            msg = await aio.send_message(chat_id, f"🔄 Mengunggah file... `/cancel_{cancel_id}`")
+                            user['radar_msg'] = msg # Kunci pesan ini di memori!
+                        except: pass
+            # ---------------------------------------------------
                 
             if not msg:
                 return 
@@ -278,18 +286,23 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     await copy_to_channel(client, res)
                 except: pass
                 
-            # --- [FIX UI] JANGAN HAPUS RADAR JIKA ITU ADALAH PESAN UTAMA ---
+            # --- [FIX UI] LINDUNGI RADAR AGAR TIDAK DIHAPUS ---
             if msg:
-                is_bot_msg = False
-                if isinstance(user, dict) and user.get('bot_msg'):
-                    if msg.id == user['bot_msg'].id:
-                        is_bot_msg = True
+                is_protected = False
+                if isinstance(user, dict):
+                    # Lindungi pesan utama (bot_msg)
+                    if user.get('bot_msg') and msg.id == user['bot_msg'].id:
+                        is_protected = True
+                    # Lindungi radar permanen kita (radar_msg)
+                    if user.get('radar_msg') and msg.id == user['radar_msg'].id:
+                        is_protected = True
                 
-                if not is_bot_msg:
+                if not is_protected:
                     from bot.tgclient import aio
                     try: await aio.delete_messages(chat_id, msg.id)
                     except: pass
-            # ---------------------------------------------------------------
+            # --------------------------------------------------
+
             return res
 
         # [FIX] Tangkap CancelledError, update Radar UI, update pesan "UPLOADING...", lalu lempar sinyal!
