@@ -364,11 +364,10 @@ async def start_livephish(link: str, user: dict):
     }
 
     # --- [FIX UI] KIRIM POSTER DI AWAL SEBELUM DOWNLOAD ---
-    if upload:
-        try:
-            base_meta['poster_msg'] = await post_art_poster(user, base_meta)
-        except Exception as e:
-            LOGGER.error(f"Gagal mengirim poster: {e}")
+    try:
+        base_meta['poster_msg'] = await post_art_poster(user, base_meta)
+    except Exception as e:
+        LOGGER.error(f"Gagal mengirim poster: {e}")
     # ------------------------------------------------------
     
     # --- [SUNTIKAN MESIN KONKURENSI ARIA2] ---
