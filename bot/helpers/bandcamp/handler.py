@@ -118,16 +118,17 @@ async def start_bandcamp(link: str, user: dict):
         filename = f"{track_num:02d} - {sanitize_filename(track_title)}.mp3"
         file_path = os.path.join(dl_dir, filename)
         
-        # --- FULL ARIA2 + HYBRID AIOHTTP FALLBACK ---
-        # Pasang User-Agent umum agar Aria2 tidak ditolak
+        # --- [FIX 1] MENCEGAH CRASH ARIA2 'msg' ---
         headers_dict = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'}
-        details_aria = {'headers': headers_dict}
+        details_aria = None
         
-        # Jika Single Track, hidupkan radar langsung ke UI
         if not is_album:
-            details_aria['msg'] = msg
-            details_aria['title'] = track_title
-            details_aria['type'] = 'Track'
+            details_aria = {
+                'msg': msg,
+                'title': track_title,
+                'type': 'Track',
+                'headers': headers_dict
+            }
 
         err = await download_file(track_url, file_path, retries=1, details=details_aria)
         
@@ -160,7 +161,10 @@ async def start_bandcamp(link: str, user: dict):
             'lyrics': lyrics_text,
             'isrc': None 
         }
-        await asyncio.to_thread(set_bandcamp_metadata, file_path, meta_payload)
+        
+        # --- [FIX 2] PANGGIL FUNGSI ASYNC SECARA LANGSUNG ---
+        await set_bandcamp_metadata(file_path, meta_payload)
+        # ----------------------------------------------------
         
         duration = int(float(track.get('duration') or 0))
 
