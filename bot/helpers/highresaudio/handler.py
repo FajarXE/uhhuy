@@ -1,5 +1,6 @@
 # [GANTI SELURUH FILE: bot/helpers/highresaudio/handler.py]
 
+import aiohttp
 import aiofiles
 import os
 import shutil
@@ -8,6 +9,7 @@ import asyncio
 import math 
 import requests 
 import random 
+import time
 
 from pathvalidate import sanitize_filepath
 from config import Config
@@ -28,7 +30,7 @@ from bot.logger import LOGGER
 
 
 async def start_highresaudio(url: str, user: dict):
-    # --- [MODIFIKASI] RE-LOGIN OTOMATIS ---
+    # --- RE-LOGIN OTOMATIS ---
     try:
         user_id = user.get('user_id')
         client = highresaudio_manager.get_client(user_id)
@@ -40,7 +42,6 @@ async def start_highresaudio(url: str, user: dict):
                 LOGGER.warning(f"HighResAudio: Client {user_id} tidak memiliki method 're_login'.")
     except Exception as e:
         LOGGER.error(f"HighResAudio: Gagal menyegarkan sesi (Re-login): {e}")
-    # --------------------------------------
 
     try:
         media_type, item_id, extra_kwargs = custom_url_parse(url)
@@ -88,28 +89,51 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             'title': track_meta.get('title', 'Unknown'),
             'type': track_meta.get('type', 'Track').capitalize()
         }
-    # ----------------------------------------
 
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        # --- MESIN PENGUNDUH FULL ARIA2 ---
-        # Menyiapkan Cookie dan Referer secara spesifik agar server HRA tidak memblokir Aria2
+        # --- MESIN PENGUNDUH HYBRID (ARIA2 -> AIOHTTP TURBO) ---
         cookie_str = "; ".join([f"{k}={v}" for k, v in client.s.cookies.items()])
         headers_dict = {
             "Referer": f"https://stream-app.highresaudio.com/album/{album_id_referer}",
             "Cookie": cookie_str
         }
         
-        if details:
+        # [PERBAIKAN FATAL] Hanya tambahkan headers jika details benar-benar ada (Mode Single Track).
+        # Jika Mode Album (details = None), biarkan tetap None agar aria2_helper tidak crash (KeyError: 'msg').
+        if details is not None:
             details['headers'] = headers_dict
-        else:
-            details = {'headers': headers_dict}
 
-        err = await download_file(download_url, track_meta['filepath'], details=details)
+        # Langkah 1: Coba kekuatan penuh Aria2 (retries=1 agar cepat beralih jika ditolak server)
+        err = await download_file(download_url, track_meta['filepath'], retries=1, details=details)
+        
         if err:
-            raise HighResAudioError(f"Aria2 gagal mengunduh track: {err}")
-        # ----------------------------------
+            LOGGER.warning(f"HighResAudio: Aria2 gagal/ditolak server. Mengaktifkan AIOHTTP Turbo Fallback...")
+            
+            # Langkah 2: AIOHTTP Turbo Fallback (Menjamin Cookie Tembus 100%)
+            async with aiohttp.ClientSession(headers=headers_dict) as session:
+                async with session.get(download_url) as r:
+                    r.raise_for_status()
+                    total_size = int(r.headers.get('content-length', 0))
+                    downloaded = 0
+                    start_time = time.time()
+                    last_update = start_time
+                    
+                    async with aiofiles.open(track_meta['filepath'], 'wb') as f:
+                        async for chunk in r.content.iter_chunked(256 * 1024):
+                            if chunk:
+                                await f.write(chunk)
+                                downloaded += len(chunk)
+                                
+                                # Update Radar UI (Hanya jika Single Track)
+                                if details and 'msg' in details:
+                                    now = time.time()
+                                    if now - last_update > 2.0 or downloaded == total_size:
+                                        last_update = now
+                                        from bot.helpers.utils import progress_message
+                                        await progress_message(downloaded, total_size, details)
+        # --------------------------------------------------------
         
     except Exception as e:
         LOGGER.error(f"HighResAudio dl_track gagal: {e}")
@@ -128,7 +152,6 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
 
     return True
 
-# Fungsi booklet dipertahankan (Tidak perlu Aria2 karena ini hanya file PDF/Gambar kecil)
 def download_booklet(client, url, temp_location):
     try:
         r = client.get_booklet_stream(url) 
@@ -156,7 +179,6 @@ async def start_album(album_url: str, user: dict, upload=True):
     if upload:
         album_meta['poster_msg'] = await post_art_poster(user, album_meta)
 
-    # --- SUNTIKAN KONKURENSI CERDAS ---
     tasks = []
     for track in album_meta['tracks']:
         tasks.append(start_track(None, user, track, False, album_folder))
@@ -168,13 +190,11 @@ async def start_album(album_url: str, user: dict, upload=True):
         'type': album_meta['type']
     }
     
-    # Eksekusi dengan limit=4 agar koneksi ke HRA super cepat tapi anti blokir!
     task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
     
     successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
     album_meta['tracks'] = successful_tracks
     album_meta['totaltracks'] = len(successful_tracks)
-    # ----------------------------------
 
     if not successful_tracks:
         raise Exception(f"Tidak ada lagu HighResAudio yang berhasil diunduh.")
