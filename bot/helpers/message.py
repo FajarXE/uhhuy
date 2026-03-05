@@ -135,21 +135,14 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 LOGGER.error(f"Gagal mengirim teks: {e}")
             return None
 
-        else:
-            import time, hashlib, math, os
-            from bot.helpers.utils import get_readable_time, get_readable_file_size, GLOBAL_CANCEL_DICT
-            from bot.settings import bot_set
-            
-            start_time = time.time()
-            
-            # --- [FIX UI] BACA ID CANCEL MASTER JIKA ADA ---
-            if meta and meta.get('task_id'):
-                cancel_id = meta['task_id']
-            else:
-                cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
-            # -----------------------------------------------
-            
-            last_update_time = start_time
+    else:
+        import time, hashlib, math, os
+        from bot.helpers.utils import get_readable_time, get_readable_file_size, GLOBAL_CANCEL_DICT
+        from bot.settings import bot_set
+        
+        start_time = time.time()
+        cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
+        last_update_time = start_time
         
         is_local = False
         if isinstance(text, str):
