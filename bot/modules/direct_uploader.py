@@ -124,7 +124,7 @@ class DirectUpload:
         server = await asyncio.to_thread(self._get_gofile_server)
         url = f"https://{server}.gofile.io/uploadFile"
         
-        data = aiohttp.FormData()
+        data = aiohttp.FormData(quote_fields=False)
         data.add_field('token', token)
         if folder_id:
             data.add_field('folderId', folder_id)
@@ -236,7 +236,7 @@ class DirectUpload:
             LOGGER.error("Viking Upload: Gagal mendapatkan server dari API.")
             return None
 
-        data = aiohttp.FormData()
+        data = aiohttp.FormData(quote_fields=False)
         data.add_field('user', token)
         
         filename = os.path.basename(filepath)
