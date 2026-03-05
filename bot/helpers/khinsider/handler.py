@@ -106,7 +106,7 @@ async def start_khinsider(url, user):
                     filename = f"artwork_{i}.{ext}"
                     filepath = f"{album_folder_path}/{filename}"
                 # Download gambar dengan menyamar (Spoofing)
-                await download_file(img_url, filepath, details={'headers': {'User-Agent': khinsider_manager.headers['User-Agent']}})
+                await download_file(img_url, filepath, details={'msg': None, 'headers': {'User-Agent': khinsider_manager.headers['User-Agent']}})
             except Exception: pass
 
     track_total = len(album_meta['tracks'])
@@ -154,8 +154,9 @@ async def start_khinsider(url, user):
             # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
             headers_dict = {"User-Agent": khinsider_manager.headers["User-Agent"]}
             
-            # [FIX] Kosongkan details_aria agar Aria2 tidak crash mencari 'msg' di mode Album
-            details_aria = None 
+            # [KUNCI RAHASIA] Gunakan 'msg': None.
+            # Aria2 tetap mendapat Headers penyamaran, tidak akan crash, dan UI tetap rapi!
+            details_aria = {'msg': None, 'headers': headers_dict}
             
             # Coba unduh dengan Aria2 
             err = await download_file(dl_url, filepath, retries=1, details=details_aria)
