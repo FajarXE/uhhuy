@@ -1,4 +1,9 @@
+# [GANTI SELURUH FILE: bot/helpers/khinsider/handler.py]
+
 import os
+import aiohttp
+import aiofiles
+import time
 import asyncio
 from mutagen.mp3 import MP3, EasyMP3
 from mutagen.id3 import ID3, APIC, TYER, TDRC, TPOS, COMM
@@ -10,6 +15,7 @@ from ...helpers.uploder import album_upload
 from ...helpers.message import edit_message
 from config import Config
 from .manager import khinsider_manager
+from bot.logger import LOGGER
 
 # --- FUNGSI TAGGING LENGKAP ---
 def set_file_tags(filepath, meta, cover_path, fmt):
@@ -18,7 +24,6 @@ def set_file_tags(filepath, meta, cover_path, fmt):
         return
 
     try:
-        # Siapkan data tag
         year = meta.get('date', 'N/A')
         if year == 'N/A': year = None
         
@@ -33,7 +38,6 @@ def set_file_tags(filepath, meta, cover_path, fmt):
                 audio = MP3(filepath)
                 audio.add_tags()
             
-            # 1. Embed Cover
             if cover_path and os.path.exists(cover_path):
                 audio.tags.delall("APIC")
                 with open(cover_path, 'rb') as albumart:
@@ -44,19 +48,15 @@ def set_file_tags(filepath, meta, cover_path, fmt):
                         data=albumart.read()
                     ))
             
-            # 2. Embed Metadata (Year & Disc)
             if year:
-                audio.tags.add(TDRC(encoding=3, text=[str(year)])) # ID3v2.4
-                audio.tags.add(TYER(encoding=3, text=[str(year)])) # ID3v2.3 compat
+                audio.tags.add(TDRC(encoding=3, text=[str(year)])) 
+                audio.tags.add(TYER(encoding=3, text=[str(year)])) 
             
-            audio.tags.add(TPOS(encoding=3, text=[disc_set])) # Part of Set (Disc)
-            
+            audio.tags.add(TPOS(encoding=3, text=[disc_set]))
             audio.save()
             
         elif fmt == 'flac':
             audio = FLAC(filepath)
-            
-            # 1. Embed Cover
             if cover_path and os.path.exists(cover_path):
                 image = Picture()
                 image.type = 3
@@ -67,39 +67,34 @@ def set_file_tags(filepath, meta, cover_path, fmt):
                 audio.clear_pictures()
                 audio.add_picture(image)
             
-            # 2. Embed Metadata
             if year:
                 audio['DATE'] = str(year)
                 audio['YEAR'] = str(year)
             
             audio['DISCNUMBER'] = str(disc_num)
             audio['TOTALDISCS'] = str(total_discs)
-            
             audio.save()
             
     except Exception as e:
-        print(f"Gagal set tags untuk {filepath}: {e}")
+        LOGGER.error(f"Gagal set tags untuk {filepath}: {e}")
 
 # --- HANDLER UTAMA ---
 async def start_khinsider(url, user):
     msg = user['bot_msg']
-    await edit_message(msg, "Memproses Album Khinsider...")
+    await edit_message(msg, "⚙️ Memproses Album Khinsider...")
     
-    # 1. Ambil Metadata Lengkap
     try:
         album_meta = await khinsider_manager.get_album(url)
     except Exception as e:
-        await edit_message(msg, f"Gagal mengambil info album: {e}")
+        await edit_message(msg, f"❌ Gagal mengambil info album: {e}")
         return
 
-    # Folder Output
     album_folder_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['title']}"
     os.makedirs(album_folder_path, exist_ok=True)
 
-    # 2. Download Gambar
     cover_path = None
     if album_meta.get('images'):
-        await edit_message(msg, f"Mengunduh {len(album_meta['images'])} gambar...")
+        await edit_message(msg, f"🖼️ Mengunduh {len(album_meta['images'])} gambar...")
         for i, img_url in enumerate(album_meta['images']):
             try:
                 ext = img_url.split('.')[-1].split('?')[0]
@@ -110,21 +105,44 @@ async def start_khinsider(url, user):
                 else:
                     filename = f"artwork_{i}.{ext}"
                     filepath = f"{album_folder_path}/{filename}"
-                await download_file(img_url, filepath)
+                # Download gambar dengan menyamar (Spoofing)
+                await download_file(img_url, filepath, details={'headers': {'User-Agent': khinsider_manager.headers['User-Agent']}})
             except Exception: pass
 
-    # 3. Download Lagu
     track_total = len(album_meta['tracks'])
-    await edit_message(msg, f"Ditemukan {track_total} lagu (Vol: {album_meta['totalvolumes']}).\nAlbum: {album_meta['title']}")
+    
+    # --- BUNGKUS DATA ALBUM DI AWAL ---
+    album_data = {
+        'title': album_meta['title'],
+        'artist': 'Game Soundtrack',
+        'albumartist': 'Game Soundtrack',
+        'type': 'album',
+        'provider': 'Khinsider',
+        'tracks': [],
+        'cover': cover_path,
+        'folderpath': album_folder_path,
+        'totaltracks': str(track_total),
+        'date': album_meta['date'],
+        'totalvolumes': album_meta['totalvolumes'],
+        'explicit': str(album_meta['explicit']),
+        'quality': bot_set.user_data.get(user['user_id'], {}).get('khinsider_qual', 'FLAC').upper()
+    }
+    
+    # --- [FIX UI] KIRIM POSTER DI AWAL SEBELUM DOWNLOAD ---
+    try:
+        album_data['poster_msg'] = await post_art_poster(user, album_data)
+    except Exception as e:
+        LOGGER.error(f"Gagal mengirim poster Khinsider: {e}")
+    # ------------------------------------------------------
 
     async def _process_track(track):
         try:
+            # 1. Scrape Direct Link
             dl_url, fmt = await khinsider_manager.get_track_download_url(
                 track['url'], 
                 preferred_formats=[bot_set.user_data.get(user['user_id'], {}).get('khinsider_qual', 'flac'), 'mp3']
             )
             
-            # Format nama file: Disc-Track. Title
             if int(album_meta['totalvolumes']) > 1:
                 filename = f"{track['disc_number']}-{track['track_number'].zfill(2)}. {track['title']}.{fmt}"
             else:
@@ -133,11 +151,25 @@ async def start_khinsider(url, user):
             filename = filename.replace("/", "_").replace("\\", "_")
             filepath = f"{album_folder_path}/{filename}"
             
-            err = await download_file(dl_url, filepath)
-            if err: raise Exception(err)
+            # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
+            # Kita 'mencuri' User-Agent milik KhinsiderManager agar Aria2 tidak diblokir
+            headers_dict = {"User-Agent": khinsider_manager.headers["User-Agent"]}
+            details_aria = {'headers': headers_dict}
             
-            # --- FIX: Tanam Metadata + Cover ---
-            # Siapkan data meta per track untuk tagging
+            # Coba unduh dengan Aria2 (beri retries=1 agar cepat fallback kalau ditolak)
+            err = await download_file(dl_url, filepath, retries=1, details=details_aria)
+            
+            if err:
+                LOGGER.warning(f"Khinsider: Aria2 gagal/ditolak. Mengaktifkan AIOHTTP Turbo Fallback untuk {filename}")
+                async with aiohttp.ClientSession(headers=headers_dict) as session:
+                    async with session.get(dl_url) as r:
+                        r.raise_for_status()
+                        async with aiofiles.open(filepath, 'wb') as f:
+                            async for chunk in r.content.iter_chunked(256 * 1024):
+                                if chunk: await f.write(chunk)
+            # ----------------------------------------
+            
+            # 3. Tanam Tags
             track_meta_for_tag = {
                 'date': album_meta['date'],
                 'disc_number': track['disc_number'],
@@ -145,9 +177,8 @@ async def start_khinsider(url, user):
             }
             if cover_path:
                 await asyncio.to_thread(set_file_tags, filepath, track_meta_for_tag, cover_path, fmt)
-            # -----------------------------------
             
-            # --- FIX DURASI: Ambil durasi asli file ---
+            # 4. Ambil Durasi Asli
             duration = 0
             try:
                 if fmt == 'flac':
@@ -157,8 +188,7 @@ async def start_khinsider(url, user):
                     audio = MP3(filepath)
                     duration = int(audio.info.length)
             except Exception as e:
-                print(f"Gagal baca durasi {filename}: {e}")
-            # ------------------------------------------
+                LOGGER.error(f"Gagal baca durasi {filename}: {e}")
 
             meta = {
                 'title': track['title'],
@@ -171,56 +201,39 @@ async def start_khinsider(url, user):
                 'provider': 'Khinsider',
                 'type': 'album',
                 'quality': fmt.upper(),
-                'duration': duration # <-- Penting agar durasi tampil di Telegram
+                'duration': duration,
+                'extension': fmt
             }
             return meta
-        except Exception: return None
+        except Exception as e:
+            LOGGER.error(f"Khinsider track error: {e}")
+            return None
 
     tasks = [_process_track(t) for t in album_meta['tracks']]
     update_details = {
-        'msg': msg, 'title': album_meta['title'], 'type': 'album',
-        'text': "Downloading... {0} {1}/{2}\n{3} ({4})"
+        'msg': msg, 
+        'title': album_meta['title'], 
+        'type': 'Album',
+        'action': 'Download'
     }
     
-    results = await run_concurrent_tasks(tasks, update_details, limit=3) 
+    # Eksekusi dengan limit 4 agar aman dari limitasi server
+    results = await run_concurrent_tasks(tasks, update_details, limit=4) 
     successful_tracks = [r for r in results if r]
 
     if not successful_tracks:
-        await edit_message(msg, "Gagal mengunduh semua lagu.")
+        await edit_message(msg, "❌ Gagal mengunduh semua lagu Khinsider.")
         return
 
-    # 4. Upload
-    await edit_message(msg, "Memproses upload...")
+    album_data['tracks'] = successful_tracks
+
+    # 5. Upload
+    await edit_message(msg, "⚙️ Memproses upload...")
     
     _, album_zip, _, _ = await asyncio.to_thread(fetch_zip_settings, user)
-    zip_path = None
     if album_zip:
-        await edit_message(msg, "Mengompresi album ke ZIP...")
-        zip_path = await asyncio.to_thread(zip_folder, album_folder_path)
+        await edit_message(msg, "📦 Mengompresi album ke ZIP...")
+        album_data['zip_path'] = await asyncio.to_thread(zip_folder, album_folder_path)
     
-    # Bungkus Data Album Lengkap untuk Poster
-    album_data = {
-        'title': album_meta['title'],
-        'artist': 'Game Soundtrack',
-        'type': 'album',
-        'provider': 'Khinsider',
-        'tracks': successful_tracks,
-        'cover': cover_path,
-        'folderpath': album_folder_path,
-        'zip_path': zip_path,
-        
-        # --- Metadata Tambahan untuk Art Poster ---
-        'totaltracks': str(track_total),
-        'date': album_meta['date'],           # Year
-        'totalvolumes': album_meta['totalvolumes'],
-        'explicit': str(album_meta['explicit']), # False -> "False"
-        'quality': successful_tracks[0]['quality'] if successful_tracks else 'N/A'
-    }
-    
-    # Kirim Poster Manual
-    try:
-        await post_art_poster(user, album_data)
-    except Exception as e:
-        print(f"Gagal kirim poster: {e}")
-    
+    await edit_message(msg, "🚀 Mengunggah...")
     await album_upload(album_data, user)
