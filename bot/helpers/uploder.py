@@ -526,31 +526,35 @@ async def telegram_upload(track, user, batch_mode=False):
         raise e
 
 async def batch_telegram_upload(metadata, user):
+    import time, hashlib
     tracks_to_upload = []
+    
+    # --- [FIX UI] Buat SATU ID Cancel Master untuk seluruh album ---
+    batch_cancel_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:16]
+    # ---------------------------------------------------------------
     
     # 1. Kumpulkan semua track yang siap diunggah
     if metadata['type'] in ['album', 'playlist']:
         for track in metadata['tracks']:
             if track.get('filepath'):
+                track['task_id'] = batch_cancel_id # Sisipkan ID Master ke lagu
                 tracks_to_upload.append(track)
     elif metadata['type'] == 'artist':
         for album in metadata.get('albums', []):
             for track in album['tracks']:
                 if track.get('filepath'):
+                    track['task_id'] = batch_cancel_id # Sisipkan ID Master ke lagu
                     tracks_to_upload.append(track)
                     
     if not tracks_to_upload: return
 
     # --- [FIX UI] UPLOAD BERURUTAN (SEQUENTIAL) ---
-    # Mengunggah satu per satu akan menjamin 2 hal penting:
-    # 1. Urutan lagu (Track 1, 2, 3...) di Telegram akan berjejer rapi, tidak melompat-lompat.
-    # 2. Radar UI (bot_msg) hanya akan memperbarui 1 lagu dalam satu waktu, menghindari flicker/spam.
     for track in tracks_to_upload:
         try:
             await telegram_upload(track, user, batch_mode=True)
         except asyncio.CancelledError:
             LOGGER.info("Batch upload dibatalkan oleh pengguna.")
-            # Lempar ke sistem utama jika dibatalkan
+            # Lempar sinyal batal agar seluruh sisa antrean otomatis berhenti!
             raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         except FileNotFoundError:
             pass
