@@ -133,40 +133,51 @@ async def _process_track_worker(track_info, i, total, dl_dir, user, session, api
                             break
             except: pass
             
-            # --- Fallback 2: YT-DLP Terakhir ---
+            # --- Fallback 2 & 3: Mesin FFmpeg & YT-DLP Terakhir ---
             if not downloaded:
-                LOGGER.warning(f"Gaana: AIOHTTP gagal. Fallback terakhir ke YT-DLP...")
+                LOGGER.warning(f"Gaana: AIOHTTP gagal. Mendeteksi HLS Stream, mengeksekusi FFmpeg...")
                 if os.path.exists(file_path):
                     os.remove(file_path)
+                
+                # 1. Gunakan FFmpeg Langsung (Sangat stabil untuk M3U8/Live Stream HLS)
                 try:
-                    def run_ytdlp():
-                        ydl_opts = {
-                            'format': 'bestaudio/best', 
-                            'outtmpl': file_path, 
-                            'quiet': True,
-                            'http_headers': headers_dict,
-                            
-                            # --- [KUNCI 1] MENURUTI PERMINTAAN YT-DLP UNTUK LIVE HLS ---
-                            # Menggunakan FFmpeg sebagai mesin sedot utama untuk HLS
-                            'external_downloader': 'ffmpeg',
-                            'hls_use_mpegts': True,
-                            
-                            # --- [KUNCI 2] FFMPEG UNTUK MENJAHIT FORMAT M4A ---
-                            'postprocessors': [{
-                                'key': 'FFmpegExtractAudio',
-                                'preferredcodec': 'm4a',
-                            }],
-                        }
-                        with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-                        
-                    await asyncio.to_thread(run_ytdlp)
+                    ua = headers_dict.get('User-Agent', 'Mozilla/5.0')
+                    # FFmpeg akan menyedot stream dan menjahitnya ke M4A secara otomatis!
+                    cmd = f'ffmpeg -y -user_agent "{ua}" -i "{url}" -c copy "{file_path}"'
+                    process = await asyncio.create_subprocess_shell(
+                        cmd,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL
+                    )
+                    await process.communicate()
                     
                     if os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
                         downloaded = True
                         break
                 except Exception as e:
-                    LOGGER.error(f"YT-DLP Error: {e}")
+                    LOGGER.error(f"FFmpeg Error: {e}")
                     pass
+                
+                # 2. Jika FFmpeg masih gagal, gunakan YT-DLP mode Standar (Tanpa argumen aneh yang bikin crash)
+                if not downloaded:
+                    try:
+                        def run_ytdlp():
+                            ydl_opts = {
+                                'format': 'bestaudio/best', 
+                                'outtmpl': file_path, 
+                                'quiet': True,
+                                'http_headers': headers_dict,
+                            }
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
+                            
+                        await asyncio.to_thread(run_ytdlp)
+                        
+                        if os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
+                            downloaded = True
+                            break
+                    except Exception as e:
+                        LOGGER.error(f"YT-DLP Error: {e}")
+                        pass
 
     if not downloaded:
         LOGGER.error(f"Gagal mengunduh track {title}")
