@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import traceback
+import shutil
 import aiohttp
 import aiofiles
 import math 
@@ -128,8 +129,8 @@ async def process_track_metadata(track_data: dict, album_data: dict, user: dict)
         'artist': album_data.get('artistName'),
         'albumartist': album_data.get('artistName'),
         'album': album_data.get('containerInfo'),
-        'tracknumber': str(track_data.get('trackNum')),
-        'discnumber': str(track_data.get('discNum')),
+        'tracknumber': str(track_data.get('trackNum', 0)).zfill(2),
+        'discnumber': str(track_data.get('discNum', 1)).zfill(2),
         'volume': str(track_data.get('discNum')),
         'totaltracks': str(len(album_data.get('songs'))),
         'totaldiscs': str(album_data.get('numDiscs', 1)),
@@ -359,6 +360,16 @@ async def start_album(album_id: str, user: dict, upload=True):
         raise Exception(f"Tidak ada lagu Nugs yang berhasil diunduh untuk album {album_meta['title']}.")
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
+
+    # --- [FIX COVER DI DALAM ZIP] ---
+    # Salin file cover dari folder sementara ke folder album sebelum di-zip
+    if album_meta.get('cover') and os.path.exists(album_meta['cover']):
+        try:
+            cover_target = os.path.join(album_meta['folderpath'], "cover.jpg")
+            shutil.copy(album_meta['cover'], cover_target)
+        except Exception as e:
+            LOGGER.warning(f"Gagal menyalin cover ke folder ZIP: {e}")
+    # ---------------------------------
 
     if album_zip: 
         await edit_message(user['bot_msg'], f"Menyiapkan {successful_tracks_count} lagu menjadi .zip...")
