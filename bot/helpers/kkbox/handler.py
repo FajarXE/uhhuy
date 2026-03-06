@@ -290,4 +290,5 @@ async def start_playlist(playlist_id: str, user: dict):
         pl_meta['zip_path'] = await zip_handler(pl_meta['folderpath'])
 
     await edit_message(user['bot_msg'], lang.s.UPLOADING)
-    await album_upload(pl_meta, user)
+    # --- [FIX CAPTION] Panggil mesin playlist, bukan mesin album! ---
+    await playlist_upload(pl_meta, user)
