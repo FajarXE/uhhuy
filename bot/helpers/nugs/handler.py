@@ -1,4 +1,4 @@
-# [GANTI FILE: bot/helpers/nugs/handler.py]
+# [GANTI SELURUH FILE: bot/helpers/nugs/handler.py]
 
 import asyncio
 import os
@@ -20,7 +20,8 @@ from .utils import create_temp_filename
 from ..uploder import *
 from ..metadata import set_metadata, create_cover_file
 from ..message import edit_message
-from ..utils import fetch_zip_settings, run_concurrent_tasks, format_string, zip_handler
+# --- [PERBAIKAN IMPORT] Menambahkan download_file dan post_art_poster ---
+from ..utils import fetch_zip_settings, run_concurrent_tasks, format_string, zip_handler, download_file, post_art_poster
 from bot.logger import LOGGER
 import bot.helpers.translations as lang
 
@@ -41,8 +42,8 @@ QUALITY_MAP = {
     'MHA1': ("Sony 360RA", "m4a", 4)
 }
 
-PLAY_URL_REGEX = r'https?://play.nugs.net/#/(artist|catalog/recording|playlists/playlist)/(\d+)'
-API_URL_REGEX = r'https?://streamapi.nugs.net/show\.aspx\?show=(\d+)'
+PLAY_URL_REGEX = r'https?://play\.nugs\.net/#/(artist|catalog/recording|playlists/playlist)/(\d+)'
+API_URL_REGEX = r'https?://streamapi\.nugs\.net/show\.aspx\?show=(\d+)'
 
 
 def custom_url_parse(link: str):
@@ -80,7 +81,7 @@ async def parse_stream_format(stream_url: str):
     return None
 
 async def download_temp_header(file_url: str, user_agent: str) -> str | None:
-    """Mengunduh header file untuk analisis MQA."""
+    """Mengunduh header file untuk analisis MQA (Tetap menggunakan aiohttp karena hanya butuh 1MB)."""
     temp_location = await asyncio.to_thread(create_temp_filename, '.flac')
     try:
         headers = {'User-Agent': user_agent, 'Range': 'bytes=0-1048576'}
@@ -211,6 +212,7 @@ async def process_track_metadata(track_data: dict, album_data: dict, user: dict)
     
     return metadata
 
+# --- KINI MENGGUNAKAN FULL ARIA2 ENGINE ---
 async def start_track(track_meta: dict, user: dict, upload=True):
     """Handler untuk mengunduh satu track Nugs."""
     client = user['nugs_api']
@@ -230,27 +232,32 @@ async def start_track(track_meta: dict, user: dict, upload=True):
         user_agent = client.session.user_agent
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(download_url, headers={'User-Agent': user_agent}) as response:
-                response.raise_for_status()
-                async with aiofiles.open(track_meta['filepath'], "wb") as f:
-                    async for chunk in response.content.iter_chunked(8192):
-                        await f.write(chunk)
+        # Penyamaran Aria2 dengan User-Agent Aplikasi Nugs
+        headers_dict = {'User-Agent': user_agent}
+        details_aria = {'msg': None, 'headers': headers_dict} if not upload else {
+            'msg': user['bot_msg'], 'title': track_meta.get('title'), 'type': 'Track', 'headers': headers_dict
+        }
+
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            
+        # 1. Sedot langsung pakai Aria2!
+        err = await download_file(download_url, filepath, retries=1, details=details_aria)
+
+        if err or not os.path.exists(filepath) or os.path.getsize(filepath) < 10000:
+            LOGGER.error(f"Nugs: Aria2 gagal mengunduh {track_meta['itemid']}")
+            return False
 
     except Exception as e:
         LOGGER.error(f"Nugs dl_track gagal untuk {track_meta['itemid']}: {e}")
         return False
 
     try:
-        # --- MODIFIKASI PENTING: Kirim user_id ke set_metadata agar lirik diambil ---
         await set_metadata(track_meta, user['user_id'])
-        # --- BATAS MODIFIKASI ---
     except Exception as e:
         LOGGER.error(f"Gagal memproses metadata Nugs: {filepath} -> {e}")
-        try:
-            os.remove(filepath)
-        except:
-            pass
+        try: os.remove(filepath)
+        except: pass
         return False
 
     if upload:
@@ -343,7 +350,8 @@ async def start_album(album_id: str, user: dict, upload=True):
         'type': album_meta['type']
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    # --- [FIX] PARALEL MAX_WORKERS ---
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
     successful_tracks_count = sum(1 for result in task_results if result)
 
