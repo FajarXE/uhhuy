@@ -1,4 +1,4 @@
-# [GANTI FILE: bot/helpers/kkbox/handler.py]
+# [GANTI SELURUH FILE: bot/helpers/kkbox/handler.py]
 
 import aiohttp
 import aiofiles
@@ -22,7 +22,7 @@ from .manager import KKBoxError
 from ..uploder import *
 from ..metadata import set_metadata
 from ..message import edit_message
-from ..utils import fetch_zip_settings, run_concurrent_tasks, format_string, zip_handler
+from ..utils import fetch_zip_settings, run_concurrent_tasks, format_string, zip_handler, download_file
 from ...settings import bot_set 
 import bot.helpers.translations as lang
 from bot.logger import LOGGER
@@ -57,9 +57,7 @@ async def start_kkbox(url: str, user: dict):
         raise e 
 
 
-async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, \
-    filepath=None, disable_link=False):
-
+async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
     client = user['kkbox_api']
 
     if not track_meta:
@@ -110,19 +108,40 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        if format_key == 'mp3_128k_chromecast':
-            async with aiohttp.ClientSession() as session:
-                async with session.get(download_url) as response:
-                    response.raise_for_status()
-                    async with aiofiles.open(track_meta['filepath'], "wb") as f:
-                        async for chunk in response.content.iter_chunked(8192):
-                            await f.write(chunk)
-        else:
-            await asyncio.to_thread(
-                client.kkdrm_dl,
-                download_url,
-                track_meta['filepath']
-            )
+        # --- [FIX KECEPATAN] FULL ARIA2 + DEKRIPSI OTOMATIS ---
+        is_drm = format_key != 'mp3_128k_chromecast'
+        # File sementara untuk menampung data mentah ber-DRM
+        temp_filepath = track_meta['filepath'] + ".enc" if is_drm else track_meta['filepath']
+
+        # Inject penyamaran dari KKBox API
+        headers_dict = {'User-Agent': 'okhttp/3.14.9'}
+        details_aria = {'msg': None, 'headers': headers_dict} if not upload else {
+            'msg': user['bot_msg'], 'title': track_meta['title'], 'type': 'Track', 'headers': headers_dict
+        }
+
+        # 1. Aria2 menyedot file terenkripsi secara brutal
+        err = await download_file(download_url, temp_filepath, retries=1, details=details_aria)
+
+        if err or not os.path.exists(temp_filepath):
+            LOGGER.error(f"KKBox: Aria2 gagal mengunduh {track_meta['title']}")
+            return False
+
+        # 2. Mesin Dekripsi ARC4 Lokal (Menjahit DRM jadi lagu normal)
+        if is_drm:
+            def _decrypt_kkbox():
+                from Cryptodome.Cipher import ARC4
+                rc4 = ARC4.new(client.lic_content_key, drop=512)
+                with open(temp_filepath, 'rb') as f_in, open(track_meta['filepath'], 'wb') as f_out:
+                    f_in.seek(1024) # Melompati header 1024 bytes bawaan KKBox DRM
+                    while True:
+                        chunk = f_in.read(65536)
+                        if not chunk: break
+                        f_out.write(rc4.decrypt(chunk))
+                os.remove(temp_filepath) # Bersihkan file mentah
+
+            # Jalankan di background agar bot tidak lag
+            await asyncio.to_thread(_decrypt_kkbox)
+        # ----------------------------------------------------
 
     except Exception as e:
         LOGGER.error(f"KKBox dl_track gagal untuk {item_id}: {e}")
@@ -135,10 +154,8 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         return False
     except Exception as e:
         LOGGER.error(f"Gagal memproses metadata KKBox: {filepath} -> {e}")
-        try:
-            os.remove(filepath)
-        except:
-            pass
+        try: os.remove(filepath)
+        except: pass
         return False
 
     if upload:
@@ -157,7 +174,6 @@ async def start_album(album_id: str, user: dict, upload=True):
     album_folder = sanitize_filepath(album_folder)
     album_meta['folderpath'] = album_folder
     
-    # Buat folder
     os.makedirs(album_folder, exist_ok=True)
 
     if upload:
@@ -174,7 +190,8 @@ async def start_album(album_id: str, user: dict, upload=True):
         'type': album_meta['type']
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    # --- [FIX PARALEL] Menggunakan MAX_WORKERS ---
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
     successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
     album_meta['tracks'] = successful_tracks
@@ -185,28 +202,18 @@ async def start_album(album_id: str, user: dict, upload=True):
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
-    # --- PERBAIKAN: SIMPAN COVER KE FOLDER ZIP (ALBUM) ---
     if album_meta.get('cover'):
         try:
             cover_path = os.path.join(album_folder, "cover.jpg")
-            
-            # 1. Cek jika URL (http/https)
             if album_meta['cover'].startswith('http'):
                  async with aiohttp.ClientSession() as session:
                     async with session.get(album_meta['cover']) as resp:
                         if resp.status == 200:
                             async with aiofiles.open(cover_path, mode='wb') as f:
                                 await f.write(await resp.read())
-                            LOGGER.info(f"KKBox: Cover album diunduh ke {cover_path}")
-            
-            # 2. Cek jika File Lokal (path) - INI YANG SEBELUMNYA HILANG
             elif os.path.exists(album_meta['cover']):
                 await asyncio.to_thread(shutil.copy, album_meta['cover'], cover_path)
-                LOGGER.info(f"KKBox: Cover album lokal disalin ke {cover_path}")
-                
-        except Exception as e:
-            LOGGER.warning(f"KKBox: Gagal menyimpan cover album ke folder zip: {e}")
-    # -----------------------------------------------------
+        except Exception: pass
 
     if album_zip: 
         await edit_message(user['bot_msg'], f"Menyiapkan {album_meta['totaltracks']} lagu menjadi .zip...")
@@ -217,9 +224,6 @@ async def start_album(album_id: str, user: dict, upload=True):
         await album_upload(album_meta, user)
 
 async def start_playlist(playlist_id: str, user: dict):
-    """
-    Handler untuk unduhan playlist KKBox.
-    """
     try:
         pl_meta = await process_playlist_metadata(playlist_id, user['r_id'], user)
     except Exception as e:
@@ -233,29 +237,17 @@ async def start_playlist(playlist_id: str, user: dict):
 
     siesta_cover = getattr(Config, 'PROJECT_SIESTA_COVER', None)
     
-    if siesta_cover:
-        pl_meta['cover'] = siesta_cover
-        LOGGER.info(f"KKBox: Menggunakan cover Project-Siesta dari Config: {siesta_cover}")
-    elif os.path.exists("assets/project-siesta.png"):
-        pl_meta['cover'] = os.path.abspath("assets/project-siesta.png")
-        LOGGER.info(f"KKBox: Menggunakan cover Project-Siesta (PNG) lokal: {pl_meta['cover']}")
-    elif os.path.exists("assets/project-siesta.jpg"):
-        pl_meta['cover'] = os.path.abspath("assets/project-siesta.jpg")
-        LOGGER.info(f"KKBox: Menggunakan cover Project-Siesta (JPG) lokal: {pl_meta['cover']}")
+    if siesta_cover: pl_meta['cover'] = siesta_cover
+    elif os.path.exists("assets/project-siesta.png"): pl_meta['cover'] = os.path.abspath("assets/project-siesta.png")
+    elif os.path.exists("assets/project-siesta.jpg"): pl_meta['cover'] = os.path.abspath("assets/project-siesta.jpg")
     elif not pl_meta.get('cover'):
         if pl_meta.get('tracks') and len(pl_meta['tracks']) > 0:
             fallback = pl_meta['tracks'][0].get('cover')
-            if fallback:
-                pl_meta['cover'] = fallback
-                LOGGER.info("KKBox: Tidak ada Project-Siesta, menggunakan cover track pertama.")
+            if fallback: pl_meta['cover'] = fallback
 
     if pl_meta.get('cover'):
-        try:
-            pl_meta['poster_msg'] = await post_art_poster(user, pl_meta)
-        except Exception as e:
-             LOGGER.warning(f"KKBox: Gagal mengirim art poster playlist: {e}")
-    else:
-        LOGGER.warning(f"KKBox: Playlist '{pl_meta['title']}' tidak memiliki cover valid. Melewati poster.")
+        try: pl_meta['poster_msg'] = await post_art_poster(user, pl_meta)
+        except Exception: pass
 
     tasks = []
     for track in pl_meta['tracks']:
@@ -268,7 +260,8 @@ async def start_playlist(playlist_id: str, user: dict):
         'type': 'playlist' 
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    # --- [FIX PARALEL] Menggunakan MAX_WORKERS ---
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
     successful_tracks = [pl_meta['tracks'][i] for i, result in enumerate(task_results) if result]
     pl_meta['tracks'] = successful_tracks
@@ -279,26 +272,18 @@ async def start_playlist(playlist_id: str, user: dict):
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
-    # --- PERBAIKAN: SIMPAN COVER KE FOLDER ZIP (PLAYLIST) ---
     if pl_meta.get('cover'):
         try:
             cover_path = os.path.join(pl_folder, "cover.jpg")
-            
             if pl_meta['cover'].startswith('http'):
                  async with aiohttp.ClientSession() as session:
                     async with session.get(pl_meta['cover']) as resp:
                         if resp.status == 200:
                             async with aiofiles.open(cover_path, mode='wb') as f:
                                 await f.write(await resp.read())
-                            LOGGER.info(f"KKBox: Cover playlist diunduh ke {cover_path}")
-            
             elif os.path.exists(pl_meta['cover']):
                 await asyncio.to_thread(shutil.copy, pl_meta['cover'], cover_path)
-                LOGGER.info(f"KKBox: Cover lokal disalin ke {cover_path}")
-                
-        except Exception as e:
-            LOGGER.warning(f"KKBox: Gagal menyimpan cover ke folder zip: {e}")
-    # -----------------------------------------------------
+        except Exception: pass
 
     if playlist_zip: 
         await edit_message(user['bot_msg'], f"Menyiapkan {pl_meta['totaltracks']} lagu menjadi .zip...")
