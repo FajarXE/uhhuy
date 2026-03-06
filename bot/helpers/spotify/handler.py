@@ -9,14 +9,20 @@ from pyrogram.errors import MessageNotModified
 
 # Import internal bot modules
 from config import Config
-from bot.helpers.utils import format_string, create_simple_text, post_art_poster, fetch_zip_settings, run_concurrent_tasks
+from bot.helpers.utils import format_string, post_art_poster, fetch_zip_settings
 from bot.helpers.message import edit_message, send_message
-from bot.helpers.uploder import track_upload, album_upload, playlist_upload, artist_upload, zip_handler
+from bot.helpers.uploder import track_upload, album_upload, playlist_upload, zip_handler
 from bot.helpers.metadata import set_metadata, create_cover_file 
 from bot.helpers.spotify.manager import spotify_manager
 import bot.helpers.translations as lang
 
 LOGGER = logging.getLogger("SpotifyHandler")
+
+def make_progress_bar(current, total):
+    if total == 0: return "▱" * 10
+    percentage = current / total
+    filled_length = int(10 * percentage)
+    return "▰" * filled_length + "▱" * (10 - filled_length)
 
 async def start_spotify(link: str, user: dict):
     client = spotify_manager.get_client()
@@ -129,6 +135,7 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False, custom_genre
         
     return meta
 
+
 async def process_track(client, track_id, user, is_episode=False):
     msg = user.get('bot_msg')
     await edit_message(msg, f"⬇️ **Spotify:** Mengunduh {'Episode' if is_episode else 'Lagu'}...")
@@ -187,70 +194,6 @@ async def process_track(client, track_id, user, is_episode=False):
     except Exception as e:
         raise e
 
-# --- HELPER WORKER PARALEL UNTUK SPOTIFY ---
-async def process_single_track(client, track, user, parent_info, user_folder, custom_genre, is_playlist, upload_per_track):
-    try:
-        if not track or not track.id: return None
-        
-        # Jeda anti-ban khusus Spotify
-        await asyncio.sleep(random.uniform(1.0, 3.5))
-        
-        download_result = await asyncio.to_thread(client.get_track_download, track_id=track.id, quality_tier="HIGH")
-        if not download_result or not download_result.temp_file_path: return None
-
-        full_track_info = None
-        try:
-            full_track_info = await asyncio.to_thread(client.get_track_info, track.id, "HIGH", None)
-        except: pass
-
-        target_info = full_track_info if full_track_info else track
-        
-        if not is_playlist and track.tags and target_info.tags:
-            target_info.tags.track_number = track.tags.track_number
-            target_info.tags.disc_number = track.tags.disc_number
-            target_info.tags.total_tracks = track.tags.total_tracks
-
-        meta = map_spotify_to_bot_metadata(target_info, user, custom_genre=custom_genre)
-        
-        if not is_playlist:
-            meta['totaltracks'] = str(len(parent_info.tracks))
-            meta['album'] = parent_info.name
-            meta['cover'] = parent_info.all_track_cover_jpg_url
-            clean_title = meta['title'].replace("/", "_")
-            track_str = str(meta['tracknumber']).zfill(2)
-            filename = f"{track_str} - {clean_title}.ogg"
-        else:
-            clean_artist = meta['artist'].replace("/", "_")
-            clean_title = meta['title'].replace("/", "_")
-            track_str = str(meta['tracknumber']).zfill(2)
-            filename = f"{track_str} - {clean_artist} - {clean_title}.ogg"
-            
-        final_path = os.path.join(user_folder, filename)
-        shutil.move(download_result.temp_file_path, final_path)
-        
-        meta['filepath'] = final_path
-        meta['folderpath'] = user_folder
-        
-        if os.path.exists(final_path) and os.path.getsize(final_path) > 1024:
-            thumb_source = parent_info.all_track_cover_jpg_url if not is_playlist else (meta.get('cover') or parent_info.cover_url)
-            if thumb_source:
-                t_path = await create_cover_file(thumb_source, meta, thumbnail=True)
-                meta['thumbnail'] = t_path
-            
-            user_id_val = user.get('user_id') or user.get('id')
-            await set_metadata(meta, user_id_val)
-            
-            if upload_per_track:
-                await track_upload(meta, user)
-                
-            return meta
-        else:
-            try: os.remove(final_path)
-            except: pass
-            return None
-    except Exception as e:
-        LOGGER.error(f"Skip Spotify track: {e}")
-        return None
 
 async def process_album(client, album_id, user):
     msg = user.get('bot_msg')
@@ -303,24 +246,83 @@ async def process_album(client, album_id, user):
     meta_album['folderpath'] = user_folder
 
     upload_per_track = not album_zip
-    tasks = []
+    processed_tracks = []
 
-    # --- [FIX PARALEL] Menggunakan MAX_WORKERS ---
-    for track in tracks:
-        tasks.append(process_single_track(
-            client, track, user, album_info, user_folder, album_genre, 
-            is_playlist=False, upload_per_track=upload_per_track
-        ))
+    # --- [KEMBALI KE MODE SERIAL (BERURUTAN)] ---
+    # Librespot tidak bisa download paralel dalam 1 TCP session!
+    for i, track in enumerate(tracks):
+        try:
+            current_num = i + 1
+            prog_bar = make_progress_bar(current_num, total)
+            display_title = track.name[:25] + "..." if len(track.name) > 25 else track.name
+            
+            status_text = (
+                f"**╭─ ᴘʀᴏɢʀᴇss**\n"
+                f"**│**\n"
+                f"**├** {prog_bar}\n"
+                f"**│**\n"
+                f"**├ ᴅᴏɴᴇ :** {current_num} / {total}\n"
+                f"**│**\n"
+                f"**├ ᴛɪᴛʟᴇ :** {display_title}\n"
+                f"**│**\n"
+                f"**╰─ ᴛʏᴘᴇ :** Album"
+            )
+            await edit_message(msg, status_text)
+            
+            # Anti-ban Jeda antar lagu (Penting untuk Spotify!)
+            if i > 0: await asyncio.sleep(random.uniform(1.5, 3.5))
+            
+            download_result = await asyncio.to_thread(client.get_track_download, track_id=track.id, quality_tier="HIGH")
+            
+            if download_result and download_result.temp_file_path:
+                full_track_info = None
+                try:
+                    full_track_info = await asyncio.to_thread(client.get_track_info, track.id, "HIGH", None)
+                except Exception: pass
 
-    update_details = {
-        'text': lang.s.DOWNLOAD_PROGRESS,
-        'msg': msg, 
-        'title': album_info.name, 
-        'type': 'Album'
-    }
-    
-    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
-    processed_tracks = [res for res in task_results if isinstance(res, dict)]
+                target_track = full_track_info if full_track_info else track
+                
+                if track.tags and target_track.tags:
+                    target_track.tags.track_number = track.tags.track_number
+                    target_track.tags.disc_number = track.tags.disc_number
+                    target_track.tags.total_tracks = track.tags.total_tracks
+                
+                meta = map_spotify_to_bot_metadata(target_track, user, custom_genre=album_genre)
+                meta['totaltracks'] = str(total)
+                meta['album'] = album_info.name 
+                
+                clean_title = meta['title'].replace("/", "_")
+                track_str = str(meta['tracknumber']).zfill(2)
+                filename = f"{track_str} - {clean_title}.ogg"
+                
+                final_path = os.path.join(user_folder, filename)
+                shutil.move(download_result.temp_file_path, final_path)
+                
+                meta['filepath'] = final_path
+                meta['folderpath'] = user_folder
+                meta['cover'] = album_info.all_track_cover_jpg_url
+                
+                if os.path.exists(final_path) and os.path.getsize(final_path) > 1024:
+                    if meta_album.get('thumbnail'):
+                        meta['thumbnail'] = meta_album['thumbnail']
+                    else:
+                        t_path = await create_cover_file(meta['cover'], meta, thumbnail=True)
+                        meta['thumbnail'] = t_path
+                    
+                    user_id_val = user.get('user_id') or user.get('id')
+                    await set_metadata(meta, user_id_val)
+                    
+                    processed_tracks.append(meta)
+
+                    if upload_per_track:
+                        await track_upload(meta, user)
+                else:
+                    try: os.remove(final_path)
+                    except: pass
+                
+        except Exception as e:
+            LOGGER.error(f"Gagal download track {track.name}: {e}")
+            continue
 
     if not processed_tracks: raise Exception("Gagal mengunduh semua lagu dalam album.")
     meta_album['tracks'] = processed_tracks
@@ -390,24 +392,74 @@ async def process_playlist(client, playlist_id, user):
     meta_playlist['folderpath'] = user_folder
 
     upload_per_track = not playlist_zip
-    tasks = []
+    processed_tracks = []
 
-    # --- [FIX PARALEL] Menggunakan MAX_WORKERS ---
-    for track in tracks:
-        tasks.append(process_single_track(
-            client, track, user, playlist_info, user_folder, None, 
-            is_playlist=True, upload_per_track=upload_per_track
-        ))
+    # --- [KEMBALI KE MODE SERIAL (BERURUTAN)] ---
+    for i, track in enumerate(tracks):
+        try:
+            if not track or not track.id: continue
+            
+            current_num = i + 1
+            prog_bar = make_progress_bar(current_num, total)
+            display_title = track.name[:25] + "..." if len(track.name) > 25 else track.name
+            
+            status_text = (
+                f"**╭─ ᴘʀᴏɢʀᴇss**\n"
+                f"**│**\n"
+                f"**├** {prog_bar}\n"
+                f"**│**\n"
+                f"**├ ᴅᴏɴᴇ :** {current_num} / {total}\n"
+                f"**│**\n"
+                f"**├ ᴛɪᴛʟᴇ :** {display_title}\n"
+                f"**│**\n"
+                f"**╰─ ᴛʏᴘᴇ :** Playlist"
+            )
+            await edit_message(msg, status_text)
+            
+            if i > 0: await asyncio.sleep(random.uniform(1.5, 3.5))
 
-    update_details = {
-        'text': lang.s.DOWNLOAD_PROGRESS,
-        'msg': msg, 
-        'title': playlist_info.name, 
-        'type': 'Playlist'
-    }
-    
-    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
-    processed_tracks = [res for res in task_results if isinstance(res, dict)]
+            download_result = await asyncio.to_thread(client.get_track_download, track_id=track.id, quality_tier="HIGH")
+            
+            if download_result and download_result.temp_file_path:
+                full_track_info = None
+                try:
+                    full_track_info = await asyncio.to_thread(client.get_track_info, track.id, "HIGH", None)
+                except Exception: pass
+
+                target_track = full_track_info if full_track_info else track
+                meta = map_spotify_to_bot_metadata(target_track, user)
+                
+                clean_artist = meta['artist'].replace("/", "_")
+                clean_title = meta['title'].replace("/", "_")
+                track_str = str(meta['tracknumber']).zfill(2)
+                filename = f"{track_str} - {clean_artist} - {clean_title}.ogg"
+                
+                final_path = os.path.join(user_folder, filename)
+                shutil.move(download_result.temp_file_path, final_path)
+                
+                meta['filepath'] = final_path
+                meta['folderpath'] = user_folder
+                
+                if os.path.exists(final_path) and os.path.getsize(final_path) > 1024:
+                    thumb_source = meta.get('cover') or playlist_info.cover_url
+                    if thumb_source:
+                        t_path = await create_cover_file(thumb_source, meta, thumbnail=True)
+                        meta['thumbnail'] = t_path
+                    
+                    user_id_val = user.get('user_id') or user.get('id')
+                    await set_metadata(meta, user_id_val)
+                    
+                    processed_tracks.append(meta)
+
+                    if upload_per_track:
+                        await track_upload(meta, user)
+                else:
+                    try: os.remove(final_path)
+                    except: pass
+
+        except Exception as e:
+            LOGGER.error(f"Skip track playlist ({i}): {e}")
+            continue
 
     if not processed_tracks: raise Exception("Gagal mengunduh isi playlist (Semua lagu gagal).")
     meta_playlist['tracks'] = processed_tracks
