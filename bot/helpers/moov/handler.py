@@ -112,9 +112,10 @@ async def start_album(album_id, user, upload=True, filter_track_id=None):
 
     if upload and not filter_track_id:
         try:
-            asyncio.create_task(post_art_poster(user, album_meta))
+            # [FIX CAPTION] Tunggu dan simpan posternya ke dalam metadata!
+            album_meta['poster_msg'] = await post_art_poster(user, album_meta)
         except Exception as e:
-            LOGGER.error(f"Poster Error (Ignored): {e}")
+            LOGGER.error(f"Poster Error: {e}")
 
     tasks = []
     for track in album_meta['tracks']:
@@ -243,7 +244,8 @@ async def start_playlist(pid, user):
     pl_meta['folderpath'] = pl_folder
 
     try:
-        asyncio.create_task(post_art_poster(user, pl_meta))
+        # [FIX CAPTION] Tunggu dan simpan posternya ke dalam metadata!
+        pl_meta['poster_msg'] = await post_art_poster(user, pl_meta)
     except: pass
 
     album_cache = {} 
