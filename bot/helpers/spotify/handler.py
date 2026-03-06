@@ -339,17 +339,24 @@ async def process_album(client, album_id, user):
     
     if album_zip:
         await edit_message(user['bot_msg'], f"🗜️ **Zipping:** Menyiapkan {len(processed_tracks)} lagu...")
-        thumb_url = getattr(album_info, 'small_cover_url', None) or meta_album.get('cover')
         
-        if thumb_url:
+        # --- [FIX CRASH UPLOAD] Pastikan Cover menjadi path lokal, bukan URL ---
+        thumb_url = getattr(album_info, 'small_cover_url', None) or meta_album.get('cover')
+        if thumb_url and str(thumb_url).startswith('http'):
              zip_thumb_path = await create_cover_file(thumb_url, meta_album, thumbnail=True)
-             meta_album['thumbnail'] = zip_thumb_path
+             meta_album['thumbnail'] = zip_thumb_path if zip_thumb_path and os.path.exists(zip_thumb_path) else None
              
-        if meta_album.get('cover'):
+        if meta_album.get('cover') and str(meta_album['cover']).startswith('http'):
              try:
                  large_cover = await create_cover_file(meta_album['cover'], meta_album, thumbnail=False)
-                 shutil.copy(large_cover, os.path.join(user_folder, "cover.jpg"))
-             except: pass
+                 if large_cover and os.path.exists(large_cover):
+                     shutil.copy(large_cover, os.path.join(user_folder, "cover.jpg"))
+                     meta_album['cover'] = large_cover
+                 else:
+                     meta_album['cover'] = None
+             except: 
+                 meta_album['cover'] = None
+        # ------------------------------------------------------------------------
 
         zip_path = await zip_handler(user_folder)
         meta_album['zip_path'] = zip_path
@@ -426,16 +433,24 @@ async def process_playlist(client, playlist_id, user):
     
     if playlist_zip:
         await edit_message(user['bot_msg'], f"🗜️ **Zipping:** Menyiapkan {len(processed_tracks)} lagu...")
+        
+        # --- [FIX CRASH UPLOAD] Pastikan Cover menjadi path lokal, bukan URL ---
         thumb_url = getattr(playlist_info, 'small_cover_url', None) or meta_playlist.get('cover')
-        if thumb_url:
+        if thumb_url and str(thumb_url).startswith('http'):
              zip_thumb_path = await create_cover_file(thumb_url, meta_playlist, thumbnail=True)
-             meta_playlist['thumbnail'] = zip_thumb_path
+             meta_playlist['thumbnail'] = zip_thumb_path if zip_thumb_path and os.path.exists(zip_thumb_path) else None
              
-        if meta_playlist.get('cover'):
+        if meta_playlist.get('cover') and str(meta_playlist['cover']).startswith('http'):
              try:
                  large_cover = await create_cover_file(meta_playlist['cover'], meta_playlist, thumbnail=False)
-                 shutil.copy(large_cover, os.path.join(user_folder, "cover.jpg"))
-             except: pass
+                 if large_cover and os.path.exists(large_cover):
+                     shutil.copy(large_cover, os.path.join(user_folder, "cover.jpg"))
+                     meta_playlist['cover'] = large_cover
+                 else:
+                     meta_playlist['cover'] = None
+             except: 
+                 meta_playlist['cover'] = None
+        # ------------------------------------------------------------------------
 
         zip_path = await zip_handler(user_folder)
         meta_playlist['zip_path'] = zip_path
