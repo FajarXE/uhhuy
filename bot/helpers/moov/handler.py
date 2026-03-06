@@ -1,4 +1,4 @@
-# [GANTI FILE: bot/helpers/moov/handler.py]
+# [GANTI SELURUH FILE: bot/helpers/moov/handler.py]
 
 import os
 import re
@@ -17,7 +17,7 @@ from .metadata import process_album_metadata, process_playlist_metadata, process
 from ..uploder import album_upload, playlist_upload
 from ..utils import (
     format_string, run_concurrent_tasks, zip_handler, 
-    fetch_zip_settings, post_art_poster
+    fetch_zip_settings, post_art_poster, download_file
 )
 
 SECRET_SALT = "F4:8E:09:CE:54:F7SeCrEtKkK"
@@ -118,8 +118,8 @@ async def start_album(album_id, user, upload=True, filter_track_id=None):
 
     tasks = []
     for track in album_meta['tracks']:
-        # [SETTING] ALBUM & TRACK = TURBO MODE (TRUE)
-        tasks.append(download_track(track, user, album_folder, turbo_mode=True))
+        # [FIX] Hapus turbo_mode karena sekarang menggunakan Aria2 murni
+        tasks.append(download_track(track, user, album_folder))
 
     dl_type = 'Single Track' if filter_track_id else 'Album'
     
@@ -142,7 +142,8 @@ async def start_album(album_id, user, upload=True, filter_track_id=None):
         'type': dl_type
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    # [FIX] Pasang MAX_WORKERS agar rapi
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     successful_tracks = [res for res in task_results if isinstance(res, dict) and res.get('filepath')]
     
     album_meta['tracks'] = successful_tracks
@@ -221,8 +222,8 @@ async def enrich_and_download_chart_track(shallow_track_meta, user, folderpath, 
             if album_meta_full.get('ean'): deep_meta['ean'] = album_meta_full.get('ean')
 
     deep_meta['folderpath'] = folderpath
-    # [SETTING] PLAYLIST = DEFAULT MODE (FALSE) AGAR AMAN
-    return await download_track(deep_meta, user, folderpath, turbo_mode=False)
+    # [FIX] Hapus turbo_mode, otomatis menggunakan Aria2
+    return await download_track(deep_meta, user, folderpath)
 
 async def start_playlist(pid, user):
     client = user['moov_api']
@@ -270,7 +271,8 @@ async def start_playlist(pid, user):
         'type': 'Playlist'
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    # [FIX] Pasang MAX_WORKERS agar rapi
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     successful_tracks = [res for res in task_results if isinstance(res, dict) and res.get('filepath')]
     
     pl_meta['tracks'] = successful_tracks
@@ -382,26 +384,8 @@ async def apply_mutagen_tags(filepath, meta, cover_path, lyrics=None):
         LOGGER.error(f"Mutagen Error: {e}")
         return 0
 
-# --- TURBO WORKER (Untuk Album/Track) ---
-async def download_segment_worker(session, url, path, semaphore):
-    async with semaphore:
-        for attempt in range(5): 
-            try:
-                timeout = aiohttp.ClientTimeout(total=45) 
-                async with session.get(url, timeout=timeout) as resp:
-                    if resp.status == 200:
-                        data = await resp.read()
-                        async with aiofiles.open(path, 'wb') as f:
-                            await f.write(data)
-                        return True
-                    else:
-                        pass
-            except Exception: pass
-            await asyncio.sleep(1 + (attempt * 0.5))
-        return False
-
 # --- HYBRID DOWNLOADER ---
-async def download_track(track_meta, user, folderpath, turbo_mode=False):
+async def download_track(track_meta, user, folderpath):
     meta = track_meta.copy()
     client = user['moov_api']
     
@@ -505,48 +489,30 @@ async def download_track(track_meta, user, folderpath, turbo_mode=False):
         remote_segments = [line.strip() for line in m3u8_content.splitlines() if line and not line.startswith('#')]
         local_segment_names = []
         
-        # STEP 4: HYBRID SEGMENT DOWNLOADER
-        if turbo_mode:
-            # --- TURBO MODE (ALBUM/TRACK) ---
-            # Menggunakan 16 koneksi paralel
-            semaphore = asyncio.Semaphore(16) 
-            seg_tasks = []
+        # --- STEP 4: ARIA2 HYBRID SEGMENT DOWNLOADER ---
+        # Menggantikan aiohttp usang dengan kekuatan penuh Aria2 secara paralel!
+        semaphore = asyncio.Semaphore(16)
+        seg_tasks = []
+        
+        async def aria2_segment_worker(url, path, headers_dict, sem):
+            async with sem:
+                details_aria = {'msg': None, 'headers': headers_dict}
+                err = await download_file(url, path, retries=2, details=details_aria)
+                return not err and os.path.exists(path)
+
+        for index, seg_url in enumerate(remote_segments):
+            seg_name = f"seg_{index:04d}.flac"
+            seg_path = os.path.join(track_temp_dir, seg_name)
+            local_segment_names.append(seg_name)
+            seg_tasks.append(aria2_segment_worker(seg_url, seg_path, hls_headers, semaphore))
             
-            for index, seg_url in enumerate(remote_segments):
-                seg_name = f"seg_{index:04d}.flac"
-                seg_path = os.path.join(track_temp_dir, seg_name)
-                local_segment_names.append(seg_name)
-                seg_tasks.append(download_segment_worker(client.session, seg_url, seg_path, semaphore))
-            
-            seg_results = await asyncio.gather(*seg_tasks)
-            if not all(seg_results):
-                LOGGER.error(f"Turbo Mode: Gagal mengunduh beberapa segmen.")
-                shutil.rmtree(track_temp_dir)
-                return False
-        else:
-            # --- DEFAULT MODE (PLAYLIST) ---
-            # Mengunduh SATU PER SATU (Sequential) agar aman dari ban
-            for index, seg_url in enumerate(remote_segments):
-                seg_name = f"seg_{index:04d}.flac"
-                seg_path = os.path.join(track_temp_dir, seg_name)
-                local_segment_names.append(seg_name)
-                
-                success = False
-                for _ in range(3): # Retry 3x
-                    try:
-                        async with client.session.get(seg_url) as seg_resp:
-                            if seg_resp.status == 200:
-                                data = await seg_resp.read()
-                                async with aiofiles.open(seg_path, 'wb') as f:
-                                    await f.write(data)
-                                success = True
-                                break
-                    except: await asyncio.sleep(0.5)
-                
-                if not success:
-                    LOGGER.error(f"Default Mode: Gagal segmen {index}.")
-                    shutil.rmtree(track_temp_dir)
-                    return False
+        seg_results = await asyncio.gather(*seg_tasks)
+        
+        if not all(seg_results):
+            LOGGER.error("Moov Aria2 Hybrid Mode: Gagal mengunduh beberapa segmen.")
+            shutil.rmtree(track_temp_dir)
+            return False
+        # -----------------------------------------------
 
         # Local M3U8 Gen
         local_m3u8_path = os.path.join(track_temp_dir, "local.m3u8")
@@ -565,7 +531,7 @@ async def download_track(track_meta, user, folderpath, turbo_mode=False):
                 await f.write(f"{seg_name}\n")
             await f.write("#EXT-X-ENDLIST\n")
 
-        # STEP 5: FFmpeg Optimized
+        # STEP 5: FFmpeg Optimized (Menjahit segmen hasil Aria2)
         cmd = [
             'ffmpeg', '-y',
             '-allowed_extensions', 'ALL',
