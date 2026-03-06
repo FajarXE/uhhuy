@@ -489,30 +489,40 @@ async def download_track(track_meta, user, folderpath):
         remote_segments = [line.strip() for line in m3u8_content.splitlines() if line and not line.startswith('#')]
         local_segment_names = []
         
-        # --- STEP 4: ARIA2 HYBRID SEGMENT DOWNLOADER ---
-        # Menggantikan aiohttp usang dengan kekuatan penuh Aria2 secara paralel!
-        semaphore = asyncio.Semaphore(16)
+        # --- STEP 4: AIOHTTP TURBO ENGINE (SUPER CEPAT UNTUK HLS) ---
+        # Kita membuang Aria2 karena overhead RPC-nya membuat unduhan HLS menjadi sangat lambat.
+        # Sebagai gantinya, kita gunakan 32 koneksi Python murni untuk menyedot pecahan lagu sekaligus!
+        semaphore = asyncio.Semaphore(32)
         seg_tasks = []
         
-        async def aria2_segment_worker(url, path, headers_dict, sem):
+        async def turbo_segment_worker(url, path, headers_dict, sem):
             async with sem:
-                details_aria = {'msg': None, 'headers': headers_dict}
-                err = await download_file(url, path, retries=2, details=details_aria)
-                return not err and os.path.exists(path)
+                for attempt in range(4): # Coba ulang hingga 4x jika gagal
+                    try:
+                        async with client.session.get(url, headers=headers_dict, timeout=30) as resp:
+                            if resp.status == 200:
+                                data = await resp.read()
+                                async with aiofiles.open(path, 'wb') as f:
+                                    await f.write(data)
+                                return True
+                    except:
+                        pass
+                    await asyncio.sleep(0.5) # Jeda sedikit sebelum mencoba lagi
+                return False
 
         for index, seg_url in enumerate(remote_segments):
             seg_name = f"seg_{index:04d}.flac"
             seg_path = os.path.join(track_temp_dir, seg_name)
             local_segment_names.append(seg_name)
-            seg_tasks.append(aria2_segment_worker(seg_url, seg_path, hls_headers, semaphore))
+            seg_tasks.append(turbo_segment_worker(seg_url, seg_path, hls_headers, semaphore))
             
         seg_results = await asyncio.gather(*seg_tasks)
         
         if not all(seg_results):
-            LOGGER.error("Moov Aria2 Hybrid Mode: Gagal mengunduh beberapa segmen.")
+            LOGGER.error("Moov Turbo Mode: Gagal mengunduh beberapa segmen.")
             shutil.rmtree(track_temp_dir)
             return False
-        # -----------------------------------------------
+        # ------------------------------------------------------------
 
         # Local M3U8 Gen
         local_m3u8_path = os.path.join(track_temp_dir, "local.m3u8")
