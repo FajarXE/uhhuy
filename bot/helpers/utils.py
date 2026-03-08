@@ -25,8 +25,60 @@ from .buttons.links import links_button
 from .message import send_message, edit_message
 from .aria2_helper import aria2_download
 
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
 GLOBAL_CANCEL_DICT = set()
 GLOBAL_TASKS = {}
+
+def get_status_text(page=1, limit=5):
+    current_time = time.time()
+    stale = [k for k, v in GLOBAL_TASKS.items() if current_time - v.get('timestamp', current_time) > 120]
+    for k in stale:
+        GLOBAL_TASKS.pop(k, None)
+
+    tasks = list(GLOBAL_TASKS.values())
+    if not tasks:
+        return "💤 **Tidak ada task yang sedang berjalan saat ini.**", None
+
+    total_tasks = len(tasks)
+    max_pages = (total_tasks + limit - 1) // limit
+    if page > max_pages: page = max_pages
+    if page < 1: page = 1
+
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+    tasks_page = tasks[start_idx:end_idx]
+
+    text = f"**📊 GLOBAL STATUS (Page {page}/{max_pages})**\n\n"
+    for i, t in enumerate(tasks_page, start=start_idx + 1):
+        text += f"**{i:02d}. {t['action']} {t['type']}**: `{t['title']}`\n"
+        text += f"**Since**: {t['since']}\n\n"
+        text += f"**Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
+        text += f"**{t['processed_label']}**: {t['processed']}\n"
+        text += f"**Current_Speed**: {t['speed']}\n"
+        text += f"**Machine_type**: {t['machine']}\n"
+        text += f"**Destination_mode**: {t['mode']}\n"
+        text += f"**Cancel**: /cancel_{t['cancel_id']}\n\n"
+        text += f"🔻 {t['dl_speed']} | 🔺 {t['ul_speed']}\n"
+        if i < end_idx and i < total_tasks:
+            text += "➖➖➖➖➖➖➖➖➖➖➖➖\n\n"
+
+    buttons = []
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"status_page_{page-1}"))
+    if page < max_pages:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"status_page_{page+1}"))
+
+    if nav_row:
+        buttons.append(nav_row)
+
+    buttons.append([
+        InlineKeyboardButton("🔄 Refresh", callback_data=f"status_refresh_{page}"),
+        InlineKeyboardButton("❌ Close", callback_data="status_close")
+    ])
+
+    return text, InlineKeyboardMarkup(buttons)
 
 # Batas aman Telegram (1.9GB)
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
@@ -203,8 +255,12 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 }
                 # ------------------------------------------------
 
-                try: await edit_message(update_details['msg'], text_to_send, None, False)
+                # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
+                global_text, global_markup = get_status_text(page=1)
+                try: 
+                    await edit_message(update_details['msg'], global_text, global_markup, False)
                 except: pass
+                # ------------------------------------------
             
             # [FIX 2] Memecah jeda 3.5 detik menjadi kepingan kecil agar super responsif terhadap Cancel
             for _ in range(35):
@@ -573,8 +629,10 @@ async def progress_message(done, total, details):
         GLOBAL_TASKS.pop(task_id, None)
     # ------------------------------------------------
 
+    # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
+    global_text, global_markup = get_status_text(page=1)
     try: 
-        await edit_message(details['msg'], text, None, False)
+        await edit_message(details['msg'], global_text, global_markup, False)
     except FloodWait: pass
     except MessageNotModified: pass
 
