@@ -246,11 +246,9 @@ async def start_album_or_playlist(item_id: str, user: dict, pre_data: dict, medi
     is_zip = (media_type == 'album' and album_zip) or (media_type == 'playlist' and playlist_zip)
 
     if is_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan {multi_meta['totaltracks']} lagu menjadi .zip...")
         multi_meta['zip_path'] = await zip_handler(multi_meta['folderpath'])
 
     if upload:
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         if media_type == 'album':
             await album_upload(multi_meta, user)
         else:
