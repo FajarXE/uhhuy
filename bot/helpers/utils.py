@@ -73,7 +73,7 @@ def get_status_text(page=1, limit=5):
         if t.get('dl_speed', '0B/s') != "0B/s": global_dl = t['dl_speed']
         if t.get('ul_speed', '0B/s') != "0B/s": global_ul = t['ul_speed']
         
-    text += f"🔻 {global_dl} | 🔺 {global_ul}\n"
+    text += f"\n🔻 {global_dl} | 🔺 {global_ul}\n"
     # --------------------------------------------------
 
     buttons = []
