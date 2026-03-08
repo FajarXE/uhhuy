@@ -29,6 +29,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 GLOBAL_CANCEL_DICT = set()
 GLOBAL_TASKS = {}
+GLOBAL_UI_MSG = {}
 
 def get_status_text(page=1, limit=5):
     current_time = time.time()
@@ -254,11 +255,13 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                     'timestamp': time.time()
                 }
                 # ------------------------------------------------
-
+                
                 # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
                 global_text, global_markup = get_status_text(page=1)
                 try: 
-                    await edit_message(update_details['msg'], global_text, global_markup, False)
+                    chat_id = update_details['msg'].chat.id if update_details and 'msg' in update_details else 0
+                    target_msg = GLOBAL_UI_MSG.get(chat_id, update_details['msg']) if chat_id else update_details['msg']
+                    await edit_message(target_msg, global_text, global_markup, False)
                 except: pass
                 # ------------------------------------------
             
@@ -632,7 +635,9 @@ async def progress_message(done, total, details):
     # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
     global_text, global_markup = get_status_text(page=1)
     try: 
-        await edit_message(details['msg'], global_text, global_markup, False)
+        chat_id = details['msg'].chat.id if details and 'msg' in details else 0
+        target_msg = GLOBAL_UI_MSG.get(chat_id, details['msg']) if chat_id else details['msg']
+        await edit_message(target_msg, global_text, global_markup, False)
     except FloodWait: pass
     except MessageNotModified: pass
 
