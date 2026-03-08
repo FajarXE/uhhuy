@@ -182,7 +182,6 @@ async def start_album(album_id: str, user: dict, upload=True):
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
     if album_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan ZIP...")
         try:
             cover_src = album_meta.get('cover')
             if cover_src:
@@ -196,7 +195,6 @@ async def start_album(album_id: str, user: dict, upload=True):
         album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
 
     if upload: 
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await album_upload(album_meta, user)
 
 async def start_playlist(playlist_id: str, user: dict, extra: dict, upload=True):
@@ -230,7 +228,6 @@ async def start_playlist(playlist_id: str, user: dict, extra: dict, upload=True)
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
     if playlist_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan ZIP...")
         try:
             cover_src = play_meta.get('cover')
             if cover_src:
@@ -244,5 +241,4 @@ async def start_playlist(playlist_id: str, user: dict, extra: dict, upload=True)
         play_meta['zip_path'] = await zip_handler(play_meta['folderpath'])
 
     if upload: 
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await playlist_upload(play_meta, user)
