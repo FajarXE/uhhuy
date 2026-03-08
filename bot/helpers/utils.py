@@ -26,6 +26,7 @@ from .message import send_message, edit_message
 from .aria2_helper import aria2_download
 
 GLOBAL_CANCEL_DICT = set()
+GLOBAL_TASKS = {}
 
 # Batas aman Telegram (1.9GB)
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
@@ -182,6 +183,26 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 text_to_send += f"**Cancel**: /cancel_{batch_id}\n\n"
                 text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
+                # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS DI SINI ---
+                GLOBAL_TASKS[batch_id] = {
+                    'action': action,
+                    'type': task_type,
+                    'title': title,
+                    'since': since_str,
+                    'progress_bar': progress_bar,
+                    'percentage': f"{percentage:.2f}%",
+                    'processed_label': "Processed_tasks",
+                    'processed': f"{completed_tasks} of {total_tasks}",
+                    'speed': speed_str,
+                    'machine': "Aria2c 1.37.0",
+                    'mode': dest_mode,
+                    'cancel_id': batch_id,
+                    'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+                    'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+                    'timestamp': time.time()
+                }
+                # ------------------------------------------------
+
                 try: await edit_message(update_details['msg'], text_to_send, None, False)
                 except: pass
             
@@ -205,8 +226,10 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
             except: pass
             
         import asyncio
+        GLOBAL_TASKS.pop(batch_id, None) # <--- CLEANUP TASK YANG DIBATALKAN
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         
+    GLOBAL_TASKS.pop(batch_id, None) # <--- CLEANUP TASK JIKA SELESAI SUKSES
     return results
 
 async def create_link(path, basepath):
@@ -525,6 +548,30 @@ async def progress_message(done, total, details):
     # Perubahan ke format /cancel_id agar biru semua
     text += f"**Cancel**: /cancel_{task_id}\n\n"
     text += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
+
+    # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS DI SINI ---
+    GLOBAL_TASKS[task_id] = {
+        'action': action,
+        'type': task_type,
+        'title': title,
+        'since': since_str,
+        'progress_bar': progress_bar,
+        'percentage': f"{percentage:.2f}%",
+        'processed_label': progress_label,
+        'processed': f"{done_str} of {total_str}",
+        'speed': speed_str,
+        'machine': machine,
+        'mode': dest_mode,
+        'cancel_id': task_id,
+        'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+        'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+        'timestamp': now
+    }
+    
+    # Hapus dari memori jika task sudah selesai 100%
+    if done >= total:
+        GLOBAL_TASKS.pop(task_id, None)
+    # ------------------------------------------------
 
     try: 
         await edit_message(details['msg'], text, None, False)
