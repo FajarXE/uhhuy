@@ -678,6 +678,9 @@ async def progress_message(done, total, details):
     except Exception: pass
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
+    # Gabungkan user dan user_dict agar selalu terbaca
+    real_user = user if user else user_dict
+    
     def _sync_cleanup():
         if metadata:
             try:
@@ -693,10 +696,27 @@ async def cleanup(user=None, metadata=None, user_dict: dict=None):
                     for zp in zip_files: 
                         if os.path.exists(zp): os.remove(zp)
             except: pass
-        if user:
-            try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/")
+        if real_user:
+            try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{real_user['r_id']}/")
             except: pass
-            try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
+            try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{real_user['r_id']}-temp/")
             except: pass
 
     await asyncio.to_thread(_sync_cleanup)
+    
+    # --- [FIX UI] HAPUS PESAN RADAR SECARA OTOMATIS SAAT SELESAI ---
+    if real_user and 'bot_msg' in real_user:
+        # 1. Hapus pesannya dari obrolan Telegram
+        try:
+            await real_user['bot_msg'].delete()
+        except Exception:
+            pass
+        
+        # 2. Lepaskan dari Radar Global agar tidak memanggil 'Tidak ada task'
+        try:
+            from bot.helpers.utils import GLOBAL_UI_MSG
+            chat_id = real_user['bot_msg'].chat.id
+            if chat_id in GLOBAL_UI_MSG:
+                GLOBAL_UI_MSG.pop(chat_id, None)
+        except Exception:
+            pass
