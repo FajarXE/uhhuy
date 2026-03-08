@@ -216,11 +216,9 @@ async def start_album(album_id: str, user: dict, upload=True):
         except Exception: pass
 
     if album_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan {album_meta['totaltracks']} lagu menjadi .zip...")
         album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
 
     if upload:
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await album_upload(album_meta, user)
 
 async def start_playlist(playlist_id: str, user: dict):
@@ -286,9 +284,7 @@ async def start_playlist(playlist_id: str, user: dict):
         except Exception: pass
 
     if playlist_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan {pl_meta['totaltracks']} lagu menjadi .zip...")
         pl_meta['zip_path'] = await zip_handler(pl_meta['folderpath'])
 
-    await edit_message(user['bot_msg'], lang.s.UPLOADING)
     # --- [FIX CAPTION] Panggil mesin playlist, bukan mesin album! ---
     await playlist_upload(pl_meta, user)
