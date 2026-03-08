@@ -178,8 +178,14 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
     is_running = True
 
     start_time = time.time()
-    batch_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
-
+    
+    # --- [TRANSISI MULUS] GUNAKAN ID PESAN SEBAGAI ID TASK ---
+    if update_details and 'msg' in update_details:
+        batch_id = hashlib.md5(str(update_details['msg'].id).encode()).hexdigest()[:16]
+    else:
+        batch_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
+    # ---------------------------------------------------------
+    
     async def run_with_sem(task):
         nonlocal completed_tasks
         
@@ -300,7 +306,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
         GLOBAL_TASKS.pop(batch_id, None) # <--- CLEANUP TASK YANG DIBATALKAN
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         
-    GLOBAL_TASKS.pop(batch_id, None) # <--- CLEANUP TASK JIKA SELESAI SUKSES
     return results
 
 async def create_link(path, basepath):
@@ -546,7 +551,10 @@ def get_readable_file_size(size_in_bytes) -> str:
 
 # --- FUNGSI PROGRESS BAR BARU ---
 async def progress_message(done, total, details):
+    import time
+    import math
     now = time.time()
+    
     if 'last_updated' in details:
         if now - details['last_updated'] < 2.0 and done < total:
             return
@@ -565,6 +573,7 @@ async def progress_message(done, total, details):
     empty_blocks = 12 - filled_blocks
     progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
     
+    from bot.helpers.utils import get_readable_file_size, get_readable_time
     if total > 1000:
         done_str = get_readable_file_size(done)
         total_str = get_readable_file_size(total)
@@ -580,10 +589,18 @@ async def progress_message(done, total, details):
     
     # --- DETEKSI ACTION & TYPE ---
     title = details.get('title', 'Unknown File')
-    action = details.get('action', 'Download').capitalize() # Default ke Download
+    action = details.get('action', 'Download').capitalize()
     task_type = details.get('type', 'Task').capitalize()
-    task_id = details.get('task_id', 'BatchTask')
     
+    # --- [TRANSISI MULUS] GUNAKAN ID PESAN ASLI SEBAGAI TASK ID ---
+    if details and 'msg' in details:
+        import hashlib
+        task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16]
+    else:
+        task_id = details.get('task_id', 'unknown')
+    # --------------------------------------------------------------
+    
+    from bot.settings import bot_set
     try:
         user_id = details['msg'].chat.id
         dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode)
@@ -593,34 +610,16 @@ async def progress_message(done, total, details):
     from .aria2_helper import get_aria2_global_stat
     try:
         stats = await get_aria2_global_stat()
-    except:
-        stats = None
-        
-    # --- [FIX SINKRONISASI RADAR SEGITIGA] ---
-    if action == 'Upload':
-        # Saat proses upload Cloud, matikan radar Aria2 dan pakai kecepatan murni AIOHTTP
-        speed_dl = 0
-        speed_ul = speed 
-    else:
-        # Saat download, pakai radar Aria2 jika ada, jika tidak pakai hitungan lokal
-        speed_dl = int(stats.get('downloadSpeed', 0)) if stats and int(stats.get('downloadSpeed', 0)) > 0 else speed
+        speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
         speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-    
-    # --- TEMPLATE TEXT TERBARU ---
-    text = f"**{action} {task_type}**: `{title}`\n"
-    text += f"**Since**: {since_str}\n\n"
-    text += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
-    text += f"**{progress_label}**: {done_str} of {total_str}\n"
-    text += f"**Current_Speed**: {speed_str}\n"
-    machine = details.get('machine', 'Aria2c 1.37.0')
-    text += f"**Machine_type**: {machine}\n"
-    text += f"**Destination_mode**: {dest_mode}\n"
-    
-    # Perubahan ke format /cancel_id agar biru semua
-    text += f"**Cancel**: /cancel_{task_id}\n\n"
-    text += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
+    except:
+        speed_dl = 0
+        speed_ul = 0
 
-    # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS DI SINI ---
+    machine = details.get('machine', 'Aria2c 1.37.0')
+
+    # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS ---
+    from bot.helpers.utils import GLOBAL_TASKS
     GLOBAL_TASKS[task_id] = {
         'action': action,
         'type': task_type,
@@ -638,20 +637,20 @@ async def progress_message(done, total, details):
         'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
         'timestamp': now
     }
+    # (CATATAN: Baris GLOBAL_TASKS.pop sengaja TIDAK ADA di sini agar task tidak hilang saat 100%)
     
-    # Hapus dari memori jika task sudah selesai 100%
-    if done >= total:
-        GLOBAL_TASKS.pop(task_id, None)
-    # ------------------------------------------------
-
     # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
+    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
     global_text, global_markup = get_status_text(page=1)
     try: 
         chat_id = details['msg'].chat.id if details and 'msg' in details else 0
         target_msg = GLOBAL_UI_MSG.get(chat_id, details['msg']) if chat_id else details['msg']
+        
+        from bot.helpers.message import edit_message
         await edit_message(target_msg, global_text, global_markup, False)
     except FloodWait: pass
     except MessageNotModified: pass
+    except Exception: pass
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
