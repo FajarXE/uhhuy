@@ -387,13 +387,29 @@ async def run_download_task(link: str, user: dict):
     finally:
         await cleanup(user)
         try:
+            # --- [TRANSISI MULUS] PEMBERSIHAN FINAL ---
+            if 'bot_msg' in user:
+                import hashlib
+                final_task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+                from bot.helpers.utils import GLOBAL_TASKS, GLOBAL_UI_MSG, get_status_text
+                from bot.helpers.message import edit_message
+                
+                # Hapus task sepenuhnya HANYA setelah proses Download+Zipping+Upload selesai
+                GLOBAL_TASKS.pop(final_task_id, None)
+                
+                # Render ulang papan agar task ini resmi hilang dari layar
+                global_text, global_markup = get_status_text(page=1)
+                chat_id = user['chat_id']
+                target_msg = GLOBAL_UI_MSG.get(chat_id, user['bot_msg'])
+                try: await edit_message(target_msg, global_text, global_markup, False)
+                except: pass
+            # ------------------------------------------
+
             if task_successful:
-                # --- [FIX DOUBLE UI] JANGAN HAPUS JIKA MASIH ADA TASK LAIN ---
                 from bot.helpers.utils import GLOBAL_TASKS, GLOBAL_UI_MSG
                 if not GLOBAL_TASKS: 
                     await aio.delete_messages(user['chat_id'], user['bot_msg'].id)
                     GLOBAL_UI_MSG.pop(user['chat_id'], None)
-                # -------------------------------------------------------------
         except:
             pass
 
