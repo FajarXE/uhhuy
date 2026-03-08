@@ -1,3 +1,5 @@
+# [FILE: bot/helpers/message.py]
+
 import os
 import asyncio
 import time
@@ -100,8 +102,8 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
                 current_user.append(uid)
         return False
 
-
-async def send_message(user, text: str, type: str = 'text', markup=None, antiflood=False, meta=None, caption=None):
+# --- [PERBAIKAN] MENAMBAHKAN PARAMETER progress DAN progress_args ---
+async def send_message(user, text: str, type: str = 'text', markup=None, antiflood=False, meta=None, caption=None, progress=None, progress_args=None):
     # [FIX] Import asyncio diletakkan di paling atas agar dikenali seluruh blok kode!
     import asyncio
     from pyrogram.types import Message
@@ -129,7 +131,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             if "FloodWait" in str(type(e).__name__):
                 if antiflood:
                     await asyncio.sleep(e.value)
-                    return await send_message(user, text, type, markup, antiflood, meta, caption)
+                    return await send_message(user, text, type, markup, antiflood, meta, caption, progress, progress_args)
             else:
                 from bot.logger import LOGGER
                 LOGGER.error(f"Gagal mengirim teks: {e}")
@@ -162,8 +164,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         msg = None
         msg_created = False 
 
-        # JANGAN DIHAPUS, INI ADALAH MESIN RADARNYA!
-        async def progress(current, total):
+        # --- [PERBAIKAN] MENGUBAH NAMA PROGRESS INTERNAL AGAR TIDAK BENTROK ---
+        async def internal_progress(current, total):
             nonlocal msg, last_update_time, msg_created, start_time 
             if cancel_id in GLOBAL_CANCEL_DICT:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
@@ -289,35 +291,42 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
             thumb = meta.get('cover') if meta and meta.get('cover') else None
             
-            prog_func = progress if is_local else None
+            # --- [PERBAIKAN] MENENTUKAN KABEL SENSOR MANA YANG DIPAKAI ---
+            if progress is not None:
+                prog_func = progress
+                p_args = progress_args or ()
+            else:
+                prog_func = internal_progress if is_local else None
+                p_args = ()
+            # -------------------------------------------------------------
             
             if type == 'audio':
                 duration = meta.get('duration', 0) if meta else 0
                 performer = meta.get('artist', '') if meta else ''
                 audio_title = meta.get('title', '') if meta else ''
-                res = await client.send_audio(chat_id, audio=text, caption=final_caption, duration=duration, performer=performer, title=audio_title, thumb=thumb, progress=prog_func)
+                res = await client.send_audio(chat_id, audio=text, caption=final_caption, duration=duration, performer=performer, title=audio_title, thumb=thumb, progress=prog_func, progress_args=p_args)
             
             elif type == 'doc':
-                res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
+                res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
             
             elif type in ['photo', 'pic']:
                 try:
                     # Langkah 1: Coba kirim sebagai Foto/Gambar standar
-                    res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func)
+                    res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func, progress_args=p_args)
                 except Exception as pic_err:
                     # Langkah 2: Jika server Telegram menolak karena ukurannya raksasa, kirim sebagai File Dokumen
                     if "IMAGE_PROCESS_FAILED" in str(pic_err) or "PHOTO_INVALID_DIMENSIONS" in str(pic_err):
                         from bot.logger import LOGGER
                         LOGGER.warning(f"Telegram menolak foto ({pic_err}), mengalihkan ke mode Dokumen.")
-                        res = await client.send_document(chat_id, document=text, caption=final_caption, progress=prog_func)
+                        res = await client.send_document(chat_id, document=text, caption=final_caption, progress=prog_func, progress_args=p_args)
                     else:
                         raise pic_err # Lempar error jika masalahnya hal lain (seperti koneksi putus)
             
             elif type == 'video':
-                res = await client.send_video(chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func)
+                res = await client.send_video(chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
             
             else:
-                res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func)
+                res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
                 
             if res:
                 try:
