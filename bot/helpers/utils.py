@@ -27,6 +27,10 @@ from .aria2_helper import aria2_download
 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+# --- TAMBAHKAN BARIS INI UNTUK MENGHITUNG UPTIME ---
+BOT_START_TIME = time.time()
+# ---------------------------------------------------
+
 GLOBAL_CANCEL_DICT = set()
 GLOBAL_TASKS = {}
 GLOBAL_UI_MSG = {}
@@ -73,8 +77,28 @@ def get_status_text(page=1, limit=5):
         if t.get('dl_speed', '0B/s') != "0B/s": global_dl = t['dl_speed']
         if t.get('ul_speed', '0B/s') != "0B/s": global_ul = t['ul_speed']
         
-    text += f"\n🔻 {global_dl} | 🔺 {global_ul}\n"
-    # --------------------------------------------------
+    # --- [FITUR BARU] STATISTIK CPU, RAM, FREE & UPTIME ---
+    try:
+        import psutil
+        cpu_usage = psutil.cpu_percent(interval=None)
+        ram_usage = psutil.virtual_memory().percent
+    except ImportError:
+        cpu_usage = 0.0
+        ram_usage = 0.0
+
+    import shutil
+    total, used, free = shutil.disk_usage(".")
+    free_storage = free / (1024 ** 3) # Konversi ke GB
+
+    uptime_seconds = int(time.time() - BOT_START_TIME)
+    h, rem = divmod(uptime_seconds, 3600)
+    m, s = divmod(rem, 60)
+
+    text += f"\nCPU: {cpu_usage:.1f}% | FREE: {free_storage:.2f} GB\n"
+    text += f"RAM: {ram_usage:.1f}% | UPTIME: {h}h {m}m {s}s\n"
+    # ------------------------------------------------------
+
+    text += f"🔻 {global_dl} | 🔺 {global_ul}\n"
 
     buttons = []
     nav_row = []
