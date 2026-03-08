@@ -141,7 +141,14 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         from bot.settings import bot_set
         
         start_time = time.time()
-        cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
+        
+        # --- [TRANSISI MULUS] GUNAKAN ID PESAN ASLI ---
+        if isinstance(user, dict) and user.get('bot_msg'):
+            cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+        else:
+            cancel_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
+        # ----------------------------------------------
+        
         last_update_time = start_time
         
         is_local = False
@@ -260,9 +267,6 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         'timestamp': now
                     }
                     
-                    # Hapus dari memori jika task sudah selesai 100%
-                    if current >= total:
-                        GLOBAL_TASKS.pop(cancel_id, None)
                 except Exception:
                     pass
                 # ------------------------------------------------
