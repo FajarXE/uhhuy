@@ -267,9 +267,12 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     pass
                 # ------------------------------------------------
 
+                # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
                 try:
+                    from bot.helpers.utils import get_status_text
+                    global_text, global_markup = get_status_text(page=1)
                     from bot.helpers.message import edit_message
-                    await edit_message(msg, text_to_send, None, False)
+                    await edit_message(msg, global_text, global_markup, False)
                 except Exception: pass
                 last_update_time = now
 
