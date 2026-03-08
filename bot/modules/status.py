@@ -56,8 +56,8 @@ def get_status_text(page=1, limit=5):
     
     return text, InlineKeyboardMarkup(buttons)
 
-@Client.on_message(filters.command(["status"]))
-async def status_command(client: Client, message: Message):
+@Client.on_message(filters.command(["task", "tasks"]))
+async def task_command(client: Client, message: Message):
     text, markup = get_status_text(page=1)
     await message.reply(text, reply_markup=markup, disable_web_page_preview=True)
 
