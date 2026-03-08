@@ -194,8 +194,6 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
     if album_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan {album_meta['totaltracks']} lagu menjadi .zip...")
-        
         if album_meta.get('cover') and os.path.exists(album_meta['cover']):
             try:
                 cover_dest = os.path.join(album_meta['folderpath'], "cover.jpg")
@@ -206,7 +204,6 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
         album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
 
     if upload:
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await album_upload(album_meta, user)
 
 
@@ -236,10 +233,8 @@ async def start_artist(artist_id, user):
 
     if not upload_album:
         if artist_zip:
-            await edit_message(user['bot_msg'], lang.s.ZIPPING)
             artist_meta['zip_path'] = await zip_handler(artist_meta['folderpath'])
 
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await artist_upload(artist_meta, user)
 
 
@@ -307,7 +302,6 @@ async def start_playlist(playlist_id, user):
          raise Exception(f"Tidak ada lagu Deezer yang berhasil diunduh (Track not available) untuk playlist {play_meta['title']}.")
 
     if playlist_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan {play_meta['totaltracks']} lagu menjadi .zip...")
         if playlist_sort:
             play_meta['folderpath'] = await move_sorted_playlist(play_meta, user)
             
@@ -321,5 +315,4 @@ async def start_playlist(playlist_id, user):
         play_meta['zip_path'] = await zip_handler(play_meta['folderpath'])
 
     if not upload:
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await playlist_upload(play_meta, user)
