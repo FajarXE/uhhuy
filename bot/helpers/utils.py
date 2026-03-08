@@ -573,6 +573,9 @@ def get_readable_file_size(size_in_bytes) -> str:
 
 # --- FUNGSI PROGRESS BAR BARU ---
 async def progress_message(done, total, details):
+    # --- [FIX SPAM PAPAN GLOBAL] Abaikan task latar belakang ---
+    if not details or not details.get('msg'):
+        return
     import time
     import math
     now = time.time()
