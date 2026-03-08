@@ -48,7 +48,16 @@ class NugsSession(ABC):
 
     @staticmethod
     def convert_timestamps(time_string: str):
-        return int(datetime.strptime(time_string, "%m/%d/%Y %H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+        # --- [PERBAIKAN] Tangkal nilai kosong dari API Nugs ---
+        if not time_string:
+            # Jika API Nugs tidak memberikan tanggal (None/kosong), anggap akun aktif (Beri waktu 10 tahun ke depan)
+            return int((datetime.now(timezone.utc) + timedelta(days=3650)).timestamp())
+        try:
+            return int(datetime.strptime(time_string, "%m/%d/%Y %H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+        except Exception:
+            # Jika Nugs mengubah format tanggalnya, abaikan error dan anggap aktif
+            return int((datetime.now(timezone.utc) + timedelta(days=3650)).timestamp())
+        # ------------------------------------------------------
 
     def get_legacy_token(self):
         if self.access_token:
@@ -97,9 +106,19 @@ class NugsSession(ABC):
 
             r = r.json()
 
+            # --- [PERBAIKAN] Mencegah error jika data promo/plan tiba-tiba kosong ---
+            promo = r.get('promo')
+            plan = r.get('plan')
+            if promo and promo.get('plan'):
+                plan_id = promo['plan'].get('id')
+            elif plan:
+                plan_id = plan.get('id')
+            else:
+                plan_id = 'unknown'
+
             return NugsSubscription(
                 subscription_id=r.get('legacySubscriptionId'),
-                sub_cost_plan_id_access_list=r.get('promo').get('plan').get('id') if r.get('promo') else r.get('plan').get('id'),
+                sub_cost_plan_id_access_list=plan_id,
                 start_stamp=self.convert_timestamps(r.get('startedAt')),
                 end_stamp=self.convert_timestamps(r.get('endsAt'))
             )
