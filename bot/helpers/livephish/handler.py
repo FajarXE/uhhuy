@@ -395,11 +395,8 @@ async def start_livephish(link: str, user: dict):
         playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
         if album_zip:
-            await edit_message(user['bot_msg'], f"Membuat file ZIP...\n{album_name}")
             base_meta['zip_path'] = await zip_handler(base_meta['folderpath'])
 
-        await edit_message(user['bot_msg'], f"Mengunggah...\n{album_name}")
         await album_upload(base_meta, user)
     else:
         raise Exception("Tidak ada track yang berhasil diunduh.")
-
