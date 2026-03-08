@@ -184,7 +184,6 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
         except: pass
 
     if album_zip: 
-        await edit_message(user['bot_msg'], f"Zipping {album_meta['totaltracks']} tracks...")
         album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
     elif booklet_path and os.path.exists(booklet_path):
         try: await user['bot_msg'].reply_document(document=booklet_path, caption="Booklet", file_name=f"Booklet.pdf")
@@ -255,9 +254,7 @@ async def start_artist(albums, user, artist):
 
     if not upload_album:
         if artist_zip: 
-            await edit_message(user['bot_msg'], f"Zipping artist...")
             artist_meta['zip_path'] = await zip_handler(artist_meta['folderpath'])
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await artist_upload(artist_meta, user)
 
 async def start_playlist(tracks, playlist, user):
@@ -319,9 +316,17 @@ async def start_playlist(tracks, playlist, user):
 
     # Zip Handler
     if playlist_zip: 
-        await edit_message(user['bot_msg'], f"Zipping {play_meta['totaltracks']} tracks...")
         if playlist_sort: play_meta['folderpath'] = await move_sorted_playlist(play_meta, user)
         play_meta['zip_path'] = await zip_handler(play_meta['folderpath'])
+       
+    # Upload Batch (Jika upload per track dimatikan)
+    if not upload:
+        if not play_meta['tracks']:
+            await edit_message(user['bot_msg'], "Gagal: Tidak ada lagu yang berhasil diunduh.")
+            return
+            
+        await playlist_upload(play_meta, user)
+
        
     # Upload Batch (Jika upload per track dimatikan)
     if not upload:
