@@ -221,9 +221,7 @@ async def start_album(album_id: str, user: dict, upload=True):
     # --- BATAS MODIFIKASI ---
 
     if album_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan {album_meta['totaltracks']} lagu menjadi .zip...")
         album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
 
     if upload:
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await album_upload(album_meta, user)
