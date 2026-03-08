@@ -72,15 +72,15 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     details = None
     if 'bot_msg' in user:
         import time, hashlib
-        # Buat ID Cancel acak & unik khusus untuk unggahan ini
-        task_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:16]
+        # --- [TRANSISI MULUS] GUNAKAN ID PESAN ASLI ---
+        task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         details = {
             'msg': user['bot_msg'],
             'title': metadata.get('title', 'Unknown'),
             'type': metadata.get('type', 'Task').capitalize(),
-            'action': 'Upload', # <-- Mengubah "Download Album" menjadi "Upload Album"
-            'machine': 'AIOHTTP Streaming', # <-- Nama Mesin Asli
-            'task_id': task_id # <-- Agar ID Cancel menjadi unik
+            'action': 'Upload', 
+            'machine': 'AIOHTTP Streaming', 
+            'task_id': task_id 
         }
     # ------------------------------------
 
