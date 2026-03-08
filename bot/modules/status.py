@@ -2,12 +2,19 @@
 
 from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, Message
-from bot.helpers.utils import get_status_text
+
+# Mengimpor GLOBAL_UI_MSG untuk menyambungkan kabel radar Papan Global
+from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
 
 @Client.on_message(filters.command(["task", "tasks"]))
 async def task_command(client: Client, message: Message):
     text, markup = get_status_text(page=1)
-    await message.reply(text, reply_markup=markup, disable_web_page_preview=True)
+    
+    # Menyimpan pesan yang dikirim bot ke dalam variabel
+    sent_msg = await message.reply(text, reply_markup=markup, disable_web_page_preview=True)
+    
+    # Mendaftarkan pesan ini ke dalam memori Radar agar diperbarui secara real-time
+    GLOBAL_UI_MSG[message.chat.id] = sent_msg
 
 @Client.on_callback_query(filters.regex(r"^status_"))
 async def status_callback(client: Client, query: CallbackQuery):
@@ -34,3 +41,4 @@ async def status_callback(client: Client, query: CallbackQuery):
             await query.answer("Status diperbarui!", show_alert=False)
         except Exception:
             await query.answer("Status sudah yang terbaru!", show_alert=False)
+
