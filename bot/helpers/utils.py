@@ -59,10 +59,22 @@ def get_status_text(page=1, limit=5):
         text += f"**Current_Speed**: {t['speed']}\n"
         text += f"**Machine_type**: {t['machine']}\n"
         text += f"**Destination_mode**: {t['mode']}\n"
-        text += f"**Cancel**: /cancel_{t['cancel_id']}\n\n"
-        text += f"🔻 {t['dl_speed']} | 🔺 {t['ul_speed']}\n"
-        if i < end_idx and i < total_tasks:
-            text += "➖➖➖➖➖➖➖➖➖➖➖➖\n\n"
+        # HAPUS BARIS KECEPATAN DI SINI, sisakan Cancel saja
+        text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
+        
+        if i < (start_idx + len(tasks_page)) and i < total_tasks:
+            text += "\n➖➖➖➖➖➖➖➖➖➖➖➖\n\n"
+
+    # --- TAMBAHKAN KECEPATAN GLOBAL DI PALING BAWAH ---
+    global_dl = "0B/s"
+    global_ul = "0B/s"
+    for t in tasks:
+        # Cari task yang punya kecepatan aktif agar tidak tampil 0B/s jika ada yg jalan
+        if t.get('dl_speed', '0B/s') != "0B/s": global_dl = t['dl_speed']
+        if t.get('ul_speed', '0B/s') != "0B/s": global_ul = t['ul_speed']
+        
+    text += f"🔻 {global_dl} | 🔺 {global_ul}\n"
+    # --------------------------------------------------
 
     buttons = []
     nav_row = []
