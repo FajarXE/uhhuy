@@ -154,6 +154,14 @@ async def start_services():
     logging.info("------------------------------------------------")
     logging.info("Main: Memulai Inisialisasi Layanan...")
     
+    # --- ANTI INFINITE CRASH LOOP: BERSIHKAN ARIA2 SAAT BOOTING ---
+    try:
+        from bot.helpers.aria2_helper import aria2_purge_all
+        await aria2_purge_all()
+        logging.info("Main: Berhasil membersihkan sisa task Aria2 lama di background.")
+    except Exception as e:
+        logging.warning(f"Main: Gagal membersihkan Aria2: {e}")
+    
     await bot_set.set_language()
     await load_all_bot_qobuz_clients()
 
