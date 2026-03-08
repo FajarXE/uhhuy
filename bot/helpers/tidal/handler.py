@@ -288,11 +288,9 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
     _, album_zip, __, ___ = fetch_zip_settings(user)
     
     if album_zip:
-        await edit_message(user['bot_msg'], lang.s.ZIPPING)
         album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
 
     if upload:
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await album_upload(album_meta, user)
 
 
@@ -391,11 +389,9 @@ async def start_playlist(playlist_id:str, user:dict, upload=True, basefolder=Non
     playlist_zip, _, __, ___ = fetch_zip_settings(user)
 
     if playlist_zip:
-        await edit_message(user['bot_msg'], lang.s.ZIPPING)
         playlist_meta['zip_path'] = await zip_handler(playlist_meta['folderpath'])
 
     if upload:
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await playlist_upload(playlist_meta, user)
 
 
@@ -434,8 +430,6 @@ async def start_artist(artist_id:int, user:dict):
     if not upload_album:
         _, __, artist_zip_check, ___ = fetch_zip_settings(user) 
         if artist_zip_check: 
-            await edit_message(user['bot_msg'], lang.s.ZIPPING)
             artist_meta['zip_path'] = await zip_handler(artist_meta['folderpath'])
         
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await artist_upload(artist_meta, user)
