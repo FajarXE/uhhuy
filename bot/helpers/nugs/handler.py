@@ -333,12 +333,18 @@ async def start_album(album_id: str, user: dict, upload=True):
     
     if track_one_meta: 
         tasks.append(start_track(track_one_meta, user, False))
+    else:
+        LOGGER.warning(f"Nugs: Gagal memproses metadata untuk lagu pertama. Mencoba melanjutkan...")
 
     for track_data in tracks_list[1:]: 
         try:
+            # --- [PERBAIKAN] Jangan biarkan error disembunyikan ---
             track_meta = await process_track_metadata(track_data, album_data, user)
-            tasks.append(start_track(track_meta, user, False)) 
+            if track_meta:
+                tasks.append(start_track(track_meta, user, False))
         except Exception as e:
+            # Tampilkan error ke log agar kita tahu kenapa lagu ini dilewati
+            LOGGER.error(f"Nugs: Lagu ke-{track_data.get('trackNum')} gagal diproses: {e}")
             continue
 
     if not tasks:
