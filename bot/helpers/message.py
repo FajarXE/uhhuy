@@ -239,6 +239,34 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 text_to_send += f"**Cancel**: /cancel_{cancel_id}\n\n"
                 text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
+                # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS DI SINI ---
+                try:
+                    from bot.helpers.utils import GLOBAL_TASKS
+                    GLOBAL_TASKS[cancel_id] = {
+                        'action': action,
+                        'type': task_type,
+                        'title': file_title,
+                        'since': since_str,
+                        'progress_bar': progress_bar,
+                        'percentage': f"{percentage:.2f}%",
+                        'processed_label': "Processed_bytes",
+                        'processed': f"{done_str} of {total_str}",
+                        'speed': speed_str,
+                        'machine': "Telegram API",
+                        'mode': dest_mode,
+                        'cancel_id': cancel_id,
+                        'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+                        'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+                        'timestamp': now
+                    }
+                    
+                    # Hapus dari memori jika task sudah selesai 100%
+                    if current >= total:
+                        GLOBAL_TASKS.pop(cancel_id, None)
+                except Exception:
+                    pass
+                # ------------------------------------------------
+
                 try:
                     from bot.helpers.message import edit_message
                     await edit_message(msg, text_to_send, None, False)
@@ -307,6 +335,13 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
 
         # [FIX] Tangkap CancelledError, update Radar UI, update pesan "UPLOADING...", lalu lempar sinyal!
         except asyncio.CancelledError:
+            # --- CLEANUP GLOBAL TASKS ---
+            try:
+                from bot.helpers.utils import GLOBAL_TASKS
+                GLOBAL_TASKS.pop(cancel_id, None)
+            except Exception: pass
+            # ----------------------------
+
             from bot.helpers.message import edit_message
             if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
             
@@ -319,6 +354,13 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             
         except Exception as e:
+            # --- CLEANUP GLOBAL TASKS ---
+            try:
+                from bot.helpers.utils import GLOBAL_TASKS
+                GLOBAL_TASKS.pop(cancel_id, None)
+            except Exception: pass
+            # ----------------------------
+
             from bot.helpers.message import edit_message
             if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
                 if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
