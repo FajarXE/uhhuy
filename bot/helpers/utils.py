@@ -204,10 +204,8 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
     start_time = time.time()
     
     # --- [TRANSISI MULUS] GUNAKAN ID PESAN SEBAGAI ID TASK ---
-    if update_details and 'msg' in update_details:
+    if update_details and update_details.get('msg'):
         batch_id = hashlib.md5(str(update_details['msg'].id).encode()).hexdigest()[:16]
-    else:
-        batch_id = hashlib.md5(str(start_time).encode()).hexdigest()[:16]
     # ---------------------------------------------------------
     
     async def run_with_sem(task):
@@ -235,7 +233,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
     async def live_updater():
         from .aria2_helper import get_aria2_global_stat
         try:
-            user_id = update_details['msg'].chat.id if update_details and 'msg' in update_details else 0
+            user_id = update_details['msg'].chat.id if update_details and update_details.get('msg') else 0
             dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode) if user_id else bot_set.upload_mode
         except:
             dest_mode = bot_set.upload_mode
@@ -298,11 +296,11 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 }
                 # ------------------------------------------------
                 
-                # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
-                global_text, global_markup = get_status_text(page=1)
-                try: 
-                    chat_id = update_details['msg'].chat.id if update_details and 'msg' in update_details else 0
-                    target_msg = GLOBAL_UI_MSG.get(chat_id, update_details['msg']) if chat_id else update_details['msg']
+            # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
+            global_text, global_markup = get_status_text(page=1)
+            try: 
+                chat_id = update_details['msg'].chat.id if update_details and update_details.get('msg') else 0
+                target_msg = GLOBAL_UI_MSG.get(chat_id, update_details['msg']) if chat_id else update_details.get('msg')
                     await edit_message(target_msg, global_text, global_markup, False)
                 except: pass
                 # ------------------------------------------
@@ -617,7 +615,7 @@ async def progress_message(done, total, details):
     task_type = details.get('type', 'Task').capitalize()
     
     # --- [TRANSISI MULUS] GUNAKAN ID PESAN ASLI SEBAGAI TASK ID ---
-    if details and 'msg' in details:
+    if details and details.get('msg'):
         import hashlib
         task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16]
     else:
@@ -667,8 +665,8 @@ async def progress_message(done, total, details):
     from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
     global_text, global_markup = get_status_text(page=1)
     try: 
-        chat_id = details['msg'].chat.id if details and 'msg' in details else 0
-        target_msg = GLOBAL_UI_MSG.get(chat_id, details['msg']) if chat_id else details['msg']
+        chat_id = details['msg'].chat.id if details and details.get('msg') else 0
+        target_msg = GLOBAL_UI_MSG.get(chat_id, details['msg']) if chat_id else details.get('msg')
         
         from bot.helpers.message import edit_message
         await edit_message(target_msg, global_text, global_markup, False)
