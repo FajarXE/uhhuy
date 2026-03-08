@@ -323,6 +323,17 @@ async def run_download_task(link: str, user: dict):
     try:
         user['bot_msg'] = await send_message(user, 'Memulai tugas...')
         
+        # --- [FIX DOUBLE UI] PUSATKAN PESAN STATUS ---
+        from bot.helpers.utils import GLOBAL_UI_MSG
+        chat_id = user['chat_id']
+        # Jika ada pesan status sebelumnya, hapus agar tidak spam!
+        if chat_id in GLOBAL_UI_MSG:
+            try: await aio.delete_messages(chat_id, GLOBAL_UI_MSG[chat_id].id)
+            except: pass
+        # Jadikan pesan yang baru ini sebagai UI Utama
+        GLOBAL_UI_MSG[chat_id] = user['bot_msg']
+        # --------------------------------------------
+        
         resolved = await resolve_shortlink(link)
         if resolved != link:
              link = resolved
@@ -377,7 +388,12 @@ async def run_download_task(link: str, user: dict):
         await cleanup(user)
         try:
             if task_successful:
-                await aio.delete_messages(user['chat_id'], user['bot_msg'].id)
+                # --- [FIX DOUBLE UI] JANGAN HAPUS JIKA MASIH ADA TASK LAIN ---
+                from bot.helpers.utils import GLOBAL_TASKS, GLOBAL_UI_MSG
+                if not GLOBAL_TASKS: 
+                    await aio.delete_messages(user['chat_id'], user['bot_msg'].id)
+                    GLOBAL_UI_MSG.pop(user['chat_id'], None)
+                # -------------------------------------------------------------
         except:
             pass
 
