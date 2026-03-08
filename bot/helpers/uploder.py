@@ -1,8 +1,9 @@
-# [FILE: bot/helpers/uploder.py] - FIXED SYNTAX & INDENTATION
+# [FILE: bot/helpers/uploder.py] - FIXED SYNTAX & INDENTATION DENGAN RADAR UPLOAD TELEGRAM
 
 import os
 import asyncio
 import shutil
+import hashlib # TAMBAHAN IMPORT UNTUK ID TASK
 from config import Config 
 from pyrogram.errors import MessageNotModified
 
@@ -24,6 +25,13 @@ class FakeListener:
     async def onUploadError(self, error):
         LOGGER.error(f"Cloud Upload Error: {error}")
         return str(error)
+
+# --- TAMBAHAN: CALLBACK PROGRESS UNTUK TELEGRAM ---
+async def tg_progress_callback(current, total, details):
+    if details:
+        from .utils import progress_message
+        await progress_message(current, total, details)
+# --------------------------------------------------
 
 def create_cloud_caption(metadata):
     title = metadata.get('title', 'Unknown')
@@ -68,11 +76,8 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     listener = FakeListener(server_dict)
     uploader = DirectUpload(listener=listener, path=base_path)
 
-    # --- [SUNTIKAN KABEL RADAR UI TELEGRAM] ---
     details = None
     if 'bot_msg' in user:
-        import time, hashlib
-        # --- [TRANSISI MULUS] GUNAKAN ID PESAN ASLI ---
         task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         details = {
             'msg': user['bot_msg'],
@@ -82,11 +87,9 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
             'machine': 'AIOHTTP Streaming', 
             'task_id': task_id 
         }
-    # ------------------------------------
 
     try:
         folder_name = metadata.get('title', 'Unknown Album')
-        # KASUS A: LIST FILES
         if isinstance(filepath, list):
             if mode == 'Gofile':
                 root_id = await uploader.gofile_get_root(token)
@@ -121,7 +124,6 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                     if res: links.append(list(res.values())[0])
                 return "\n".join(links)
 
-        # KASUS B: SINGLE FILE
         elif os.path.isfile(filepath):
             if details: details['title'] = os.path.basename(filepath)
             
@@ -159,7 +161,6 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
                 res = await uploader.upload(os.path.basename(filepath), 0, mode.lower(), details=details)
                 if res: return list(res.values())[0]
 
-        # KASUS C: FOLDER ASLI
         elif os.path.isdir(filepath):
             files = [f for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
             
@@ -209,30 +210,24 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     
     return None
 
-# --- TASK HANDLERS (DEBUG & FIX) ---
-
 async def album_upload(metadata, user):
     user_dict = user.copy()
     user_id = user['user_id']
     user_settings = bot_set.user_data.get(user_id, {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
-    # [DEBUG] Print settings yang terbaca
     _, is_zip, _, show_poster = fetch_zip_settings(user)
     LOGGER.info(f"[DEBUG ALBUM] User: {user_id} | Mode: {user_mode} | ZIP: {is_zip} | Poster: {show_poster}")
 
-    # [FIX] Auto-Generate ZIP
     if is_zip and not metadata.get('zip_path'):
         LOGGER.info("[DEBUG ALBUM] ZIP aktif tapi path kosong. Memulai Zipping...")
         if 'bot_msg' in user: 
-            # --- MEMANGGIL PROGRESS BAR UI BARU ---
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
             await progress_message(0, 1, up_zip)
             
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
         LOGGER.info(f"[DEBUG ALBUM] Hasil Zipping: {metadata.get('zip_path')}")
 
-    # 1. CLOUD UPLOAD
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path'] 
@@ -244,55 +239,48 @@ async def album_upload(metadata, user):
                 await edit_message(metadata['poster_msg'], caption)
             else:
                 if metadata.get('poster_msg'):
-                    try:
-                        await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
-                    except:
-                        pass
+                    try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
+                    except: pass
                 await send_message(user, caption, 'text')
         else:
              await send_message(user, f"❌ <b>Upload Failed!</b>", 'text')
         await cleanup(None, metadata, user_dict)
         return 
 
-    # 2. LOCAL UPLOAD
     if bot_set.upload_mode == 'Local': await local_upload(metadata, user)
-    
-    # 3. TELEGRAM UPLOAD
     elif bot_set.upload_mode == 'Telegram':
         LOGGER.info("[DEBUG ALBUM] Masuk Logic Telegram Upload")
         
-        # [FIX] Handle Poster di Telegram Mode
         if show_poster and metadata.get('poster_msg'):
             caption = await format_string(lang.s.ALBUM_TEMPLATE, metadata, user)
-            try:
-                await edit_message(metadata['poster_msg'], caption)
-            except MessageNotModified:
-                pass
+            try: await edit_message(metadata['poster_msg'], caption)
+            except MessageNotModified: pass
         
         if is_zip and metadata.get('zip_path'):
             LOGGER.info("[DEBUG ALBUM] Uploading ZIP ke Telegram")
             zip_files = metadata['zip_path']
             if isinstance(zip_files, str): zip_files = [zip_files] 
             for item in zip_files: 
-                await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata)
+                # --- [SUNTIKAN RADAR UPLOAD TELEGRAM (ZIP)] ---
+                details = None
+                if 'bot_msg' in user:
+                    task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+                    details = {'msg': user['bot_msg'], 'title': os.path.basename(item), 'type': 'Zip Archive', 'action': 'Upload', 'machine': 'Telegram API', 'task_id': task_id}
+                # ----------------------------------------------
+                await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata, progress=tg_progress_callback, progress_args=(details,))
         else: 
             LOGGER.info("[DEBUG ALBUM] Uploading Batch Tracks (ZIP False/Gagal)")
             await batch_telegram_upload(metadata, user)
             
-    # 4. RCLONE UPLOAD
     else:
         rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
         if show_poster and metadata.get('poster_msg'):
-            try:
-                await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.ALBUM_TEMPLATE, metadata, user))
-            except MessageNotModified:
-                pass
+            try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.ALBUM_TEMPLATE, metadata, user))
+            except MessageNotModified: pass
         else:
             if metadata.get('poster_msg'):
-                try:
-                    await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
-                except:
-                    pass
+                try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
+                except: pass
             await post_simple_message(user, metadata, rclone_link, index_link)
             
     await cleanup(None, metadata, user_dict)
@@ -314,7 +302,6 @@ async def artist_upload(metadata, user):
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
-        # Logic Cloud Artist...
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path']
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
@@ -327,10 +314,8 @@ async def artist_upload(metadata, user):
                 await edit_message(metadata['poster_msg'], caption)
             else:
                 if metadata.get('poster_msg'):
-                    try:
-                        await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
-                    except:
-                        pass
+                    try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
+                    except: pass
                 await send_message(user, caption, 'text')
         else:
              await send_message(user, f"❌ <b>Upload Failed!</b>\nCould not upload to {user_mode}.", 'text')
@@ -339,28 +324,27 @@ async def artist_upload(metadata, user):
     
     if bot_set.upload_mode == 'Local': await local_upload(metadata, user)
     elif bot_set.upload_mode == 'Telegram':
-        # [FIX] Poster Telegram
         if show_poster and metadata.get('poster_msg'):
             caption = await format_string(lang.s.ARTIST_TEMPLATE, metadata, user)
-            try:
-                await edit_message(metadata['poster_msg'], caption)
-            except:
-                pass
+            try: await edit_message(metadata['poster_msg'], caption)
+            except: pass
 
         if is_zip and metadata.get('zip_path'): 
             zip_files = metadata['zip_path']
             if isinstance(zip_files, str): zip_files = [zip_files]
-            for item in zip_files: await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata)
-        else: 
-            pass 
+            for item in zip_files: 
+                # --- [SUNTIKAN RADAR UPLOAD TELEGRAM (ZIP)] ---
+                details = None
+                if 'bot_msg' in user:
+                    task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+                    details = {'msg': user['bot_msg'], 'title': os.path.basename(item), 'type': 'Zip Archive', 'action': 'Upload', 'machine': 'Telegram API', 'task_id': task_id}
+                # ----------------------------------------------
+                await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata, progress=tg_progress_callback, progress_args=(details,))
     else:
-        # Rclone
         rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
         if show_poster and metadata.get('poster_msg'):
-            try:
-                await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.ARTIST_TEMPLATE, metadata, user))
-            except MessageNotModified:
-                pass
+            try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.ARTIST_TEMPLATE, metadata, user))
+            except MessageNotModified: pass
         else:
             await post_simple_message(user, metadata, rclone_link, index_link)
             
@@ -376,7 +360,6 @@ async def playlist_upload(metadata, user):
 
     if is_zip and not metadata.get('zip_path'):
         if 'bot_msg' in user: 
-            # --- MEMANGGIL PROGRESS BAR UI BARU ---
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
             await progress_message(0, 1, up_zip)
             
@@ -384,7 +367,6 @@ async def playlist_upload(metadata, user):
         LOGGER.info(f"[DEBUG PLAYLIST] Zip path: {metadata.get('zip_path')}")
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
-        # Logic Cloud Playlist...
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path'] 
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
@@ -396,10 +378,8 @@ async def playlist_upload(metadata, user):
                 await edit_message(metadata['poster_msg'], caption)
             else: 
                 if metadata.get('poster_msg'):
-                    try:
-                        await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
-                    except:
-                        pass
+                    try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
+                    except: pass
                 await send_message(user, caption, 'text')
         else:
             await send_message(user, f"❌ <b>Upload Failed!</b>\nCould not upload to {user_mode}.", 'text')
@@ -409,24 +389,27 @@ async def playlist_upload(metadata, user):
 
     if bot_set.upload_mode == 'Local': await local_upload(metadata, user)
     elif bot_set.upload_mode == 'Telegram':
-        # [FIX] Poster Telegram
         if show_poster and metadata.get('poster_msg'):
             caption = await format_string(lang.s.PLAYLIST_TEMPLATE, metadata, user)
-            try:
-                await edit_message(metadata['poster_msg'], caption)
-            except:
-                pass
+            try: await edit_message(metadata['poster_msg'], caption)
+            except: pass
 
         if is_zip and metadata.get('zip_path'): 
             LOGGER.info("[DEBUG PLAYLIST] Uploading ZIP")
             zip_files = metadata['zip_path']
             if isinstance(zip_files, str): zip_files = [zip_files]
-            for item in zip_files: await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata)
+            for item in zip_files: 
+                # --- [SUNTIKAN RADAR UPLOAD TELEGRAM (ZIP)] ---
+                details = None
+                if 'bot_msg' in user:
+                    task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+                    details = {'msg': user['bot_msg'], 'title': os.path.basename(item), 'type': 'Zip Archive', 'action': 'Upload', 'machine': 'Telegram API', 'task_id': task_id}
+                # ----------------------------------------------
+                await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata, progress=tg_progress_callback, progress_args=(details,))
         else: 
             LOGGER.info("[DEBUG PLAYLIST] Uploading Batch")
             await batch_telegram_upload(metadata, user)
     else:
-        # Rclone
         if bot_set.playlist_sort and not is_zip:
             if bot_set.disable_sort_link: await rclone_upload(user, f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/")
             else:
@@ -439,22 +422,17 @@ async def playlist_upload(metadata, user):
             rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
             
             if show_poster and metadata.get('poster_msg'):
-                try:
-                    await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.PLAYLIST_TEMPLATE, metadata, user))
-                except MessageNotModified:
-                    pass
+                try: await edit_art_poster(metadata, user, rclone_link, index_link, await format_string(lang.s.PLAYLIST_TEMPLATE, metadata, user))
+                except MessageNotModified: pass
             else:
                 if metadata.get('poster_msg'):
-                    try:
-                        await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
-                    except:
-                        pass
+                    try: await aio.delete_messages(user['chat_id'], metadata['poster_msg'].id)
+                    except: pass
                 await post_simple_message(user, metadata, rclone_link, index_link)
                 
     await cleanup(None, metadata, user)
 
 async def track_upload(metadata, user, disable_link=False):
-    # [FIX] Jangan hardcode 'Telegram', gunakan bot_set.upload_mode sebagai default!
     user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', bot_set.upload_mode)
     upload_success = False
     
@@ -516,11 +494,23 @@ async def telegram_upload(track, user, batch_mode=False):
         LOGGER.error(f"[UPLOAD FAIL] Path does not exist: '{filepath}'")
         raise FileNotFoundError(f"File not found: {filepath}")
         
+    # --- [SUNTIKAN RADAR UPLOAD TELEGRAM (LAGU/TRACK)] ---
+    details = None
+    if 'bot_msg' in user:
+        task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+        details = {
+            'msg': user['bot_msg'],
+            'title': meta.get('title', os.path.basename(filepath)),
+            'type': meta.get('type', 'Track').capitalize(),
+            'action': 'Upload',
+            'machine': 'Telegram API',
+            'task_id': task_id
+        }
+    # -----------------------------------------------------
+        
     try: 
-        # --- [FIX UI] JANGAN HAPUS bot_msg ---
-        # Kita membiarkan `user` tetap utuh agar message.py bisa mendeteksi bot_msg 
-        # dan menjadikannya sebagai satu-satunya Radar Kecepatan yang permanen!
-        await send_message(user, filepath, 'audio', meta=meta)
+        # Menambahkan parameter 'progress' dan 'progress_args' ke mesin pengirim
+        await send_message(user, filepath, 'audio', meta=meta, progress=tg_progress_callback, progress_args=(details,))
     except Exception as e:
         LOGGER.error(f"[UPLOAD ERROR] send_message failed for {filepath}: {e}")
         raise e
@@ -528,7 +518,6 @@ async def telegram_upload(track, user, batch_mode=False):
 async def batch_telegram_upload(metadata, user):
     tracks_to_upload = []
     
-    # 1. Kumpulkan semua track yang siap diunggah
     if metadata['type'] in ['album', 'playlist']:
         for track in metadata['tracks']:
             if track.get('filepath'):
@@ -541,19 +530,13 @@ async def batch_telegram_upload(metadata, user):
                     
     if not tracks_to_upload: return
 
-    # --- [FIX UI] UPLOAD BERURUTAN (SEQUENTIAL) ---
-    # Mengunggah satu per satu akan menjamin 2 hal penting:
-    # 1. Urutan lagu (Track 1, 2, 3...) di Telegram akan berjejer rapi, tidak melompat-lompat.
-    # 2. Radar UI (bot_msg) hanya akan memperbarui 1 lagu dalam satu waktu, menghindari flicker/spam.
     for track in tracks_to_upload:
         try:
             await telegram_upload(track, user, batch_mode=True)
         except asyncio.CancelledError:
             LOGGER.info("Batch upload dibatalkan oleh pengguna.")
-            # Lempar ke sistem utama jika dibatalkan
             raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         except FileNotFoundError:
             pass
         except Exception as e:
             LOGGER.error(f"Gagal mengunggah track: {e}")
-    # ----------------------------------------------
