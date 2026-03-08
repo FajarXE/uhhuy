@@ -372,11 +372,9 @@ async def start_album(album_id: str, user: dict, upload=True):
     # ---------------------------------
 
     if album_zip: 
-        await edit_message(user['bot_msg'], f"Menyiapkan {successful_tracks_count} lagu menjadi .zip...")
         album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
 
     if upload:
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
         await album_upload(album_meta, user)
 
 async def start_nugs(url: str, user: dict):
