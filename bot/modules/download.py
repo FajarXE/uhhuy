@@ -5,7 +5,12 @@ from pyrogram import Client, filters
 import asyncio 
 import traceback
 import random
-import aiohttp 
+import aiohttp
+import time
+
+# --- ANTI INFINITE CRASH LOOP ---
+BOT_UPTIME = time.time()
+# --------------------------------
 
 from bot import CMD
 from bot.logger import LOGGER
