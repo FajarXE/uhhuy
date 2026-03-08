@@ -153,3 +153,35 @@ async def get_aria2_global_stat():
         LOGGER.error(f"Gagal mengambil Global Stat Aria2: {e}")
         
     return None
+
+async def aria2_purge_all():
+    """Membersihkan SEMUA task Aria2 yang nyangkut di background saat bot baru nyala"""
+    payload_active = {
+        "jsonrpc": "2.0",
+        "id": "bot_purge",
+        "method": "aria2.tellActive",
+        "params": []
+    }
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            # Cari semua task yang sedang berjalan
+            async with session.post(ARIA2_RPC_URL, json=payload_active) as resp:
+                res = await resp.json()
+                if "result" in res:
+                    for task in res["result"]:
+                        gid = task.get("gid")
+                        if gid:
+                            # Bunuh paksa task yang nyangkut
+                            kill_payload = {
+                                "jsonrpc": "2.0",
+                                "id": "bot_kill",
+                                "method": "aria2.forceRemove",
+                                "params": [gid]
+                            }
+                            await session.post(ARIA2_RPC_URL, json=kill_payload)
+                            
+            # Bersihkan cache memori bot kita
+            ACTIVE_DOWNLOADS.clear()
+    except Exception:
+        pass
