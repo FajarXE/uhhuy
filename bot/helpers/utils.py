@@ -296,11 +296,11 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 }
                 # ------------------------------------------------
                 
-            # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
-            global_text, global_markup = get_status_text(page=1)
-            try: 
-                chat_id = update_details['msg'].chat.id if update_details and update_details.get('msg') else 0
-                target_msg = GLOBAL_UI_MSG.get(chat_id, update_details['msg']) if chat_id else update_details.get('msg')
+                # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
+                global_text, global_markup = get_status_text(page=1)
+                try: 
+                    chat_id = update_details['msg'].chat.id if update_details and update_details.get('msg') else 0
+                    target_msg = GLOBAL_UI_MSG.get(chat_id, update_details['msg']) if chat_id else update_details.get('msg')
                     await edit_message(target_msg, global_text, global_markup, False)
                 except: pass
                 # ------------------------------------------
