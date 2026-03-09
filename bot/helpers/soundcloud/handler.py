@@ -241,13 +241,8 @@ async def start_album_or_playlist(item_id: str, user: dict, pre_data: dict, medi
     if not successful_tracks:
         raise Exception(f"Tidak ada lagu SC yang berhasil diunduh untuk {multi_meta['title']}.")
 
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-
-    is_zip = (media_type == 'album' and album_zip) or (media_type == 'playlist' and playlist_zip)
-
-    if is_zip: 
-        multi_meta['zip_path'] = await zip_handler(multi_meta['folderpath'])
-
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload:
         if media_type == 'album':
             await album_upload(multi_meta, user)
