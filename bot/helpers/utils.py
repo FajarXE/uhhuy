@@ -649,6 +649,15 @@ async def progress_message(done, total, details):
 
     machine = details.get('machine', 'Aria2c 1.37.0')
 
+    # --- [FIX SPEED UPLOAD] GABUNGKAN KECEPATAN TELEGRAM ---
+    # Aria2 melaporkan 0 saat Upload, jadi kita wajib menyuntikkan 
+    # kecepatan aktual Telegram (variabel 'speed') ke kabel data utama!
+    if action.lower() == 'upload':
+        speed_ul += speed
+    elif action.lower() == 'download' and machine == 'Telegram API':
+        speed_dl += speed
+    # -------------------------------------------------------
+
     # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS ---
     from bot.helpers.utils import GLOBAL_TASKS
     GLOBAL_TASKS[task_id] = {
