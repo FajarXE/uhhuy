@@ -392,11 +392,8 @@ async def start_livephish(link: str, user: dict):
         base_meta['tracks'] = completed_tracks
         base_meta['folderpath'] = base_meta['tempfolder']
         
-        playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-
-        if album_zip:
-            base_meta['zip_path'] = await zip_handler(base_meta['folderpath'])
-
+        # Zipping dan upload diurus secara otomatis oleh uploader.py
+        # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
         await album_upload(base_meta, user)
     else:
         raise Exception("Tidak ada track yang berhasil diunduh.")
