@@ -216,12 +216,11 @@ async def start_album(album_url: str, user: dict, upload=True):
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
-    if album_zip: 
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-
     if upload:
-
-        if 'zip_path' not in album_meta and booklet_path and os.path.exists(booklet_path):
+        # Jika user memilih TIDAK membuat ZIP, uploader.py hanya akan mengunggah lagu.
+        # Jadi, kita harus mengirim Booklet secara terpisah ke Telegram.
+        # (Jika ZIP aktif, Booklet otomatis sudah ikut terbungkus di dalam ZIP-nya!)
+        if not album_zip and booklet_path and os.path.exists(booklet_path):
             try:
                 await user['bot_msg'].reply_document(
                     document=booklet_path,
@@ -231,4 +230,6 @@ async def start_album(album_url: str, user: dict, upload=True):
             except Exception as e:
                 LOGGER.error(f"HighResAudio: Gagal mengunggah booklet: {e}")
         
+        # Zipping dan upload album diurus sepenuhnya secara otomatis oleh uploader.py
+        # agar memunculkan Papan Global yang mulus tanpa kedipan!
         await album_upload(album_meta, user)
