@@ -63,7 +63,7 @@ def get_status_text(page=1, limit=5):
         text += f"**Current_Speed**: {t['speed']}\n"
         text += f"**Machine_type**: {t['machine']}\n"
         text += f"**Destination_mode**: {t['mode']}\n"
-        # HAPUS BARIS KECEPATAN DI SINI, sisakan Cancel saja
+        text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
         text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
