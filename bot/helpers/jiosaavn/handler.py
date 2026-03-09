@@ -165,7 +165,7 @@ async def process_single_track(token_id, user, session, api):
         metadata = res.copy()
         metadata.update({'provider': 'JioSaavn', 'type': 'track'})
         
-        await edit_message(msg, "🚀 Memproses Upload...")
+        # Langsung serahkan ke uploader untuk transisi mulus
         await track_upload(metadata, user)
     except Exception as e:
         await edit_message(msg, f"❌ Error: {e}")
@@ -225,20 +225,11 @@ async def process_album(token_id, user, session, api):
 
         if not downloaded_tracks: raise Exception("❌ Gagal mengunduh semua lagu.")
 
-        await edit_message(msg, "📦 Memproses Album...")
-        
-        zip_path = None
-        if is_album_zip:
-             await edit_message(msg, "🗜️ Membersihkan & Membuat ZIP...")
-             for f in os.listdir(dl_dir):
-                 if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "cover.jpg":
-                     try: os.remove(os.path.join(dl_dir, f))
-                     except: pass
-
-             parent_dir = os.path.dirname(dl_dir)
-             zip_name = sanitize_filename(title)
-             base_name = os.path.join(parent_dir, zip_name)
-             zip_path = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
+        # Pembersihan cover tidak terpakai sebelum uploader mengambil alih
+        for f in os.listdir(dl_dir):
+            if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "cover.jpg":
+                try: os.remove(os.path.join(dl_dir, f))
+                except: pass
 
         metadata = {
             'type': 'album', 
@@ -247,16 +238,15 @@ async def process_album(token_id, user, session, api):
             'folderpath': dl_dir, 
             'tracks': downloaded_tracks, 
             'cover': final_cover_path if os.path.exists(final_cover_path) else None,
-            'zip_path': zip_path, 
+            # 'zip_path' dihapus agar uploader.py yang membuat ZIP otomatis menggunakan radar UI
             'poster_msg': poster_msg, 
             'provider': 'JioSaavn', 
             'release_date': release_date, 
-            'totaltracks': str(total),     # <-- Memperbaiki total tracks kosong
-            'totalvolumes': '1',           # <-- Memperbaiki total volumes kosong
-            'explicit': is_explicit,       # <-- Memperbaiki explicit kosong
+            'totaltracks': str(total),
+            'totalvolumes': '1',
+            'explicit': is_explicit,
             'quality': '320kbps'
         }
-        await edit_message(msg, "🚀 Mengunggah Album...")
         await album_upload(metadata, user)
         
     except Exception as e:
@@ -305,20 +295,11 @@ async def process_playlist(token_id, user, session, api):
 
         if not downloaded_tracks: raise Exception("❌ Gagal mengunduh playlist.")
 
-        await edit_message(msg, "📦 Memproses Playlist...")
-        
-        zip_path = None
-        if is_pl_zip:
-             await edit_message(msg, "🗜️ Membersihkan & Membuat ZIP...")
-             for f in os.listdir(dl_dir):
-                 if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "playlist_cover.jpg":
-                     try: os.remove(os.path.join(dl_dir, f))
-                     except: pass
-
-             parent_dir = os.path.dirname(dl_dir)
-             zip_name = sanitize_filename(title)
-             base_name = os.path.join(parent_dir, zip_name)
-             zip_path = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
+        # Pembersihan cover tidak terpakai sebelum uploader mengambil alih
+        for f in os.listdir(dl_dir):
+            if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "playlist_cover.jpg":
+                try: os.remove(os.path.join(dl_dir, f))
+                except: pass
 
         metadata = {
             'type': 'playlist', 
@@ -326,13 +307,12 @@ async def process_playlist(token_id, user, session, api):
             'folderpath': dl_dir, 
             'tracks': downloaded_tracks, 
             'cover': playlist_cover_path if os.path.exists(playlist_cover_path) else None, 
-            'zip_path': zip_path, 
+            # 'zip_path' dihapus agar uploader.py yang membuat ZIP otomatis menggunakan radar UI
             'poster_msg': poster_msg, 
             'provider': 'JioSaavn', 
-            'totaltracks': str(total),     # <-- Memperbaiki total tracks kosong
+            'totaltracks': str(total),
             'quality': '320kbps'
         }
-        await edit_message(msg, "🚀 Mengunggah Playlist...")
         await playlist_upload(metadata, user)
         
     except Exception as e:
