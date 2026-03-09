@@ -70,12 +70,16 @@ def get_status_text(page=1, limit=5):
             text += "\n➖➖➖➖➖➖➖➖➖➖➖➖\n\n"
 
     # --- TAMBAHKAN KECEPATAN GLOBAL DI PALING BAWAH ---
-    global_dl = "0B/s"
-    global_ul = "0B/s"
+    total_dl_raw = 0
+    total_ul_raw = 0
+    
     for t in tasks:
-        # Cari task yang punya kecepatan aktif agar tidak tampil 0B/s jika ada yg jalan
-        if t.get('dl_speed', '0B/s') != "0B/s": global_dl = t['dl_speed']
-        if t.get('ul_speed', '0B/s') != "0B/s": global_ul = t['ul_speed']
+        # Menjumlahkan angka kecepatan mentah dari semua tugas yang berjalan
+        total_dl_raw += t.get('speed_dl_raw', 0)
+        total_ul_raw += t.get('speed_ul_raw', 0)
+        
+    global_dl = f"{get_readable_file_size(total_dl_raw)}/s" if total_dl_raw > 0 else "0B/s"
+    global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
         
     # --- [FITUR BARU] STATISTIK CPU, RAM, FREE & UPTIME ---
     try:
@@ -292,6 +296,8 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                     'cancel_id': batch_id,
                     'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
                     'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+                    'speed_dl_raw': speed_dl,  # <--- KABEL DATA MENTAH ARIA2
+                    'speed_ul_raw': speed_ul,  # <--- KABEL DATA MENTAH ARIA2
                     'timestamp': time.time()
                 }
                 # ------------------------------------------------
@@ -660,6 +666,8 @@ async def progress_message(done, total, details):
         'cancel_id': task_id,
         'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
         'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+        'speed_dl_raw': speed_dl,  # <--- KABEL DATA MENTAH UI
+        'speed_ul_raw': speed_ul,  # <--- KABEL DATA MENTAH UI
         'timestamp': now
     }
     # (CATATAN: Baris GLOBAL_TASKS.pop sengaja TIDAK ADA di sini agar task tidak hilang saat 100%)
