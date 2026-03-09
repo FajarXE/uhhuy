@@ -115,8 +115,8 @@ def get_status_text(page=1, limit=5):
         buttons.append(nav_row)
 
     buttons.append([
-        InlineKeyboardButton("🔄 Refresh", callback_data=f"status_refresh_{page}"),
-        InlineKeyboardButton("❌ Close", callback_data="status_close")
+        InlineKeyboardButton("🔄 Refresh", callback_data=f"status_refresh_{page}", style="primary"),
+        InlineKeyboardButton("❌ Close", callback_data="status_close", style="danger")
     ])
 
     return text, InlineKeyboardMarkup(buttons)
