@@ -285,11 +285,7 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
     
     album_meta['tracks'] = [track for track in results if track]
     
-    _, album_zip, __, ___ = fetch_zip_settings(user)
-    
-    if album_zip:
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
     if upload:
         await album_upload(album_meta, user)
 
@@ -386,11 +382,7 @@ async def start_playlist(playlist_id:str, user:dict, upload=True, basefolder=Non
     
     playlist_meta['tracks'] = [track for track in results if track]
     
-    playlist_zip, _, __, ___ = fetch_zip_settings(user)
-
-    if playlist_zip:
-        playlist_meta['zip_path'] = await zip_handler(playlist_meta['folderpath'])
-
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
     if upload:
         await playlist_upload(playlist_meta, user)
 
@@ -428,8 +420,5 @@ async def start_artist(artist_id:int, user:dict):
         await start_album(album['id'], user, upload_album, artist_meta['folderpath'])
 
     if not upload_album:
-        _, __, artist_zip_check, ___ = fetch_zip_settings(user) 
-        if artist_zip_check: 
-            artist_meta['zip_path'] = await zip_handler(artist_meta['folderpath'])
-        
+        # Zipping dan upload diurus secara otomatis oleh uploader.py
         await artist_upload(artist_meta, user)
