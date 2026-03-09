@@ -210,7 +210,7 @@ async def process_single_gaana(track, user, session, api):
         if not res: raise Exception("Gagal mengunduh lagu.")
         
         res['type'] = 'track'
-        await edit_message(msg, "🚀 Memproses Upload...")
+        # Langsung serahkan ke uploader untuk transisi mulus
         await track_upload(res, user)
     except Exception as e:
         await edit_message(msg, f"❌ Error: {e}")
@@ -281,29 +281,20 @@ async def process_album_gaana(identifier, user, session, api):
         await edit_message(msg, "❌ Gagal mengunduh semua lagu.")
         return
 
-    await edit_message(msg, "📦 Memproses Album...")
-    
-    zip_path = None
-    if is_album_zip:
-         await edit_message(msg, "🗜️ Membersihkan & Membuat ZIP...")
-         for f in os.listdir(dl_dir):
-             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "cover.jpg":
-                 try: os.remove(os.path.join(dl_dir, f))
-                 except: pass
-
-         parent_dir = os.path.dirname(dl_dir)
-         zip_name = sanitize_filename(album_title)
-         base_name = os.path.join(parent_dir, zip_name)
-         zip_path = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
+    # Pembersihan gambar sampah sebelum uploader mengambil alih
+    for f in os.listdir(dl_dir):
+        if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "cover.jpg":
+            try: os.remove(os.path.join(dl_dir, f))
+            except: pass
 
     metadata = {
         'type': 'album', 'title': album_title, 'artist': artist_name, 
         'folderpath': dl_dir, 'tracks': downloaded, 'cover': final_cover_path if os.path.exists(final_cover_path) else None,
-        'zip_path': zip_path, 'poster_msg': poster_msg, 'provider': 'Gaana', 
+        # 'zip_path' dihapus agar diurus otomatis oleh uploader.py
+        'poster_msg': poster_msg, 'provider': 'Gaana', 
         'release_date': release_date, 'totaltracks': str(total), 'totalvolumes': '1', 
         'explicit': is_explicit, 'quality': '320kbps'
     }
-    await edit_message(msg, "🚀 Mengunggah Album...")
     await album_upload(metadata, user)
 
 async def process_playlist_gaana(identifier, user, session, api):
@@ -369,26 +360,17 @@ async def process_playlist_gaana(identifier, user, session, api):
         await edit_message(msg, "❌ Gagal mengunduh playlist.")
         return
 
-    await edit_message(msg, "📦 Memproses Playlist...")
-    
-    zip_path = None
-    if is_pl_zip:
-         await edit_message(msg, "🗜️ Membersihkan & Membuat ZIP...")
-         for f in os.listdir(dl_dir):
-             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "playlist_cover.jpg":
-                 try: os.remove(os.path.join(dl_dir, f))
-                 except: pass
-
-         parent_dir = os.path.dirname(dl_dir)
-         zip_name = sanitize_filename(title)
-         base_name = os.path.join(parent_dir, zip_name)
-         zip_path = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
+    # Pembersihan gambar sampah sebelum uploader mengambil alih
+    for f in os.listdir(dl_dir):
+        if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) and f != "playlist_cover.jpg":
+            try: os.remove(os.path.join(dl_dir, f))
+            except: pass
 
     metadata = {
         'type': 'playlist', 'title': title, 'folderpath': dl_dir, 
         'tracks': downloaded, 'cover': playlist_cover_path if os.path.exists(playlist_cover_path) else None, 
-        'zip_path': zip_path, 'poster_msg': poster_msg, 'provider': 'Gaana', 
+        # 'zip_path' dihapus agar diurus otomatis oleh uploader.py
+        'poster_msg': poster_msg, 'provider': 'Gaana', 
         'track_count': total, 'totaltracks': str(total), 'quality': '320kbps'
     }
-    await edit_message(msg, "🚀 Mengunggah Playlist...")
     await playlist_upload(metadata, user)
