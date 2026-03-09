@@ -388,10 +388,6 @@ async def process_artist(user, permalink):
 
     album_meta['tracks'] = successful_tracks
 
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-    if artist_zip or album_zip or playlist_zip:
-        await edit_message(user['bot_msg'], "Sedang membuat file Zip...")
-        album_meta['zip_path'] = await zip_handler(folderpath)
-
-    await edit_message(user['bot_msg'], "🚀 Memproses Upload...")
+    # Zipping dan Upload diserahkan sepenuhnya ke mesin uploader otomatis
+    # agar Papan Global tidak berkedip dan transisi berjalan mulus!
     await album_upload(album_meta, user)
