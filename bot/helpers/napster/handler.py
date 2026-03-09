@@ -201,10 +201,6 @@ async def start_album(album_id: str, user: dict, upload=True):
         return # Keluar dengan tenang
     # --- BATAS PERBAIKAN 2 ---
 
-    # --- PERBAIKAN: Unpack 4 nilai (urutan baru) ---
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-    # --- AKHIR PERBAIKAN ---
-
     # --- MODIFIKASI: MENYALIN COVER KE FOLDER ALBUM SEBELUM ZIP ---
     # Kita cek apakah file cover ada di path sementara, lalu copy ke folder album sebagai 'cover.jpg'
     if album_meta.get('cover') and os.path.exists(album_meta['cover']):
@@ -215,13 +211,14 @@ async def start_album(album_id: str, user: dict, upload=True):
             # Hanya salin jika belum ada di sana
             if not os.path.exists(cover_dest_path):
                 shutil.copy2(album_meta['cover'], cover_dest_path)
+                from bot.logger import LOGGER
                 LOGGER.info(f"Cover disalin ke folder zip: {cover_dest_path}")
         except Exception as e:
+            from bot.logger import LOGGER
             LOGGER.warning(f"Gagal menyalin cover ke folder album: {e}")
     # --- BATAS MODIFIKASI ---
 
-    if album_zip: 
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload:
         await album_upload(album_meta, user)
