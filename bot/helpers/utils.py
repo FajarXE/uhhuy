@@ -26,6 +26,7 @@ from .message import send_message, edit_message
 from .aria2_helper import aria2_download
 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ButtonStyle
 
 # --- TAMBAHKAN BARIS INI UNTUK MENGHITUNG UPTIME ---
 BOT_START_TIME = time.time()
@@ -115,9 +116,9 @@ def get_status_text(page=1, limit=5):
         buttons.append(nav_row)
 
     buttons.append([
-        InlineKeyboardButton("🔄 Refresh", callback_data=f"status_refresh_{page}", style="primary"),
-        InlineKeyboardButton("❌ Close", callback_data="status_close", style="danger")
-    ])
+        InlineKeyboardButton("🔄 Refresh", callback_data=f"status_refresh_{page}", style=ButtonStyle.PRIMARY),
+        InlineKeyboardButton("❌ Close", callback_data="status_close", style=ButtonStyle.DANGER)
+    ])     
 
     return text, InlineKeyboardMarkup(buttons)
 
