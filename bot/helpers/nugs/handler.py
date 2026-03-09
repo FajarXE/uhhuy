@@ -368,12 +368,12 @@ async def start_album(album_id: str, user: dict, upload=True):
             cover_target = os.path.join(album_meta['folderpath'], "cover.jpg")
             shutil.copy(album_meta['cover'], cover_target)
         except Exception as e:
+            from bot.logger import LOGGER
             LOGGER.warning(f"Gagal menyalin cover ke folder ZIP: {e}")
     # ---------------------------------
 
-    if album_zip: 
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload:
         await album_upload(album_meta, user)
 
