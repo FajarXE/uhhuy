@@ -298,6 +298,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                     'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
                     'speed_dl_raw': speed_dl,  # <--- KABEL DATA MENTAH ARIA2
                     'speed_ul_raw': speed_ul,  # <--- KABEL DATA MENTAH ARIA2
+                    'user_id': update_details['msg'].chat.id if update_details and update_details.get('msg') else 0,
                     'timestamp': time.time()
                 }
                 # ------------------------------------------------
@@ -677,6 +678,7 @@ async def progress_message(done, total, details):
         'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
         'speed_dl_raw': speed_dl,  # <--- KABEL DATA MENTAH UI
         'speed_ul_raw': speed_ul,  # <--- KABEL DATA MENTAH UI
+        'user_id': details['msg'].chat.id if details and details.get('msg') else 0,
         'timestamp': now
     }
     # (CATATAN: Baris GLOBAL_TASKS.pop sengaja TIDAK ADA di sini agar task tidak hilang saat 100%)
