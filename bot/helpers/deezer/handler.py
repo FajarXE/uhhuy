@@ -191,18 +191,16 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
     if not successful_tracks:
         raise Exception(f"Tidak ada lagu Deezer yang berhasil diunduh (Track not available) untuk album {album_meta['title']}.")
 
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
+    # Mempertahankan fungsi copy gambar sebelum uploader mengambil alih
+    if album_meta.get('cover') and os.path.exists(album_meta['cover']):
+        try:
+            cover_dest = os.path.join(album_meta['folderpath'], "cover.jpg")
+            shutil.copy(album_meta['cover'], cover_dest)
+        except Exception as e:
+            from bot.logger import LOGGER
+            LOGGER.warning(f"Gagal menyalin cover.jpg ke folder album: {e}")
 
-    if album_zip: 
-        if album_meta.get('cover') and os.path.exists(album_meta['cover']):
-            try:
-                cover_dest = os.path.join(album_meta['folderpath'], "cover.jpg")
-                shutil.copy(album_meta['cover'], cover_dest)
-            except Exception as e:
-                LOGGER.warning(f"Gagal menyalin cover.jpg ke folder album: {e}")
-
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-
+    # Zipping otomatis diurus uploader.py agar muncul progress bar
     if upload:
         await album_upload(album_meta, user)
 
@@ -232,9 +230,7 @@ async def start_artist(artist_id, user):
         await start_album(album, user, upload_album, basefolder=artist_meta['folderpath'])
 
     if not upload_album:
-        if artist_zip:
-            artist_meta['zip_path'] = await zip_handler(artist_meta['folderpath'])
-
+        # Zipping otomatis diurus uploader.py
         await artist_upload(artist_meta, user)
 
 
@@ -301,6 +297,7 @@ async def start_playlist(playlist_id, user):
     if not play_meta['tracks']:
          raise Exception(f"Tidak ada lagu Deezer yang berhasil diunduh (Track not available) untuk playlist {play_meta['title']}.")
 
+    # Mempertahankan sorting dan copy gambar
     if playlist_zip: 
         if playlist_sort:
             play_meta['folderpath'] = await move_sorted_playlist(play_meta, user)
@@ -310,9 +307,9 @@ async def start_playlist(playlist_id, user):
                 cover_dest = os.path.join(play_meta['folderpath'], "cover.jpg")
                 shutil.copy(play_meta['cover'], cover_dest)
             except Exception as e:
+                from bot.logger import LOGGER
                 LOGGER.warning(f"Gagal menyalin cover.jpg ke folder playlist: {e}")
 
-        play_meta['zip_path'] = await zip_handler(play_meta['folderpath'])
-
+    # Zipping otomatis diurus uploader.py
     if not upload:
         await playlist_upload(play_meta, user)
