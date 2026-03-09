@@ -183,12 +183,11 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
         try: shutil.copy2(album_meta['cover'], os.path.join(album_meta['folderpath'], "cover.jpg"))
         except: pass
 
-    if album_zip: 
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-    elif booklet_path and os.path.exists(booklet_path):
+    if booklet_path and os.path.exists(booklet_path):
         try: await user['bot_msg'].reply_document(document=booklet_path, caption="Booklet", file_name=f"Booklet.pdf")
         except: pass
 
+    # Zipping otomatis diurus uploader.py agar muncul progress bar
     if upload: await album_upload(album_meta, user)
 
 async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=True, basefolder=None, disable_link=False, disable_msg=False):
@@ -253,8 +252,7 @@ async def start_artist(albums, user, artist):
     for album in albums: await start_album(album['id'], user, upload_album, artist_meta['folderpath'])
 
     if not upload_album:
-        if artist_zip: 
-            artist_meta['zip_path'] = await zip_handler(artist_meta['folderpath'])
+        # Zipping otomatis diurus uploader.py
         await artist_upload(artist_meta, user)
 
 async def start_playlist(tracks, playlist, user):
@@ -314,10 +312,9 @@ async def start_playlist(tracks, playlist, user):
         try: shutil.copy2(play_meta['cover'], os.path.join(play_meta['folderpath'], "cover.jpg"))
         except: pass
 
-    # Zip Handler
-    if playlist_zip: 
-        if playlist_sort: play_meta['folderpath'] = await move_sorted_playlist(play_meta, user)
-        play_meta['zip_path'] = await zip_handler(play_meta['folderpath'])
+    # Sort Playlist jika diminta
+    if playlist_zip and playlist_sort: 
+        play_meta['folderpath'] = await move_sorted_playlist(play_meta, user)
        
     # Upload Batch (Jika upload per track dimatikan)
     if not upload:
@@ -325,14 +322,5 @@ async def start_playlist(tracks, playlist, user):
             await edit_message(user['bot_msg'], "Gagal: Tidak ada lagu yang berhasil diunduh.")
             return
             
-        await playlist_upload(play_meta, user)
-
-       
-    # Upload Batch (Jika upload per track dimatikan)
-    if not upload:
-        if not play_meta['tracks']:
-            await edit_message(user['bot_msg'], "Gagal: Tidak ada lagu yang berhasil diunduh.")
-            return
-            
-        await edit_message(user['bot_msg'], lang.s.UPLOADING)
+        # Zipping dan upload diurus secara otomatis oleh uploader.py
         await playlist_upload(play_meta, user)
