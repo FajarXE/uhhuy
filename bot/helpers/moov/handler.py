@@ -158,16 +158,9 @@ async def start_album(album_id, user, upload=True, filter_track_id=None):
     else:
         raise Exception("Gagal mengunduh lagu (Stream key kosong atau region blocked).")
 
-    try:
-        playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-        if album_zip and not filter_track_id: 
-            await edit_message(user['bot_msg'], "Zipping...")
-            album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-    except Exception as e:
-        LOGGER.error(f"Zip Error: {e}")
-        
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload:
-        await edit_message(user['bot_msg'], "Uploading...")
         await album_upload(album_meta, user)
 
 async def enrich_and_download_chart_track(shallow_track_meta, user, folderpath, album_cache):
@@ -281,15 +274,8 @@ async def start_playlist(pid, user):
     if not successful_tracks:
         raise Exception("Gagal mengunduh semua lagu dari Playlist ini (Cek Log untuk detail).")
 
-    try:
-        playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-        if playlist_zip: 
-            await edit_message(user['bot_msg'], "Zipping...")
-            pl_meta['zip_path'] = await zip_handler(pl_meta['folderpath'])
-    except Exception as e:
-        LOGGER.error(f"Zip Error: {e}")
-        
-    await edit_message(user['bot_msg'], "Uploading...")
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     await playlist_upload(pl_meta, user)
 
 async def apply_mutagen_tags(filepath, meta, cover_path, lyrics=None):
