@@ -215,9 +215,8 @@ async def start_album(album_id: str, user: dict, upload=True):
                 await asyncio.to_thread(shutil.copy, album_meta['cover'], cover_path)
         except Exception: pass
 
-    if album_zip: 
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload:
         await album_upload(album_meta, user)
 
@@ -283,8 +282,6 @@ async def start_playlist(playlist_id: str, user: dict):
                 await asyncio.to_thread(shutil.copy, pl_meta['cover'], cover_path)
         except Exception: pass
 
-    if playlist_zip: 
-        pl_meta['zip_path'] = await zip_handler(pl_meta['folderpath'])
-
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
     # --- [FIX CAPTION] Panggil mesin playlist, bukan mesin album! ---
     await playlist_upload(pl_meta, user)
