@@ -179,19 +179,22 @@ async def start_album(album_id: str, user: dict, upload=True):
     album_meta['totaltracks'] = len(successful_tracks)
     if not successful_tracks: raise Exception("Tidak ada lagu yang berhasil diunduh.")
 
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-    if album_zip: 
-        try:
-            cover_src = album_meta.get('cover')
-            if cover_src:
-                target = os.path.join(album_meta['folderpath'], "cover.jpg")
+    # --- MODIFIKASI: Menyalin cover ke folder album sebelum di-zip ---
+    try:
+        cover_src = album_meta.get('cover')
+        if cover_src:
+            target = os.path.join(album_meta['folderpath'], "cover.jpg")
+            if not os.path.exists(target):
                 if os.path.exists(cover_src): shutil.copy(cover_src, target)
                 elif cover_src.startswith('http'):
+                    # Biarkan Aria2 yang mengunduh gambarnya juga
                     details_aria = {'msg': None}
                     await download_file(cover_src, target, retries=1, details=details_aria)
-        except: pass
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
+    except: pass
+    # -----------------------------------------------------------------
 
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload: 
         await album_upload(album_meta, user)
 
@@ -224,18 +227,21 @@ async def start_playlist(playlist_id: str, user: dict, extra: dict, upload=True)
     play_meta['totaltracks'] = len(successful_tracks)
     if not successful_tracks: raise Exception("Tidak ada lagu yang berhasil diunduh.")
 
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-    if playlist_zip: 
-        try:
-            cover_src = play_meta.get('cover')
-            if cover_src:
-                target = os.path.join(play_meta['folderpath'], "cover.jpg")
+    # --- MODIFIKASI: Menyalin cover ke folder playlist sebelum di-zip ---
+    try:
+        cover_src = play_meta.get('cover')
+        if cover_src:
+            target = os.path.join(play_meta['folderpath'], "cover.jpg")
+            if not os.path.exists(target):
                 if os.path.exists(cover_src): shutil.copy(cover_src, target)
                 elif cover_src.startswith('http'):
+                    # Biarkan Aria2 yang mengunduh gambarnya juga
                     details_aria = {'msg': None}
                     await download_file(cover_src, target, retries=1, details=details_aria)
-        except: pass
-        play_meta['zip_path'] = await zip_handler(play_meta['folderpath'])
+    except: pass
+    # --------------------------------------------------------------------
 
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload: 
         await playlist_upload(play_meta, user)
