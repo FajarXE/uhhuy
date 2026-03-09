@@ -266,13 +266,15 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         'cancel_id': cancel_id,
                         'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
                         'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+                        'speed_dl_raw': speed_dl,  # <--- TAMBAHKAN INI
+                        'speed_ul_raw': speed_ul,  # <--- TAMBAHKAN INI
                         'timestamp': now
                     }
                     
                 except Exception:
                     pass
                 # ------------------------------------------------
-
+                
                 # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
                 try:
                     from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
