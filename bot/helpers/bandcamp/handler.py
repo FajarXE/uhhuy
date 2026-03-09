@@ -205,24 +205,10 @@ async def start_bandcamp(link: str, user: dict):
     # --- UPLOAD ---
     if len(downloaded_tracks) == 1 and not is_album:
         track_meta = downloaded_tracks[0]
-        await edit_message(msg, "🚀 Memproses Upload Track...")
+        # Langsung serahkan ke uploader untuk transisi mulus
         await track_upload(track_meta, user)
     else:
-        await edit_message(msg, "📦 Memproses Album...")
         album_meta['tracks'] = downloaded_tracks
-        
-        _, is_album_zip, _, _ = await asyncio.to_thread(fetch_zip_settings, user)
-        
-        if is_album_zip:
-            await edit_message(msg, "🗜️ Membuat ZIP...")
-            try:
-                from bot.helpers.utils import zip_folder
-                album_meta['zip_path'] = await asyncio.to_thread(zip_folder, dl_dir)
-            except ImportError:
-                parent_dir = os.path.dirname(dl_dir)
-                zip_name = sanitize_filename(album_title)
-                base_name = os.path.join(parent_dir, zip_name)
-                album_meta['zip_path'] = await asyncio.to_thread(shutil.make_archive, base_name, 'zip', dl_dir)
-
-        await edit_message(msg, "🚀 Mengunggah Album...")
+        # Zipping dan Upload diserahkan sepenuhnya ke mesin uploader otomatis
+        # agar Papan Global tidak berkedip!
         await album_upload(album_meta, user)
