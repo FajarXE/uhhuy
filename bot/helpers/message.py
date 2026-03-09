@@ -268,6 +268,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
                         'speed_dl_raw': speed_dl,  # <--- TAMBAHKAN INI
                         'speed_ul_raw': speed_ul,  # <--- TAMBAHKAN INI
+                        'user_id': msg.chat.id if msg else 0,
                         'timestamp': now
                     }
                     
