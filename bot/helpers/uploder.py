@@ -29,6 +29,15 @@ class FakeListener:
 # --- TAMBAHAN: CALLBACK PROGRESS UNTUK TELEGRAM ---
 async def tg_progress_callback(current, total, details):
     if details:
+        # --- [FIX CANCEL UPLOAD] CEK SINYAL BATAL DI SINI ---
+        task_id = details.get('task_id')
+        if task_id:
+            from bot.helpers.utils import GLOBAL_CANCEL_DICT
+            if task_id in GLOBAL_CANCEL_DICT:
+                import asyncio
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+        # ----------------------------------------------------
+        
         from .utils import progress_message
         await progress_message(current, total, details)
 # --------------------------------------------------
