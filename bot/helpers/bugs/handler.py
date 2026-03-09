@@ -199,14 +199,7 @@ async def start_album(album_id: str, user: dict, upload=True):
     if not successful_tracks:
         raise Exception(f"Tidak ada lagu Bugs yang berhasil diunduh untuk album {album_meta['title']}.")
 
-    # --- PERBAIKAN: Unpack 4 nilai (urutan baru) ---
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-    # --- AKHIR PERBAIKAN ---
-
-    if album_zip: 
-        # --- PERBAIKAN: Gunakan 'zip_path' agar konsisten ---
-        album_meta['zip_path'] = await zip_handler(album_meta['folderpath'])
-        # --- AKHIR PERBAIKAN ---
-
+    # Zipping dan upload diurus secara otomatis oleh uploader.py
+    # agar memunculkan Papan Global yang mulus tanpa kedipan!
     if upload:
         await album_upload(album_meta, user)
