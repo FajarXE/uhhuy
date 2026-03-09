@@ -4,7 +4,7 @@ import re
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from bot.helpers.aria2_helper import aria2_cancel, ACTIVE_DOWNLOADS
-from bot.helpers.utils import GLOBAL_CANCEL_DICT
+from bot.helpers.utils import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
 from bot.settings import bot_set
 
 @Client.on_message(filters.regex(r"^/cancel_([a-zA-Z0-9]+)"))
@@ -14,6 +14,16 @@ async def cancel_task_handler(client: Client, message: Message):
         return
     
     gid = message.matches[0].group(1)
+    is_admin = user_id in bot_set.admins
+    
+    # --- PENGECEKAN KEPEMILIKAN TASK (SECURITY FIX) ---
+    if gid in GLOBAL_TASKS:
+        task_owner = GLOBAL_TASKS[gid].get('user_id')
+        # Jika bukan admin, dan task owner ada, dan user_id tidak sama dengan owner
+        if not is_admin and task_owner and str(task_owner) != str(user_id):
+            await message.reply("❌ **Akses Ditolak:** Anda hanya bisa membatalkan tugas Anda sendiri.")
+            return
+    # --------------------------------------------------
     
     # 1. Cek apakah ini ID dari Aria2 (Sedang proses Download)
     if gid in ACTIVE_DOWNLOADS:
@@ -27,4 +37,4 @@ async def cancel_task_handler(client: Client, message: Message):
     # 2. Jika bukan Aria2, berarti itu ID dari Upload/Zipping!
     else:
         GLOBAL_CANCEL_DICT.add(gid)
-        await message.reply(f"🛑 **Sinyal Batal Dikirim!**\nProses Upload/Zipping akan segera dihentikan.")
+        await message.reply(f"🛑 **Sinyal Batal Dikirim!**\nProses akan segera dihentikan.")
