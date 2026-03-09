@@ -230,12 +230,6 @@ async def start_khinsider(url, user):
     album_data['tracks'] = successful_tracks
 
     # 5. Upload
-    await edit_message(msg, "⚙️ Memproses upload...")
-    
-    _, album_zip, _, _ = await asyncio.to_thread(fetch_zip_settings, user)
-    if album_zip:
-        await edit_message(msg, "📦 Mengompresi album ke ZIP...")
-        album_data['zip_path'] = await asyncio.to_thread(zip_folder, album_folder_path)
-    
-    await edit_message(msg, "🚀 Mengunggah...")
+    # Semua proses Zipping dan Upload diserahkan sepenuhnya ke mesin uploader
+    # agar transisi Radar UI berjalan mulus 100% tanpa kedipan!
     await album_upload(album_data, user)
