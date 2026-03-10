@@ -307,9 +307,18 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
                 global_text, global_markup = get_status_text(page=1)
                 try: 
-                    chat_id = update_details['msg'].chat.id if update_details and update_details.get('msg') else 0
-                    target_msg = GLOBAL_UI_MSG.get(chat_id, update_details['msg']) if chat_id else update_details.get('msg')
-                    await edit_message(target_msg, global_text, global_markup, False)
+                    targets = {}
+                    if update_details and update_details.get('msg'):
+                        targets[update_details['msg'].chat.id] = update_details['msg']
+                    
+                    from bot.helpers.utils import GLOBAL_UI_MSG
+                    if GLOBAL_UI_MSG:
+                        for cid, m in GLOBAL_UI_MSG.items():
+                            targets[cid] = m
+                    
+                    from bot.helpers.message import edit_message
+                    for m in targets.values():
+                        await edit_message(m, global_text, global_markup, False)
                 except: pass
                 # ------------------------------------------
             
@@ -688,11 +697,17 @@ async def progress_message(done, total, details):
     from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
     global_text, global_markup = get_status_text(page=1)
     try: 
-        chat_id = details['msg'].chat.id if details and details.get('msg') else 0
-        target_msg = GLOBAL_UI_MSG.get(chat_id, details['msg']) if chat_id else details.get('msg')
+        targets = {}
+        if details and details.get('msg'):
+            targets[details['msg'].chat.id] = details['msg']
         
+        if GLOBAL_UI_MSG:
+            for cid, m in GLOBAL_UI_MSG.items():
+                targets[cid] = m
+                
         from bot.helpers.message import edit_message
-        await edit_message(target_msg, global_text, global_markup, False)
+        for m in targets.values():
+            await edit_message(m, global_text, global_markup, False)
     except FloodWait: pass
     except MessageNotModified: pass
     except Exception: pass
