@@ -92,7 +92,8 @@ def get_status_text(page=1, limit=5):
         ram_usage = 0.0
 
     import shutil
-    total, used, free = shutil.disk_usage(".")
+    # Mengarahkan pengecekan disk langsung ke folder tempat Render di-mount
+    total, used, free = shutil.disk_usage(Config.DOWNLOAD_BASE_DIR)
     free_storage = free / (1024 ** 3) # Konversi ke GB
 
     uptime_seconds = int(time.time() - BOT_START_TIME)
