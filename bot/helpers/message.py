@@ -281,11 +281,17 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
                     global_text, global_markup = get_status_text(page=1)
                     
-                    chat_id = msg.chat.id if msg else 0
-                    target_msg = GLOBAL_UI_MSG.get(chat_id, msg) if chat_id else msg
+                    # Kumpulkan semua pesan yang harus di-update (Pemilik + Penonton)
+                    targets = {}
+                    if msg: targets[msg.chat.id] = msg
+                    if GLOBAL_UI_MSG:
+                        for cid, m in GLOBAL_UI_MSG.items():
+                            targets[cid] = m
                     
                     from bot.helpers.message import edit_message
-                    await edit_message(target_msg, global_text, global_markup, False)
+                    # Broadcast pembaruan ke semua radar yang terbuka!
+                    for m in targets.values():
+                        await edit_message(m, global_text, global_markup, False)
                 except Exception: pass
                 last_update_time = now
 
