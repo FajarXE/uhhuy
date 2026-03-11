@@ -51,7 +51,7 @@ def get_status_text(page=1, limit=5):
         
         # --- [UPDATE BAHASA: Pengecualian Auto-Cleaner] ---
         # Kita ubah dari 'antrean' menjadi 'queue' dan 'processing'
-        if 'queue' in action or 'zipping' in action or 'processing' in action:
+        if 'queue' in action or 'zipping' in action or 'processing' in action or 'connecting' in action or 'fetching' in action:
             v['timestamp'] = current_time
             continue
             
