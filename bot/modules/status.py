@@ -1,51 +1,104 @@
 # [FILE: bot/modules/status.py]
 
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, Message
+from pyrogram.errors import FloodWait, MessageNotModified
 
-# Mengimpor GLOBAL_UI_MSG untuk menyambungkan kabel radar Papan Global
-from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
+# Mengimpor GLOBAL_UI_MSG dan GLOBAL_UI_PAGES untuk menyambungkan kabel radar Papan Global
+from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+from bot.logger import LOGGER
 
 @Client.on_message(filters.command(["task", "tasks"]))
 async def task_command(client: Client, message: Message):
+    chat_id = message.chat.id
+    
     # --- [FIX SPAM PAPAN GLOBAL] HAPUS PESAN LAMA JIKA ADA ---
-    if message.chat.id in GLOBAL_UI_MSG:
+    if chat_id in GLOBAL_UI_MSG:
         try:
-            await GLOBAL_UI_MSG[message.chat.id].delete()
+            await GLOBAL_UI_MSG[chat_id].delete()
         except Exception:
             pass
     # ---------------------------------------------------------
 
+    # --- [MEMORI HALAMAN] Set halaman ke 1 saat /task dikirim ---
+    GLOBAL_UI_PAGES[chat_id] = 1
+    # ------------------------------------------------------------
+    
     text, markup = get_status_text(page=1)
     
-    # Menyimpan pesan yang dikirim bot ke dalam variabel
-    sent_msg = await message.reply(text, reply_markup=markup, disable_web_page_preview=True)
-    
-    # Mendaftarkan pesan ini ke dalam memori Radar agar diperbarui secara real-time
-    GLOBAL_UI_MSG[message.chat.id] = sent_msg
+    try:
+        # Menyimpan pesan yang dikirim bot ke dalam variabel
+        sent_msg = await message.reply(text, reply_markup=markup, disable_web_page_preview=True)
+        
+        # Mendaftarkan pesan ini ke dalam memori Radar agar diperbarui secara real-time
+        GLOBAL_UI_MSG[chat_id] = sent_msg
+        
+    except FloodWait as e:
+        LOGGER.warning(f"Terkena FloodWait {e.value} detik saat mengirim /task.")
+        await asyncio.sleep(e.value)
+        # Coba kirim lagi setelah tidur sejenak
+        try:
+            sent_msg = await message.reply(text, reply_markup=markup, disable_web_page_preview=True)
+            GLOBAL_UI_MSG[chat_id] = sent_msg
+        except Exception:
+            pass
+    except Exception as e:
+        LOGGER.error(f"Gagal mengirim /task: {e}")
 
 @Client.on_callback_query(filters.regex(r"^status_"))
 async def status_callback(client: Client, query: CallbackQuery):
     data = query.data
+    chat_id = query.message.chat.id
     
     if data == "status_close":
-        await query.message.delete()
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
         return
         
     if data.startswith("status_page_"):
         page = int(data.split("_")[-1])
+        
+        # --- [MEMORI HALAMAN] Simpan posisi halaman saat klik Next/Prev ---
+        GLOBAL_UI_PAGES[chat_id] = page
+        # ------------------------------------------------------------------
+        
         text, markup = get_status_text(page=page)
         try:
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            try: await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+            except Exception: pass
+        except MessageNotModified:
+            pass
         except Exception:
             pass
-        await query.answer()
+            
+        try: await query.answer()
+        except Exception: pass
         
     elif data.startswith("status_refresh_"):
         page = int(data.split("_")[-1])
+        
+        # --- [MEMORI HALAMAN] Simpan posisi halaman saat klik Refresh ---
+        GLOBAL_UI_PAGES[chat_id] = page
+        # ----------------------------------------------------------------
+        
         text, markup = get_status_text(page=page)
         try:
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
             await query.answer("Status diperbarui!", show_alert=False)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            try: await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+            except Exception: pass
+            try: await query.answer("Status diperbarui (Tertunda limit)!", show_alert=False)
+            except Exception: pass
+        except MessageNotModified:
+            try: await query.answer("Status sudah yang terbaru!", show_alert=False)
+            except Exception: pass
         except Exception:
-            await query.answer("Status sudah yang terbaru!", show_alert=False)
+            pass
