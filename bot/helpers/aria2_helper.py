@@ -24,7 +24,11 @@ async def aria2_download(url, filepath, details=None):
         "max-connection-per-server": "16",
         "split": "16",
         "min-split-size": "1M",
-        "allow-overwrite": "true"
+        "allow-overwrite": "true",
+        "max-tries": "10",
+        "retry-wait": "3",
+        "timeout": "40",
+        "lowest-speed-limit": "10K"
     }
     
     # Jika ada headers dari layanan musik, pasangkan ke opsi Aria2!
