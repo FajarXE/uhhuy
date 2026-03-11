@@ -376,7 +376,7 @@ async def run_download_task(link: str, user: dict):
             )
             
             # --- PAKSA PAPAN GLOBAL REFRESH ---
-            for cid, m in utils.GLOBAL_UI_MSG.items():
+            for cid, m in list(utils.GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list() DI SINI
                 c_page = utils.GLOBAL_UI_PAGES.get(cid, 1)
                 g_text, g_markup = utils.get_status_text(page=c_page)
                 try: await edit_message(m, g_text, g_markup, False)
@@ -489,7 +489,7 @@ async def run_download_task(link: str, user: dict):
                 utils.GLOBAL_TASKS.pop(final_task_id, None)
                 
                 # Render ulang papan tanpa melompat ke halaman 1
-                for cid, m in utils.GLOBAL_UI_MSG.items():
+                for cid, m in list(utils.GLOBAL_UI_MSG.items()):  # <--- SUDAH DITAMBAHKAN list() DI SINI
                     c_page = utils.GLOBAL_UI_PAGES.get(cid, 1)
                     g_text, g_markup = utils.get_status_text(page=c_page)
                     try: await edit_message(m, g_text, g_markup, False)
