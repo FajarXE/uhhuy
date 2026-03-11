@@ -278,8 +278,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 
                 # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
                 try:
-                    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
-                    global_text, global_markup = get_status_text(page=1)
+                    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
                     
                     # Kumpulkan semua pesan yang harus di-update (Pemilik + Penonton)
                     targets = {}
@@ -289,9 +288,16 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                             targets[cid] = m
                     
                     from bot.helpers.message import edit_message
-                    # Broadcast pembaruan ke semua radar yang terbuka!
-                    for m in targets.values():
-                        await edit_message(m, global_text, global_markup, False)
+                    
+                    # --- Broadcast pembaruan ke semua radar DENGAN MEMORI HALAMAN! ---
+                    for cid, m in targets.items():
+                        current_page = GLOBAL_UI_PAGES.get(cid, 1)
+                        global_text, global_markup = get_status_text(page=current_page)
+                        try: 
+                            await edit_message(m, global_text, global_markup, False)
+                        except Exception: 
+                            pass
+                    # ------------------------------------------------------------------
                 except Exception: pass
                 last_update_time = now
 
