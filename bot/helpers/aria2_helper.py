@@ -116,7 +116,7 @@ async def aria2_download(url, filepath, details=None):
                         
                 # --- [FIX CPU OVERLOAD] CEGAH BOT LAG ---
                 # Mengubah 0.005 detik (200x request/detik) menjadi 1.5 detik
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(1.0)
  
     except Exception as e:
         LOGGER.error(f"Aria2 RPC Exception: {e}")
