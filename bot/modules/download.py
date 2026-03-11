@@ -588,7 +588,7 @@ async def start_link(link: str, user: dict) -> None:
 
     khinsider = ["https://downloads.khinsider.com", "downloads.khinsider.com", "http://downloads.khinsider.com"]
 
-    spotify = ["https://open.spotify.com", "http://open.spotify.com", "open.spotify.com", "https://spotify.link", "spotify.link", "https://spoti.fi", "spoti.fi"]
+    spotify = ["http://googleusercontent.com/spotify.com/", "https://spotify.link", "spotify.link", "https://spoti.fi", "spoti.fi"]
     
     # Blok TIDAL
     if link.startswith(tuple(tidal)):
@@ -1068,8 +1068,7 @@ async def start_link(link: str, user: dict) -> None:
             raise e
 
     # Blok SPOTIFY
-    # Perbaikan: Hapus "/8" agar bisa menangkap /13, /20, dll.
-    elif link.startswith(tuple(spotify)) or "googleusercontent.com/spotify.com" in link:
+    elif link.startswith(tuple(spotify)):
         user['provider'] = 'Spotify'
         try:
             await start_spotify(link, user)
