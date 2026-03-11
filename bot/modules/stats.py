@@ -12,6 +12,9 @@ from config import Config
 
 # --- TAMBAHAN IMPOR ---
 from bot.settings import bot_set
+import asyncio
+from pyrogram.errors import FloodWait, MessageNotModified
+from bot.logger import LOGGER
 
 # Simpan waktu start bot
 BOT_START_TIME = time.time()
@@ -200,41 +203,55 @@ async def stats_handler(client, message):
 
     msg = await message.reply("🔄 **Mengumpulkan Data...**", quote=True)
     
-    # Ambil text dari fungsi generator
     final_text = generate_stats_text()
     
-    # Tombol Refresh (Default) dan Tutup (Merah)
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh")],
         [InlineKeyboardButton("Close", callback_data="stats_close", style=ButtonStyle.DANGER)]
     ])
     
-    await msg.edit(final_text, reply_markup=buttons)
+    # --- [FIX ANTI-CRASH FLOODWAIT UNTUK STATS] ---
+    try:
+        await msg.edit(final_text, reply_markup=buttons)
+    except FloodWait as e:
+        LOGGER.warning(f"Tilang FloodWait {e.value} detik di stats.py. Menunggu...")
+        await asyncio.sleep(e.value)
+        try:
+            await msg.edit(final_text, reply_markup=buttons)
+        except Exception:
+            pass
+    except MessageNotModified:
+        pass
+    except Exception as e:
+        LOGGER.error(f"Gagal mengedit pesan stats: {e}")
+    # ----------------------------------------------
 
 # --- CALLBACK: REFRESH STATS ---
 @Client.on_callback_query(filters.regex("^stats_refresh$"))
 async def refresh_stats_callback(client, query: CallbackQuery):
-    # Ambil data terbaru
     new_text = generate_stats_text()
     
-    # Tombol Refresh (Default) dan Tutup (Merah)
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh")],
         [InlineKeyboardButton("Close", callback_data="stats_close", style=ButtonStyle.DANGER)]
     ])
     
+    # --- [FIX FLOODWAIT UNTUK TOMBOL REFRESH] ---
     try:
-        # Edit pesan dengan data baru
-        await query.edit_message_text(
-            new_text, 
-            reply_markup=buttons
-        )
+        await query.edit_message_text(new_text, reply_markup=buttons)
         await query.answer("✅ Data Diperbarui!")
+    except FloodWait as e:
+        LOGGER.warning(f"Tombol Refresh Stats terkena FloodWait {e.value} detik.")
+        await query.answer(f"⏳ Terkena limit Telegram. Tunggu {e.value} detik.", show_alert=True)
     except Exception:
         # Menghindari error jika tombol ditekan terlalu cepat (konten belum berubah)
         await query.answer("✅ Data sudah paling update!")
+    # --------------------------------------------
 
 # --- CALLBACK: CLOSE ---
 @Client.on_callback_query(filters.regex("^stats_close$"))
 async def close_callback(client, query: CallbackQuery):
-    await query.message.delete()
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
