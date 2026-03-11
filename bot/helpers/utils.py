@@ -35,10 +35,29 @@ BOT_START_TIME = time.time()
 GLOBAL_CANCEL_DICT = set()
 GLOBAL_TASKS = {}
 GLOBAL_UI_MSG = {}
+GLOBAL_UI_PAGES = {}
+
+# --- TAMBAHKAN DUA BARIS INI ---
+GLOBAL_TASK_LOCK = asyncio.Lock()
+GLOBAL_QUEUE_COUNT = 0
+# -------------------------------
 
 def get_status_text(page=1, limit=5):
     current_time = time.time()
-    stale = [k for k, v in GLOBAL_TASKS.items() if current_time - v.get('timestamp', current_time) > 120]
+    
+    stale = []
+    for k, v in list(GLOBAL_TASKS.items()):
+        action = str(v.get('action', '')).lower()
+        
+        # --- [UPDATE BAHASA: Pengecualian Auto-Cleaner] ---
+        # Kita ubah dari 'antrean' menjadi 'queue' dan 'processing'
+        if 'queue' in action or 'zipping' in action or 'processing' in action:
+            v['timestamp'] = current_time
+            continue
+            
+        if current_time - v.get('timestamp', current_time) > 120:
+            stale.append(k)
+            
     for k in stale:
         GLOBAL_TASKS.pop(k, None)
 
@@ -58,14 +77,25 @@ def get_status_text(page=1, limit=5):
     text = f"**📊 GLOBAL STATUS (Page {page}/{max_pages})**\n\n"
     for i, t in enumerate(tasks_page, start=start_idx + 1):
         text += f"**{i:02d}. {t['action']} {t['type']}**: `{t['title']}`\n"
-        text += f"**Since**: {t['since']}\n\n"
-        text += f"**Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
-        text += f"**{t['processed_label']}**: {t['processed']}\n"
-        text += f"**Current_Speed**: {t['speed']}\n"
-        text += f"**Machine_type**: {t['machine']}\n"
-        text += f"**Destination_mode**: {t['mode']}\n"
-        text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
-        text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
+        
+        # --- [TATA LETAK KHUSUS ANTREAN (MINIMALIS)] ---
+        if t.get('is_queue'):
+            text += f"**{t['processed_label']}**: {t['processed']}\n"
+            text += f"**Machine_type**: {t['machine']}\n"
+            text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
+            text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
+        # -----------------------------------------------
+        # --- [TATA LETAK NORMAL (FULL)] ---
+        else:
+            text += f"**Since**: {t['since']}\n\n"
+            text += f"**Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
+            text += f"**{t['processed_label']}**: {t['processed']}\n"
+            text += f"**Current_Speed**: {t['speed']}\n"
+            text += f"**Machine_type**: {t['machine']}\n"
+            text += f"**Destination_mode**: {t['mode']}\n"
+            text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
+            text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
+        # ----------------------------------
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n➖➖➖➖➖➖➖➖➖➖➖➖\n\n"
@@ -104,20 +134,25 @@ def get_status_text(page=1, limit=5):
     text += f"RAM: {ram_usage:.1f}% | UPTIME: {h}h {m}m {s}s\n"
     # ------------------------------------------------------
 
+    # --- MUNCULKAN INFO ANTRIAN DI SINI ---
+    if GLOBAL_QUEUE_COUNT > 0:
+        text += f"⏳ **IN QUEUE**: {GLOBAL_QUEUE_COUNT} Task(s)\n"
+    # --------------------------------------
+
     text += f"🔻 {global_dl} | 🔺 {global_ul}\n"
 
     buttons = []
     nav_row = []
     if page > 1:
-        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"status_page_{page-1}"))
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"status_page_{page-1}", style=ButtonStyle.PRIMARY))
     if page < max_pages:
-        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"status_page_{page+1}"))
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"status_page_{page+1}", style=ButtonStyle.PRIMARY))
 
     if nav_row:
         buttons.append(nav_row)
 
     buttons.append([
-        InlineKeyboardButton("🔄 Refresh", callback_data=f"status_refresh_{page}", style=ButtonStyle.PRIMARY),
+        InlineKeyboardButton("♻️ Refresh", callback_data=f"status_refresh_{page}", style=ButtonStyle.SUCCESS),
         InlineKeyboardButton("❌ Close", callback_data="status_close", style=ButtonStyle.DANGER)
     ])     
 
@@ -306,20 +341,26 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 # ------------------------------------------------
                 
                 # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
-                global_text, global_markup = get_status_text(page=1)
                 try: 
+                    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+                    
                     targets = {}
                     if update_details and update_details.get('msg'):
                         targets[update_details['msg'].chat.id] = update_details['msg']
                     
-                    from bot.helpers.utils import GLOBAL_UI_MSG
                     if GLOBAL_UI_MSG:
                         for cid, m in GLOBAL_UI_MSG.items():
                             targets[cid] = m
                     
                     from bot.helpers.message import edit_message
-                    for m in targets.values():
-                        await edit_message(m, global_text, global_markup, False)
+                    
+                    # --- BACA MEMORI HALAMAN SAAT REFRESH ---
+                    for cid, m in targets.items():
+                        current_page = GLOBAL_UI_PAGES.get(cid, 1)
+                        g_text, g_markup = get_status_text(page=current_page)
+                        try: await edit_message(m, g_text, g_markup, False)
+                        except: pass
+                    # ----------------------------------------
                 except: pass
                 # ------------------------------------------
             
@@ -695,8 +736,7 @@ async def progress_message(done, total, details):
     # (CATATAN: Baris GLOBAL_TASKS.pop sengaja TIDAK ADA di sini agar task tidak hilang saat 100%)
     
     # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
-    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG
-    global_text, global_markup = get_status_text(page=1)
+    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
     try: 
         targets = {}
         if details and details.get('msg'):
@@ -707,8 +747,18 @@ async def progress_message(done, total, details):
                 targets[cid] = m
                 
         from bot.helpers.message import edit_message
-        for m in targets.values():
-            await edit_message(m, global_text, global_markup, False)
+        
+        # --- BACA MEMORI HALAMAN SAAT REFRESH ---
+        for cid, m in targets.items():
+            # Mengambil halaman terakhir yang dibuka pengguna (default 1)
+            current_page = GLOBAL_UI_PAGES.get(cid, 1) 
+            g_text, g_markup = get_status_text(page=current_page)
+            
+            try: 
+                await edit_message(m, g_text, g_markup, False)
+            except: 
+                pass
+        # ----------------------------------------
     except FloodWait: pass
     except MessageNotModified: pass
     except Exception: pass
