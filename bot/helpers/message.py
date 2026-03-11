@@ -284,7 +284,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     targets = {}
                     if msg: targets[msg.chat.id] = msg
                     if GLOBAL_UI_MSG:
-                        for cid, m in GLOBAL_UI_MSG.items():
+                        for cid, m in list(GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list()
                             targets[cid] = m
                     
                     from bot.helpers.message import edit_message
