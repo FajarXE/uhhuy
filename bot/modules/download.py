@@ -382,21 +382,27 @@ async def run_download_task(link: str, user: dict):
                 try: await edit_message(m, g_text, g_markup, False)
                 except: pass
             # ----------------------------------
-
-        # --- [PERBAIKAN: SMART POLLING LOCK] ---
-        # Task tidak lagi tidur nyenyak, tapi mengecek tombol Cancel tiap 1.5 detik
+        
+        # --- [PERBAIKAN: SMART POLLING LOCK (ANTI-ACAK / STRICT FIFO)] ---
+        import hashlib
+        cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+        
+        # Masuk ke barisan antrean gembok (Jangan keluar-keluar lagi!)
+        lock_task = asyncio.create_task(utils.GLOBAL_TASK_LOCK.acquire())
         lock_acquired = False
-        while not lock_acquired:
-            try:
-                # Coba dapatkan gembok dengan batas waktu 1.5 detik
-                await asyncio.wait_for(utils.GLOBAL_TASK_LOCK.acquire(), timeout=1.5)
+        
+        while True:
+            # Tetap berada di barisan, tapi cek kondisi setiap 1.5 detik
+            done, pending = await asyncio.wait([lock_task], timeout=1.5)
+            
+            if lock_task in done:
                 lock_acquired = True
-            except asyncio.TimeoutError:
-                # Jika 1.5 detik belum dapat gembok (masih antre), cek apakah tombol Cancel ditekan!
-                import hashlib
-                cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-                if cancel_id in utils.GLOBAL_CANCEL_DICT:
-                    raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+                break # Gembok berhasil didapat sesuai urutan!
+                
+            # Jika belum dapat giliran, cek apakah user menekan tombol Cancel
+            if cancel_id in utils.GLOBAL_CANCEL_DICT:
+                lock_task.cancel() # Keluar dari barisan secara permanen
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
         try: 
             # === [ZONA EKSKLUSIF (LOCK AKTIF)] ===
