@@ -31,7 +31,7 @@ class Bot(Client):
             workdir=Config.WORK_DIR,
             in_memory=True,
             ipv6=False,
-            workers=100,
+            workers=20,
             sleep_threshold=30
         )
 
