@@ -8,6 +8,8 @@ import random
 import aiohttp
 import time
 
+import bot.helpers.utils as utils
+
 # --- ANTI INFINITE CRASH LOOP ---
 BOT_UPTIME = time.time()
 # --------------------------------
@@ -320,39 +322,108 @@ async def resolve_shortlink(link: str) -> str:
 
 async def run_download_task(link: str, user: dict):
     task_successful = False
+    added_to_queue = False
+    
     try:
-        user['bot_msg'] = await send_message(user, 'Memulai tugas...')
+        user['bot_msg'] = await send_message(user, 'Mempersiapkan tugas...')
         
-        # --- [FIX DOUBLE UI] PUSATKAN PESAN STATUS ---
-        from bot.helpers.utils import GLOBAL_UI_MSG
+        # --- [FIX DOUBLE UI] HAPUS PESAN LAMA DENGAN METODE LEBIH KUAT ---
         chat_id = user['chat_id']
-        # Jika ada pesan status sebelumnya, hapus agar tidak spam!
-        if chat_id in GLOBAL_UI_MSG:
-            try: await aio.delete_messages(chat_id, GLOBAL_UI_MSG[chat_id].id)
-            except: pass
-        # Jadikan pesan yang baru ini sebagai UI Utama
-        GLOBAL_UI_MSG[chat_id] = user['bot_msg']
-        # --------------------------------------------
+        if chat_id in utils.GLOBAL_UI_MSG:
+            try: 
+                await utils.GLOBAL_UI_MSG[chat_id].delete()
+            except Exception: 
+                pass
+        utils.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
+        # -----------------------------------------------------------------
         
-        resolved = await resolve_shortlink(link)
-        if resolved != link:
-             link = resolved
-             user['link'] = link
+        # CEK APAKAH ADA TUGAS LAIN YANG SEDANG BERJALAN
+        if utils.GLOBAL_TASK_LOCK.locked():
+            utils.GLOBAL_QUEUE_COUNT += 1
+            added_to_queue = True
+            
+            import hashlib
+            import time
+            cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+            
+            # --- [FIX TAMPILAN ANTREAN MINIMALIS BAHASA INGGRIS] ---
+            utils.GLOBAL_TASKS[cancel_id] = {
+                'action': 'Queue',
+                'type': 'Task',
+                'title': link,
+                'since': '', 
+                'progress_bar': '', 
+                'percentage': '',
+                'processed_label': 'Status',
+                'processed': f"Waiting for turn {utils.GLOBAL_QUEUE_COUNT}",
+                'speed': '',
+                'machine': 'Queue System',
+                'mode': '',
+                'cancel_id': cancel_id,
+                'dl_speed': '0B/s',
+                'ul_speed': '0B/s',
+                'speed_dl_raw': 0,
+                'speed_ul_raw': 0,
+                'user_id': chat_id,
+                'timestamp': time.time(),
+                'is_queue': True   # <-- TANDA KHUSUS AGAR UI JADI MINIMALIS
+            }
+            # -------------------------------------------------------
+            
+            await edit_message(
+                user['bot_msg'], 
+                f"⏳ **In Queue**\nYour task is waiting for its turn.\n(Waiting for {utils.GLOBAL_QUEUE_COUNT} other task(s) to finish)\n\nCancel: `/cancel_{cancel_id}`"
+            )
+            
+            # --- PAKSA PAPAN GLOBAL REFRESH AGAR ANTREAN MUNCUL ---
+            for cid, m in utils.GLOBAL_UI_MSG.items():
+                c_page = utils.GLOBAL_UI_PAGES.get(cid, 1)
+                g_text, g_markup = utils.get_status_text(page=c_page)
+                try: await edit_message(m, g_text, g_markup, False)
+                except: pass
+            # ------------------------------------------------------
 
-        await start_link(link, user)
-        task_successful = True
+        # MENGUNCI PROSES
+        async with utils.GLOBAL_TASK_LOCK:
+            if added_to_queue:
+                utils.GLOBAL_QUEUE_COUNT -= 1
+                added_to_queue = False 
+                
+            import hashlib
+            import time
+            cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+            if cancel_id in utils.GLOBAL_CANCEL_DICT:
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+
+            # --- [TRANSISI VISUAL] UBAH STATUS JADI PROCESSING ---
+            if cancel_id in utils.GLOBAL_TASKS:
+                utils.GLOBAL_TASKS[cancel_id]['action'] = 'Processing'
+                utils.GLOBAL_TASKS[cancel_id]['processed'] = 'Fetching metadata...'
+                utils.GLOBAL_TASKS[cancel_id]['timestamp'] = time.time()
+                utils.GLOBAL_TASKS[cancel_id]['is_queue'] = False # <-- Matikan minimalis, kembali ke tampilan Full
+            # ------------------------------------------------------------
+
+            await edit_message(user['bot_msg'], '🚀 Starting task...')
+            
+            resolved = await resolve_shortlink(link)
+            if resolved != link:
+                 link = resolved
+                 user['link'] = link
+
+            await start_link(link, user)
+            task_successful = True
  
     except asyncio.CancelledError:
-        LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan (mungkin shutdown).")
-        await send_message(user, "Tugas dibatalkan.")
+        LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan.")
+        try: await edit_message(user['bot_msg'], "🛑 Tugas dibatalkan.")
+        except: pass
         await asyncio.sleep(5) 
             
     except Exception as e:
+        import traceback
         error_str = str(e)
-        # Deteksi Error yang Dapat Dimaafkan (Tanpa Traceback)
         is_handled_error = False
         
-        # --- PERBAIKAN: Menambahkan error umum lainnya ---
         if "not available in any" in error_str or \
            "Maaf, tidak ada akun" in error_str or \
            "NotImplementedError" in error_str or \
@@ -366,10 +437,10 @@ async def run_download_task(link: str, user: dict):
            "halaman sistem" in error_str or \
            "Gagal mengambil profil artis" in error_str or \
            "404" in error_str or \
-           isinstance(e, NapsterError) or \
-           isinstance(e, BugsError) or \
-           (highresaudio_manager and isinstance(e, HighResAudioError)) or \
-           isinstance(e, DeezerError): 
+           "HighResAudioError" in error_str or \
+           "DeezerError" in error_str or \
+           "BugsError" in error_str or \
+           "NapsterError" in error_str: 
             is_handled_error = True
         
         error_message = f"Tugas Gagal: {e}" if is_handled_error else f"Tugas Gagal: Terjadi error.\n`{e}`"
@@ -379,37 +450,32 @@ async def run_download_task(link: str, user: dict):
         else:
              LOGGER.error(f"Error fatal di run_download_task: {e}\n{traceback.format_exc()}")
 
-        try:
-            await edit_message(user['bot_msg'], error_message)
-        except:
-            pass 
+        try: await edit_message(user['bot_msg'], error_message)
+        except: pass 
             
     finally:
+        if added_to_queue:
+            utils.GLOBAL_QUEUE_COUNT -= 1
+            
         await cleanup(user)
         try:
-            # --- [TRANSISI MULUS] PEMBERSIHAN FINAL ---
             if 'bot_msg' in user:
                 import hashlib
                 final_task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-                from bot.helpers.utils import GLOBAL_TASKS, GLOBAL_UI_MSG, get_status_text
-                from bot.helpers.message import edit_message
                 
-                # Hapus task sepenuhnya HANYA setelah proses Download+Zipping+Upload selesai
-                GLOBAL_TASKS.pop(final_task_id, None)
+                utils.GLOBAL_TASKS.pop(final_task_id, None)
                 
-                # Render ulang papan agar task ini resmi hilang dari layar
-                global_text, global_markup = get_status_text(page=1)
+                global_text, global_markup = utils.get_status_text(page=1)
                 chat_id = user['chat_id']
-                target_msg = GLOBAL_UI_MSG.get(chat_id, user['bot_msg'])
+                target_msg = utils.GLOBAL_UI_MSG.get(chat_id, user['bot_msg'])
                 try: await edit_message(target_msg, global_text, global_markup, False)
                 except: pass
-            # ------------------------------------------
 
             if task_successful:
-                from bot.helpers.utils import GLOBAL_TASKS, GLOBAL_UI_MSG
-                if not GLOBAL_TASKS: 
-                    await aio.delete_messages(user['chat_id'], user['bot_msg'].id)
-                    GLOBAL_UI_MSG.pop(user['chat_id'], None)
+                if not utils.GLOBAL_TASKS: 
+                    try: await user['bot_msg'].delete()
+                    except: pass
+                    utils.GLOBAL_UI_MSG.pop(user['chat_id'], None)
         except:
             pass
 
