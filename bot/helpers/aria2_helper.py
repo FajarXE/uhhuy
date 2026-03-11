@@ -86,9 +86,20 @@ async def aria2_download(url, filepath, details=None):
                     total_length = int(status.get("totalLength", 0))
                     completed_length = int(status.get("completedLength", 0))
                     
-                    # Update Telegram Message UI secara Live
-                    if details and total_length > 0:
-                        await progress_message(completed_length, total_length, details)
+                    # --- [FIX GHOST TASK] JANTUNG BUATAN ---
+                    if details:
+                        if total_length > 0:
+                            await progress_message(completed_length, total_length, details)
+                        else:
+                            # Memompa detak jantung meski Aria2 nyangkut agar tidak dihapus sistem
+                            from bot.helpers.utils import GLOBAL_TASKS
+                            import time
+                            task_id = details.get('task_id')
+                            if task_id and task_id in GLOBAL_TASKS:
+                                GLOBAL_TASKS[task_id]['timestamp'] = time.time()
+                                GLOBAL_TASKS[task_id]['action'] = 'Connecting'
+                                GLOBAL_TASKS[task_id]['processed'] = 'Mengalokasikan file...'
+                    # ----------------------------------------
                     
                     if state == "complete":
                         ACTIVE_DOWNLOADS.pop(gid, None)
@@ -103,6 +114,8 @@ async def aria2_download(url, filepath, details=None):
                         LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
                         return False
                         
+                # --- [FIX CPU OVERLOAD] CEGAH BOT LAG ---
+                # Mengubah 0.005 detik (200x request/detik) menjadi 1.5 detik
                 await asyncio.sleep(1.5)
  
     except Exception as e:
