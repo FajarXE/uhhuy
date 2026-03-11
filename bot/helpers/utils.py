@@ -349,7 +349,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                         targets[update_details['msg'].chat.id] = update_details['msg']
                     
                     if GLOBAL_UI_MSG:
-                        for cid, m in GLOBAL_UI_MSG.items():
+                        for cid, m in list(GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list()
                             targets[cid] = m
                     
                     from bot.helpers.message import edit_message
@@ -743,7 +743,7 @@ async def progress_message(done, total, details):
             targets[details['msg'].chat.id] = details['msg']
         
         if GLOBAL_UI_MSG:
-            for cid, m in GLOBAL_UI_MSG.items():
+            for cid, m in list(GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list()
                 targets[cid] = m
                 
         from bot.helpers.message import edit_message
