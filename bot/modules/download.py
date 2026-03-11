@@ -1056,7 +1056,7 @@ async def start_link(link: str, user: dict) -> None:
     elif link.startswith(tuple(khinsider)):
         user['provider'] = 'Khinsider'
         if not khinsider_manager:
-             raise Exception("Modul Khinsider tidak dimuat (Folder/file helper hilang).")
+            raise Exception("Modul Khinsider tidak dimuat (Folder/file helper hilang).")
         
         try:
             await start_khinsider(link, user)
@@ -1066,16 +1066,16 @@ async def start_link(link: str, user: dict) -> None:
             LOGGER.error(f"Khinsider Gagal: {e}")
             raise e
 
-     # -----------------------------------------
-     # Blok SPOTIFY (Kebal Peluru)
-     # -----------------------------------------
-     elif link.strip().startswith((
+    # -----------------------------------------
+    # Blok SPOTIFY (Kebal Peluru)
+    # -----------------------------------------
+    elif link.strip().startswith((
         "http://googleusercontent.com/spotify.com/", 
         "https://googleusercontent.com/spotify.com/",
         "https://spotify.link", "spotify.link", 
         "https://spoti.fi", "spoti.fi",
         "https://open.spotify.com", "open.spotify.com"
-     )):
+    )):
         user['provider'] = 'Spotify'
         try:
             await start_spotify(link.strip(), user)
@@ -1085,6 +1085,6 @@ async def start_link(link: str, user: dict) -> None:
             LOGGER.error(f"Spotify Gagal: {e}")
             raise e
 
-     else:
-         LOGGER.warning(f"Link tidak dikenali: {link}")
-         raise Exception(f"Link tidak dikenali. Bot tidak tahu cara mengunduh dari: {link}")
+    else:
+        LOGGER.warning(f"Link tidak dikenali: {link}")
+        raise Exception(f"Link tidak dikenali. Bot tidak tahu cara mengunduh dari: {link}")
