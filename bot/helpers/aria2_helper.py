@@ -103,7 +103,7 @@ async def aria2_download(url, filepath, details=None):
                         LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
                         return False
                         
-                await asyncio.sleep(0.005)
+                await asyncio.sleep(1.5)
  
     except Exception as e:
         LOGGER.error(f"Aria2 RPC Exception: {e}")
