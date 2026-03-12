@@ -197,7 +197,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 return 
 
             now = time.time()
-            if msg and (now - last_update_time > 2.5 or current == total):
+            if msg and (now - last_update_time > 3.0 or current == total):
                 diff = now - start_time
                 if diff < 1: diff = 1
                 
