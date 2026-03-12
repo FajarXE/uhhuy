@@ -38,7 +38,7 @@ GLOBAL_UI_MSG = {}
 GLOBAL_UI_PAGES = {}
 
 # --- TAMBAHKAN DUA BARIS INI ---
-GLOBAL_TASK_LOCK = asyncio.Lock()
+GLOBAL_TASK_LOCK = asyncio.Semaphore(3)
 GLOBAL_QUEUE_COUNT = 0
 # -------------------------------
 
