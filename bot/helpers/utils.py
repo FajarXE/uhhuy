@@ -640,7 +640,7 @@ async def progress_message(done, total, details):
     now = time.time()
     
     if 'last_updated' in details:
-        if now - details['last_updated'] < 2.0 and done < total:
+        if now - details['last_updated'] < 3.0 and done < total:
             return
     details['last_updated'] = now
 
