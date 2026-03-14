@@ -542,6 +542,14 @@ async def batch_telegram_upload(metadata, user):
     for track in tracks_to_upload:
         try:
             await telegram_upload(track, user, batch_mode=True)
+            
+            # --- [OPTIMASI ANTI-FLOODWAIT TELEGRAM] ---
+            # Beri jeda 1.5 detik setiap selesai mengirim 1 lagu.
+            # Ini mencegah API Telegram mendeteksi bot melakukan spam
+            # dan menghindari error "Too Many Requests" (FloodWait).
+            await asyncio.sleep(1.5)
+            # ------------------------------------------
+            
         except asyncio.CancelledError:
             LOGGER.info("Batch upload dibatalkan oleh pengguna.")
             raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
