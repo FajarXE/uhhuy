@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/utils.py] - AGGRESSIVE FETCH & DEBUG
+# [FILE: bot/helpers/utils.py] - QUEUE REMOVED & ANTI-FLOODWAIT
 
 import os
 import math
@@ -28,19 +28,14 @@ from .aria2_helper import aria2_download
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
 
-# --- TAMBAHKAN BARIS INI UNTUK MENGHITUNG UPTIME ---
 BOT_START_TIME = time.time()
-# ---------------------------------------------------
 
 GLOBAL_CANCEL_DICT = set()
 GLOBAL_TASKS = {}
 GLOBAL_UI_MSG = {}
 GLOBAL_UI_PAGES = {}
 
-# --- TAMBAHKAN DUA BARIS INI ---
-GLOBAL_TASK_LOCK = asyncio.Semaphore(3)
-GLOBAL_QUEUE_COUNT = 0
-# -------------------------------
+# PENGHAPUSAN: GLOBAL_TASK_LOCK dan GLOBAL_QUEUE_COUNT telah dihapus.
 
 def get_status_text(page=1, limit=5):
     current_time = time.time()
@@ -49,9 +44,7 @@ def get_status_text(page=1, limit=5):
     for k, v in list(GLOBAL_TASKS.items()):
         action = str(v.get('action', '')).lower()
         
-        # --- [UPDATE BAHASA: Pengecualian Auto-Cleaner] ---
-        # Kita ubah dari 'antrean' menjadi 'queue' dan 'processing'
-        if 'queue' in action or 'zipping' in action or 'processing' in action or 'connecting' in action or 'fetching' in action:
+        if 'zipping' in action or 'processing' in action or 'connecting' in action or 'fetching' in action:
             v['timestamp'] = current_time
             continue
             
@@ -74,45 +67,32 @@ def get_status_text(page=1, limit=5):
     end_idx = start_idx + limit
     tasks_page = tasks[start_idx:end_idx]
 
-    text = f"**📊 GLOBAL STATUS (Page {page}/{max_pages})**\n\n"
+    # PENGHAPUSAN: Teks 📊 GLOBAL STATUS (Page 1/1) dihapus sesuai permintaan
+    text = ""
     for i, t in enumerate(tasks_page, start=start_idx + 1):
         text += f"**{i:02d}. {t['action']} {t['type']}**: `{t['title']}`\n"
-        
-        # --- [TATA LETAK KHUSUS ANTREAN (MINIMALIS)] ---
-        if t.get('is_queue'):
-            text += f"**{t['processed_label']}**: {t['processed']}\n"
-            text += f"**Machine_type**: {t['machine']}\n"
-            text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
-            text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
-        # -----------------------------------------------
-        # --- [TATA LETAK NORMAL (FULL)] ---
-        else:
-            text += f"**Since**: {t['since']}\n\n"
-            text += f"**Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
-            text += f"**{t['processed_label']}**: {t['processed']}\n"
-            text += f"**Current_Speed**: {t['speed']}\n"
-            text += f"**Machine_type**: {t['machine']}\n"
-            text += f"**Destination_mode**: {t['mode']}\n"
-            text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
-            text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
-        # ----------------------------------
+        text += f"**Since**: {t['since']}\n\n"
+        text += f"**Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
+        text += f"**{t['processed_label']}**: {t['processed']}\n"
+        text += f"**Current_Speed**: {t['speed']}\n"
+        text += f"**Machine_type**: {t['machine']}\n"
+        text += f"**Destination_mode**: {t['mode']}\n"
+        text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
+        text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n➖➖➖➖➖➖➖➖➖➖➖➖\n\n"
 
-    # --- TAMBAHKAN KECEPATAN GLOBAL DI PALING BAWAH ---
     total_dl_raw = 0
     total_ul_raw = 0
     
     for t in tasks:
-        # Menjumlahkan angka kecepatan mentah dari semua tugas yang berjalan
         total_dl_raw += t.get('speed_dl_raw', 0)
         total_ul_raw += t.get('speed_ul_raw', 0)
         
     global_dl = f"{get_readable_file_size(total_dl_raw)}/s" if total_dl_raw > 0 else "0B/s"
     global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
         
-    # --- [FITUR BARU] STATISTIK CPU, RAM, FREE & UPTIME ---
     try:
         import psutil
         cpu_usage = psutil.cpu_percent(interval=None)
@@ -122,9 +102,8 @@ def get_status_text(page=1, limit=5):
         ram_usage = 0.0
 
     import shutil
-    # Mengarahkan pengecekan disk langsung ke folder tempat Render di-mount
     total, used, free = shutil.disk_usage(Config.DOWNLOAD_BASE_DIR)
-    free_storage = free / (1024 ** 3) # Konversi ke GB
+    free_storage = free / (1024 ** 3)
 
     uptime_seconds = int(time.time() - BOT_START_TIME)
     h, rem = divmod(uptime_seconds, 3600)
@@ -132,13 +111,6 @@ def get_status_text(page=1, limit=5):
 
     text += f"\nCPU: {cpu_usage:.1f}% | FREE: {free_storage:.2f} GB\n"
     text += f"RAM: {ram_usage:.1f}% | UPTIME: {h}h {m}m {s}s\n"
-    # ------------------------------------------------------
-
-    # --- MUNCULKAN INFO ANTRIAN DI SINI ---
-    if GLOBAL_QUEUE_COUNT > 0:
-        text += f"⏳ **IN QUEUE**: {GLOBAL_QUEUE_COUNT} Task(s)\n"
-    # --------------------------------------
-
     text += f"🔻 {global_dl} | 🔺 {global_ul}\n"
 
     buttons = []
@@ -158,7 +130,6 @@ def get_status_text(page=1, limit=5):
 
     return text, InlineKeyboardMarkup(buttons)
 
-# Batas aman Telegram (1.9GB)
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
 
 async def download_file(url, path, retries=3, timeout=30, details=None):
@@ -167,11 +138,9 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
     
     for attempt in range(1, retries + 1):
         try:
-            # Panggil aria2
             from .aria2_helper import aria2_download
             success = await aria2_download(url, path, details)
             
-            # ---> PERBAIKAN FATAL: Kembalikan None jika sukses! <---
             if success and os.path.exists(path) and os.path.getsize(path) > 0:
                 return None 
             else:
@@ -179,7 +148,6 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
         except Exception as e:
             LOGGER.error(f"Download gagal: {e}")
             
-        # ---> Kembalikan teks error (Truthy) jika gagal <---
         if attempt == retries: 
             return f"Gagal mengunduh file setelah {retries} percobaan."
             
@@ -244,15 +212,12 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
 
     start_time = time.time()
     
-    # --- [TRANSISI MULUS] GUNAKAN ID PESAN SEBAGAI ID TASK ---
     if update_details and update_details.get('msg'):
         batch_id = hashlib.md5(str(update_details['msg'].id).encode()).hexdigest()[:16]
-    # ---------------------------------------------------------
     
     async def run_with_sem(task):
         nonlocal completed_tasks
         
-        # [FIX 1] Menutup coroutine secara resmi agar tidak error "never awaited"
         if batch_id in GLOBAL_CANCEL_DICT:
             if hasattr(task, 'close'): task.close() 
             return None
@@ -317,7 +282,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 text_to_send += f"**Cancel**: /cancel_{batch_id}\n\n"
                 text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
-                # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS DI SINI ---
                 GLOBAL_TASKS[batch_id] = {
                     'action': action,
                     'type': task_type,
@@ -333,14 +297,12 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                     'cancel_id': batch_id,
                     'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
                     'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-                    'speed_dl_raw': speed_dl,  # <--- KABEL DATA MENTAH ARIA2
-                    'speed_ul_raw': speed_ul,  # <--- KABEL DATA MENTAH ARIA2
+                    'speed_dl_raw': speed_dl, 
+                    'speed_ul_raw': speed_ul, 
                     'user_id': update_details['msg'].chat.id if update_details and update_details.get('msg') else 0,
                     'timestamp': time.time()
                 }
-                # ------------------------------------------------
                 
-                # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
                 try: 
                     from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
                     
@@ -349,23 +311,20 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                         targets[update_details['msg'].chat.id] = update_details['msg']
                     
                     if GLOBAL_UI_MSG:
-                        for cid, m in list(GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list()
+                        for cid, m in list(GLOBAL_UI_MSG.items()):
                             targets[cid] = m
                     
                     from bot.helpers.message import edit_message
                     
-                    # --- BACA MEMORI HALAMAN SAAT REFRESH ---
                     for cid, m in targets.items():
                         current_page = GLOBAL_UI_PAGES.get(cid, 1)
                         g_text, g_markup = get_status_text(page=current_page)
                         try: await edit_message(m, g_text, g_markup, False)
                         except: pass
-                    # ----------------------------------------
                 except: pass
-                # ------------------------------------------
             
-            # [FIX 2] Memecah jeda 3.5 detik menjadi kepingan kecil agar super responsif terhadap Cancel
-            for _ in range(35):
+            # ANTI-FLOODWAIT BATCH TASK: Diubah agar update lebih jarang tapi loop tetap responsif terhadap cancel
+            for _ in range(55): # Naik jadi ~5.5 detik jeda UI Update
                 if not is_running or batch_id in GLOBAL_CANCEL_DICT:
                     break
                 await asyncio.sleep(0.1)
@@ -377,14 +336,13 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
     is_running = False
     await updater_task
     
-    # [FIX 3] Garansi Mutlak UI akan berubah menjadi Batal!
     if batch_id in GLOBAL_CANCEL_DICT:
         if update_details and 'msg' in update_details:
             try: await edit_message(update_details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
             except: pass
             
         import asyncio
-        GLOBAL_TASKS.pop(batch_id, None) # <--- CLEANUP TASK YANG DIBATALKAN
+        GLOBAL_TASKS.pop(batch_id, None) 
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         
     return results
@@ -415,7 +373,6 @@ async def zip_handler(folderpath):
                 u_id = int(part)
                 u_data = bot_set.user_data.get(u_id, {})
                 if not u_data:
-                     # Coba string jika int gagal
                      u_data = bot_set.user_data.get(str(u_id), {})
                 if u_data.get('upload_mode'):
                     user_mode = u_data['upload_mode']
@@ -513,36 +470,20 @@ async def move_sorted_playlist(metadata, user) -> str:
 
     return await asyncio.to_thread(_sync_move)
 
-# --- [FIX UTAMA: FETCH ZIP SETTINGS ROBUST] ---
 def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, bool]:
-    # 1. Pastikan user_id valid
     raw_id = users.get("user_id")
     if not raw_id:
         return (False, False, False, False)
         
     user_id = int(raw_id)
-    
-    # 2. Coba ambil data user dari Memory (Cek Int dan String Key)
     mem_data = bot_set.user_data.get(user_id)
     if not mem_data:
         mem_data = bot_set.user_data.get(str(user_id), {})
-    
-    # DEBUG: Intip isi memori untuk user ini
-    # LOGGER.info(f"[DEBUG UTILS] ID: {user_id} | Type: {type(user_id)} | MEM: {mem_data}")
 
-    # 3. Fungsi cek Key (Lowercase & Uppercase)
     def check(key_base):
-        # Cek lowercase di User Memory
-        if key_base.lower() in mem_data:
-            return bool(mem_data[key_base.lower()])
-        # Cek Uppercase di User Memory (Jaga-jaga legacy)
-        if key_base.upper() in mem_data:
-            return bool(mem_data[key_base.upper()])
-        
-        # Cek Global Default (bot_set)
-        if hasattr(bot_set, key_base.lower()):
-            return bool(getattr(bot_set, key_base.lower()))
-            
+        if key_base.lower() in mem_data: return bool(mem_data[key_base.lower()])
+        if key_base.upper() in mem_data: return bool(mem_data[key_base.upper()])
+        if hasattr(bot_set, key_base.lower()): return bool(getattr(bot_set, key_base.lower()))
         return False
 
     pl_zip = check("playlist_zip")
@@ -551,7 +492,6 @@ def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, boo
     poster = check("art_poster")
 
     return (pl_zip, al_zip, ar_zip, poster)
-# ----------------------------------------------
 
 async def post_art_poster(user:dict, meta:dict):
     photo = meta.get('cover')
@@ -599,7 +539,6 @@ async def post_simple_message(user, meta, r_link=None, i_link=None):
     markup = links_button(r_link, i_link)
     await send_message(user, caption, markup=markup)
 
-# --- HELPER FORMAT WAKTU ---
 def get_readable_time(seconds: int) -> str:
     count = 0
     ping_time = ""
@@ -620,7 +559,6 @@ def get_readable_time(seconds: int) -> str:
     ping_time += ":".join(time_list)
     return ping_time if ping_time else "0s"
 
-# --- HELPER FORMAT UKURAN ---
 def get_readable_file_size(size_in_bytes) -> str:
     if not size_in_bytes:
         return "0B"
@@ -630,17 +568,16 @@ def get_readable_file_size(size_in_bytes) -> str:
         size_in_bytes /= 1024.0
     return f"{size_in_bytes:.2f} YB"
 
-# --- FUNGSI PROGRESS BAR BARU ---
 async def progress_message(done, total, details):
-    # --- [FIX SPAM PAPAN GLOBAL] Abaikan task latar belakang ---
     if not details or not details.get('msg'):
         return
     import time
     import math
     now = time.time()
     
+    # ANTI FLOODWAIT: Edit delay minimum 5.5 detik
     if 'last_updated' in details:
-        if now - details['last_updated'] < 3.0 and done < total:
+        if now - details['last_updated'] < 5.5 and done < total:
             return
     details['last_updated'] = now
 
@@ -671,18 +608,15 @@ async def progress_message(done, total, details):
         
     since_str = get_readable_time(int(diff))
     
-    # --- DETEKSI ACTION & TYPE ---
     title = details.get('title', 'Unknown File')
     action = details.get('action', 'Download').capitalize()
     task_type = details.get('type', 'Task').capitalize()
     
-    # --- [TRANSISI MULUS] GUNAKAN ID PESAN ASLI SEBAGAI TASK ID ---
     if details and details.get('msg'):
         import hashlib
         task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16]
     else:
         task_id = details.get('task_id', 'unknown')
-    # --------------------------------------------------------------
     
     from bot.settings import bot_set
     try:
@@ -702,16 +636,11 @@ async def progress_message(done, total, details):
 
     machine = details.get('machine', 'Aria2c 1.37.0')
 
-    # --- [FIX SPEED UPLOAD] GABUNGKAN KECEPATAN TELEGRAM ---
-    # Aria2 melaporkan 0 saat Upload, jadi kita wajib menyuntikkan 
-    # kecepatan aktual Telegram (variabel 'speed') ke kabel data utama!
     if action.lower() == 'upload':
         speed_ul += speed
     elif action.lower() == 'download' and machine == 'Telegram API':
         speed_dl += speed
-    # -------------------------------------------------------
 
-    # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS ---
     from bot.helpers.utils import GLOBAL_TASKS
     GLOBAL_TASKS[task_id] = {
         'action': action,
@@ -728,14 +657,12 @@ async def progress_message(done, total, details):
         'cancel_id': task_id,
         'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
         'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-        'speed_dl_raw': speed_dl,  # <--- KABEL DATA MENTAH UI
-        'speed_ul_raw': speed_ul,  # <--- KABEL DATA MENTAH UI
+        'speed_dl_raw': speed_dl,
+        'speed_ul_raw': speed_ul,
         'user_id': details['msg'].chat.id if details and details.get('msg') else 0,
         'timestamp': now
     }
-    # (CATATAN: Baris GLOBAL_TASKS.pop sengaja TIDAK ADA di sini agar task tidak hilang saat 100%)
     
-    # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
     from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
     try: 
         targets = {}
@@ -743,14 +670,12 @@ async def progress_message(done, total, details):
             targets[details['msg'].chat.id] = details['msg']
         
         if GLOBAL_UI_MSG:
-            for cid, m in list(GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list()
+            for cid, m in list(GLOBAL_UI_MSG.items()): 
                 targets[cid] = m
                 
         from bot.helpers.message import edit_message
         
-        # --- BACA MEMORI HALAMAN SAAT REFRESH ---
         for cid, m in targets.items():
-            # Mengambil halaman terakhir yang dibuka pengguna (default 1)
             current_page = GLOBAL_UI_PAGES.get(cid, 1) 
             g_text, g_markup = get_status_text(page=current_page)
             
@@ -758,7 +683,6 @@ async def progress_message(done, total, details):
                 await edit_message(m, g_text, g_markup, False)
             except: 
                 pass
-        # ----------------------------------------
     except FloodWait: pass
     except MessageNotModified: pass
     except Exception: pass
