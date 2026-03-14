@@ -36,29 +36,25 @@ async def cancel_task_handler(client: Client, message: Message):
         GLOBAL_CANCEL_DICT.add(gid)
         await message.reply(f"🛑 **Sinyal Batal Dikirim!**\nProses akan segera dihentikan.")
 
-# --- [FITUR BARU] TOMBOL PANIK / CLEAR QUEUE ---
-@Client.on_message(filters.command(["clear_queue", "force_unlock"]))
+# --- TOMBOL PANIK / CLEAR BOARD (TANPA ANTREAN) ---
+@Client.on_message(filters.command(["clear_queue", "force_unlock", "clear_board"]))
 async def force_unlock_handler(client: Client, message: Message):
     user_id = message.from_user.id
     if user_id not in bot_set.admins:
-        await message.reply("❌ **Akses Ditolak:** Hanya Admin yang bisa mereset antrean.")
+        await message.reply("❌ **Akses Ditolak:** Hanya Admin yang bisa mereset sistem.")
         return
         
     import bot.helpers.utils as utils
     
-    # 1. Buka paksa gembok antrean jika terkunci
-    if utils.GLOBAL_TASK_LOCK.locked():
-        utils.GLOBAL_TASK_LOCK.release()
-        
-    # 2. Reset angka antrean ke 0
-    utils.GLOBAL_QUEUE_COUNT = 0
-    
-    # 3. Bersihkan sisa task hantu di Papan Global
+    # 1. Bersihkan sisa task hantu di Papan Global
     utils.GLOBAL_TASKS.clear()
     
-    # 4. Bunuh paksa semua unduhan Aria2 yang nyangkut di latar belakang
+    # 2. Bersihkan sinyal batal yang nyangkut
+    utils.GLOBAL_CANCEL_DICT.clear()
+    
+    # 3. Bunuh paksa semua unduhan Aria2 yang nyangkut di latar belakang
     from bot.helpers.aria2_helper import aria2_purge_all
     await aria2_purge_all()
     
-    await message.reply("✅ **Sistem Antrean & Gembok Berhasil Direset!**\nSemua task hantu dan antrean macet telah dibersihkan.")
+    await message.reply("✅ **Sistem Papan Global Berhasil Direset!**\nSemua task hantu dan unduhan yang macet telah dibersihkan.")
 # ------------------------------------------------
