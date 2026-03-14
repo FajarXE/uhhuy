@@ -324,7 +324,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 except: pass
             
             # ANTI-FLOODWAIT BATCH TASK: Diubah agar update lebih jarang tapi loop tetap responsif terhadap cancel
-            for _ in range(55): # Naik jadi ~5.5 detik jeda UI Update
+            for _ in range(100): # Naik jadi ~10.0 detik jeda UI Update
                 if not is_running or batch_id in GLOBAL_CANCEL_DICT:
                     break
                 await asyncio.sleep(0.1)
@@ -575,9 +575,9 @@ async def progress_message(done, total, details):
     import math
     now = time.time()
     
-    # ANTI FLOODWAIT: Edit delay minimum 5.5 detik
+    # ANTI FLOODWAIT: Edit delay minimum 10.0 detik
     if 'last_updated' in details:
-        if now - details['last_updated'] < 5.5 and done < total:
+        if now - details['last_updated'] < 10.0 and done < total:
             return
     details['last_updated'] = now
 
