@@ -253,30 +253,40 @@ async def shutdown_all_services():
 if __name__ == "__main__":
     import shutil
 
-    # --- [FITUR BARU] STARTUP AUTO-CLEANER ---
+    # --- [FIX 1] AUTO-CLEANER UNTUK RENDER MOUNT DISK ---
     if os.path.isdir(Config.DOWNLOAD_BASE_DIR):
-        logging.info(f"Main: 🧹 Membersihkan sisa file sampah di folder {Config.DOWNLOAD_BASE_DIR}...")
+        logging.info(f"Main: 🧹 Membersihkan isi folder {Config.DOWNLOAD_BASE_DIR}...")
         try:
-            shutil.rmtree(Config.DOWNLOAD_BASE_DIR)
-            logging.info("Main: ✅ Folder sampah berhasil dibersihkan (Storage Fresh)!")
+            # Loop untuk menghapus isinya saja, bukan menghapus foldernya (menghindari Errno 16)
+            for filename in os.listdir(Config.DOWNLOAD_BASE_DIR):
+                file_path = os.path.join(Config.DOWNLOAD_BASE_DIR, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.remove(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception as e:
+                    logging.warning(f"Main: Gagal menghapus {file_path}: {e}")
+            logging.info("Main: ✅ Isi folder sampah berhasil dibersihkan!")
         except Exception as e:
             logging.error(f"Main: ❌ Gagal membersihkan folder: {e}")
-            
-    if not os.path.isdir(Config.DOWNLOAD_BASE_DIR):
+    else:
         os.makedirs(Config.DOWNLOAD_BASE_DIR)
     # -----------------------------------------
     
     # --- [FITUR BARU] UVLOOP TURBO ENGINE ---
     try:
         import uvloop
-        # Memaksa asyncio menggunakan mesin uvloop
         uvloop.install()
         logging.info("Main: 🚀 Mesin turbo uvloop berhasil dipasang!")
     except ImportError:
         logging.warning("Main: uvloop tidak ditemukan. Menggunakan asyncio standar.")
     # ----------------------------------------
     
-    loop = asyncio.get_event_loop()
+    # --- [FIX 2] MENGATASI ERROR EVENT LOOP PYTHON 3.12 ---
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    # ------------------------------------------------------
     
     # Debugging
     loop.set_debug(True)
