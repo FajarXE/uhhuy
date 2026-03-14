@@ -251,8 +251,22 @@ async def shutdown_all_services():
 
 
 if __name__ == "__main__":
+    import shutil # Library bawaan Python untuk menghapus folder beserta isinya
+
+    # --- [FITUR BARU] STARTUP AUTO-CLEANER ---
+    # Jika folder download lama masih ada, hapus semuanya beserta isinya
+    if os.path.isdir(Config.DOWNLOAD_BASE_DIR):
+        logging.info(f"Main: 🧹 Membersihkan sisa file sampah di folder {Config.DOWNLOAD_BASE_DIR}...")
+        try:
+            shutil.rmtree(Config.DOWNLOAD_BASE_DIR)
+            logging.info("Main: ✅ Folder sampah berhasil dibersihkan (Storage Fresh)!")
+        except Exception as e:
+            logging.error(f"Main: ❌ Gagal membersihkan folder: {e}")
+            
+    # Buat ulang folder download dalam keadaan 100% kosong siap pakai
     if not os.path.isdir(Config.DOWNLOAD_BASE_DIR):
         os.makedirs(Config.DOWNLOAD_BASE_DIR)
+    # -----------------------------------------
     
     loop = asyncio.get_event_loop()
     
