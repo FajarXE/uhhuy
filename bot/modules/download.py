@@ -322,7 +322,6 @@ async def resolve_shortlink(link: str) -> str:
 
 async def run_download_task(link: str, user: dict):
     task_successful = False
-    added_to_queue = False
     
     try:
         user['bot_msg'] = await send_message(user, 'Mempersiapkan tugas...')
@@ -338,108 +337,47 @@ async def run_download_task(link: str, user: dict):
         utils.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
         # -----------------------------------------------------------------
         
-        # CEK APAKAH ADA TUGAS LAIN YANG SEDANG BERJALAN
-        if utils.GLOBAL_TASK_LOCK.locked():
-            utils.GLOBAL_QUEUE_COUNT += 1
-            added_to_queue = True
-            
-            import hashlib
-            import time
-            cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-            
-            # --- DAFTARKAN KE PAPAN GLOBAL ---
-            utils.GLOBAL_TASKS[cancel_id] = {
-                'action': 'Queue',
-                'type': 'Task',
-                'title': link,
-                'since': '', 
-                'progress_bar': '', 
-                'percentage': '',
-                'processed_label': 'Status',
-                'processed': f"Waiting for turn {utils.GLOBAL_QUEUE_COUNT}",
-                'speed': '',
-                'machine': 'Queue System',
-                'mode': '',
-                'cancel_id': cancel_id,
-                'dl_speed': '0B/s',
-                'ul_speed': '0B/s',
-                'speed_dl_raw': 0,
-                'speed_ul_raw': 0,
-                'user_id': chat_id,
-                'timestamp': time.time(),
-                'is_queue': True
-            }
-            
-            await edit_message(
-                user['bot_msg'], 
-                f"⏳ **In Queue**\nYour task is waiting for its turn.\n(Waiting for {utils.GLOBAL_QUEUE_COUNT} other task(s) to finish)\n\nCancel: `/cancel_{cancel_id}`"
-            )
-            
-            # --- PAKSA PAPAN GLOBAL REFRESH ---
-            for cid, m in list(utils.GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list() DI SINI
-                c_page = utils.GLOBAL_UI_PAGES.get(cid, 1)
-                g_text, g_markup = utils.get_status_text(page=c_page)
-                try: await edit_message(m, g_text, g_markup, False)
-                except: pass
-            # ----------------------------------
-        
-        # --- [PERBAIKAN: SMART POLLING LOCK (ANTI-ACAK / STRICT FIFO)] ---
         import hashlib
+        import time
         cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         
-        # Masuk ke barisan antrean gembok (Jangan keluar-keluar lagi!)
-        lock_task = asyncio.create_task(utils.GLOBAL_TASK_LOCK.acquire())
-        lock_acquired = False
+        if cancel_id in utils.GLOBAL_CANCEL_DICT:
+            raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+
+        # --- DAFTARKAN KE PAPAN GLOBAL SECARA LANGSUNG (TANPA ANTREAN) ---
+        utils.GLOBAL_TASKS[cancel_id] = {
+            'action': 'Processing',
+            'type': 'Task',
+            'title': link,
+            'since': '', 
+            'progress_bar': '', 
+            'percentage': '',
+            'processed_label': 'Status',
+            'processed': 'Fetching metadata...',
+            'speed': '',
+            'machine': 'Initializing',
+            'mode': '',
+            'cancel_id': cancel_id,
+            'dl_speed': '0B/s',
+            'ul_speed': '0B/s',
+            'speed_dl_raw': 0,
+            'speed_ul_raw': 0,
+            'user_id': chat_id,
+            'timestamp': time.time(),
+            'is_queue': False
+        }
+
+        await edit_message(user['bot_msg'], '🚀 Starting task...')
         
-        while True:
-            # Tetap berada di barisan, tapi cek kondisi setiap 1.5 detik
-            done, pending = await asyncio.wait([lock_task], timeout=1.5)
+        resolved = await resolve_shortlink(link)
+        if resolved != link:
+             link = resolved
+             user['link'] = link
+
+        # LANGSUNG EKSEKUSI UNDUHAN TANPA MENUNGGU LOCK
+        await start_link(link, user)
+        task_successful = True
             
-            if lock_task in done:
-                lock_acquired = True
-                break # Gembok berhasil didapat sesuai urutan!
-                
-            # Jika belum dapat giliran, cek apakah user menekan tombol Cancel
-            if cancel_id in utils.GLOBAL_CANCEL_DICT:
-                lock_task.cancel() # Keluar dari barisan secara permanen
-                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
-
-        try: 
-            # === [ZONA EKSKLUSIF (LOCK AKTIF)] ===
-            if added_to_queue:
-                utils.GLOBAL_QUEUE_COUNT -= 1
-                added_to_queue = False 
-                
-            import hashlib
-            import time
-            cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-            if cancel_id in utils.GLOBAL_CANCEL_DICT:
-                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
-
-            # --- [TRANSISI VISUAL] UBAH STATUS JADI PROCESSING ---
-            if cancel_id in utils.GLOBAL_TASKS:
-                utils.GLOBAL_TASKS[cancel_id]['action'] = 'Processing'
-                utils.GLOBAL_TASKS[cancel_id]['processed'] = 'Fetching metadata...'
-                utils.GLOBAL_TASKS[cancel_id]['timestamp'] = time.time()
-                utils.GLOBAL_TASKS[cancel_id]['is_queue'] = False
-            # ------------------------------------------------------------
-
-            await edit_message(user['bot_msg'], '🚀 Starting task...')
-            
-            resolved = await resolve_shortlink(link)
-            if resolved != link:
-                 link = resolved
-                 user['link'] = link
-
-            await start_link(link, user)
-            task_successful = True
-            
-        finally:
-            # WAJIB LEPASKAN GEMBOK AGAR BOT TIDAK MACET!
-            if lock_acquired:
-                utils.GLOBAL_TASK_LOCK.release()
-        # ---------------------------------------
- 
     except asyncio.CancelledError:
         LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan.")
         try: await edit_message(user['bot_msg'], "🛑 Tugas dibatalkan.")
@@ -451,6 +389,7 @@ async def run_download_task(link: str, user: dict):
         error_str = str(e)
         is_handled_error = False
         
+        # Daftar error ringan (tidak perlu print traceback panjang di log)
         if "not available in any" in error_str or \
            "Maaf, tidak ada akun" in error_str or \
            "NotImplementedError" in error_str or \
@@ -482,8 +421,6 @@ async def run_download_task(link: str, user: dict):
             
     finally:
         import bot.helpers.utils as utils
-        if added_to_queue:
-            utils.GLOBAL_QUEUE_COUNT -= 1
             
         await cleanup(user)
         try:
@@ -495,7 +432,7 @@ async def run_download_task(link: str, user: dict):
                 utils.GLOBAL_TASKS.pop(final_task_id, None)
                 
                 # Render ulang papan tanpa melompat ke halaman 1
-                for cid, m in list(utils.GLOBAL_UI_MSG.items()):  # <--- SUDAH DITAMBAHKAN list() DI SINI
+                for cid, m in list(utils.GLOBAL_UI_MSG.items()):
                     c_page = utils.GLOBAL_UI_PAGES.get(cid, 1)
                     g_text, g_markup = utils.get_status_text(page=c_page)
                     try: await edit_message(m, g_text, g_markup, False)
