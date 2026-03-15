@@ -592,7 +592,7 @@ async def progress_message(done, total, details):
     
     filled_blocks = math.floor((percentage / 100) * 12)
     empty_blocks = 12 - filled_blocks
-    progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
+    progress_bar = "■" * filled_blocks + "□" * empty_blocks
     
     from bot.helpers.utils import get_readable_file_size, get_readable_time
     if total > 1000:
