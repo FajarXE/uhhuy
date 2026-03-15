@@ -612,6 +612,11 @@ async def progress_message(done, total, details):
     action = details.get('action', 'Download').capitalize()
     task_type = details.get('type', 'Task').capitalize()
     
+    # --- [FIX TEKS KEMBAR] ---
+    if task_type.lower() == action.lower() or task_type == 'Download':
+        task_type = 'Track'
+    # -------------------------
+    
     if details and details.get('msg'):
         import hashlib
         task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16]
