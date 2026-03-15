@@ -206,7 +206,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 
                 filled_blocks = math.floor((percentage / 100) * 12)
                 empty_blocks = 12 - filled_blocks
-                progress_bar = "◙" * filled_blocks + "◘" * empty_blocks
+                progress_bar = "■" * filled_blocks + "□" * empty_blocks
                 
                 done_str = get_readable_file_size(current)
                 total_str = get_readable_file_size(total)
