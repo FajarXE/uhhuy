@@ -544,10 +544,10 @@ async def batch_telegram_upload(metadata, user):
             await telegram_upload(track, user, batch_mode=True)
             
             # --- [OPTIMASI ANTI-FLOODWAIT TELEGRAM] ---
-            # Beri jeda 1.5 detik setiap selesai mengirim 1 lagu.
+            # Beri jeda 2.0 detik setiap selesai mengirim 1 lagu.
             # Ini mencegah API Telegram mendeteksi bot melakukan spam
             # dan menghindari error "Too Many Requests" (FloodWait).
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.0)
             # ------------------------------------------
             
         except asyncio.CancelledError:
