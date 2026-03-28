@@ -60,6 +60,35 @@ async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -
     return None
 
 
+async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
+    try:
+        # Cari berdasarkan UPC/Barcode terlebih dahulu
+        if metadata.get('upc') and metadata['upc'] != "0":
+            mb_url = f"https://musicbrainz.org/ws/2/release?query=barcode:{metadata['upc']}&fmt=json"
+            async with session.get(mb_url, headers={'User-Agent': 'MusicBot/1.0 ( mybot@example.com )'}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get('releases') and len(data['releases']) > 0:
+                        release_id = data['releases'][0]['id']
+                        
+                        # Ambil gambar dari CoverArtArchive
+                        caa_api = f"https://coverartarchive.org/release/{release_id}"
+                        async with session.get(caa_api) as caa_resp:
+                            if caa_resp.status == 200:
+                                caa_data = await caa_resp.json()
+                                if caa_data.get('images') and len(caa_data['images']) > 0:
+                                    # Cari gambar 'Front' (Bagian depan)
+                                    for img in caa_data['images']:
+                                        if img.get('front'):
+                                            return img['image']
+                                    # Jika tidak ada label 'front', ambil yang pertama
+                                    return caa_data['images'][0]['image']
+    except Exception as e:
+        logging.warning(f"Pencarian sampul MusicBrainz gagal untuk UPC {metadata.get('upc')}: {e}")
+        return None
+    return None
+
+
 def get_credits(meta, keys, roles=None):
     """
     Mengambil daftar nama dari berbagai sumber secara agresif.
@@ -218,19 +247,40 @@ async def get_track_metadata(item_id, r_id, q_meta=None, user: dict=None):
     metadata['bps'] = str(q_meta.get('bit_depth', ''))
     metadata['sample_rate'] = str(q_meta.get('sampling_rate', ''))
 
-    qobuz_fallback_url = q_meta['album']['image'].get('original', q_meta['album']['image'].get('large'))
+    # === Penentuan Sumber Cover ===
+    # Ambil user_id dengan aman
+    u_id = user.get('user_id', 0)
+    
+    # Ambil preferensi pengguna, default ke 'itunes' agar tidak mengubah perilaku lama
+    cover_source = bot_set.user_data.get(u_id, {}).get("qobuz_cover_source", "itunes")
+    
+    # URL Asli Qobuz
+    if 'album' in q_meta and 'image' in q_meta['album']: # Logika untuk track
+        qobuz_fallback_url = q_meta['album']['image'].get('original', q_meta['album']['image'].get('large'))
+    else: # Logika untuk album
+        qobuz_fallback_url = q_meta['image'].get('original', q_meta['image'].get('large'))
+
     cover_url = None
     
     try:
         async with aiohttp.ClientSession() as session:
-            logging.debug(f"Mencari sampul di iTunes untuk {metadata['album']}...")
-            cover_url = await get_itunes_cover_url(metadata, session)
+            if cover_source == "itunes":
+                logging.debug(f"Mencari sampul di iTunes untuk {metadata['album']}...")
+                cover_url = await get_itunes_cover_url(metadata, session)
+            elif cover_source == "musicbrainz":
+                logging.debug(f"Mencari sampul di MusicBrainz untuk {metadata['album']}...")
+                cover_url = await get_musicbrainz_cover_url(metadata, session)
+            else: # cover_source == "original"
+                logging.debug(f"Menggunakan sampul original Qobuz.")
+                cover_url = qobuz_fallback_url
     except Exception as e:
-        logging.warning(f"Sesi pencarian sampul iTunes gagal (track): {e}")
+        logging.warning(f"Sesi pencarian sampul ({cover_source}) gagal: {e}")
 
+    # Fallback ke original Qobuz jika API lain gagal
     if not cover_url:
-        logging.debug(f"iTunes gagal, menggunakan sampul Qobuz.")
+        logging.debug(f"Pencarian sampul gagal atau disetel ke original, menggunakan sampul Qobuz.")
         cover_url = qobuz_fallback_url
+    # ===============================
 
     final_cover_path_or_url = cover_url
     if not cover_url:
@@ -307,19 +357,40 @@ async def get_album_metadata(item_id, r_id, user: dict):
     metadata['provider'] = 'Qobuz'
     metadata['type'] = 'album'
 
-    qobuz_fallback_url = q_meta['image'].get('original', q_meta['image'].get('large'))
+    # === Penentuan Sumber Cover ===
+    # Ambil user_id dengan aman
+    u_id = user.get('user_id', 0)
+    
+    # Ambil preferensi pengguna, default ke 'itunes' agar tidak mengubah perilaku lama
+    cover_source = bot_set.user_data.get(u_id, {}).get("qobuz_cover_source", "itunes")
+    
+    # URL Asli Qobuz
+    if 'album' in q_meta and 'image' in q_meta['album']: # Logika untuk track
+        qobuz_fallback_url = q_meta['album']['image'].get('original', q_meta['album']['image'].get('large'))
+    else: # Logika untuk album
+        qobuz_fallback_url = q_meta['image'].get('original', q_meta['image'].get('large'))
+
     cover_url = None
     
     try:
         async with aiohttp.ClientSession() as session:
-            logging.debug(f"Mencari sampul di iTunes untuk {metadata['album']}...")
-            cover_url = await get_itunes_cover_url(metadata, session)
+            if cover_source == "itunes":
+                logging.debug(f"Mencari sampul di iTunes untuk {metadata['album']}...")
+                cover_url = await get_itunes_cover_url(metadata, session)
+            elif cover_source == "musicbrainz":
+                logging.debug(f"Mencari sampul di MusicBrainz untuk {metadata['album']}...")
+                cover_url = await get_musicbrainz_cover_url(metadata, session)
+            else: # cover_source == "original"
+                logging.debug(f"Menggunakan sampul original Qobuz.")
+                cover_url = qobuz_fallback_url
     except Exception as e:
-        logging.warning(f"Sesi pencarian sampul iTunes gagal (album): {e}")
+        logging.warning(f"Sesi pencarian sampul ({cover_source}) gagal: {e}")
 
+    # Fallback ke original Qobuz jika API lain gagal
     if not cover_url:
-        logging.debug(f"iTunes gagal, menggunakan sampul Qobuz.")
+        logging.debug(f"Pencarian sampul gagal atau disetel ke original, menggunakan sampul Qobuz.")
         cover_url = qobuz_fallback_url
+    # ===============================
 
     final_cover_path_or_url = cover_url
     if not cover_url:
