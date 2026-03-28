@@ -36,7 +36,7 @@ async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -
                     if data.get('resultCount', 0) > 0:
                         artwork_url = data['results'][0].get('artworkUrl100')
                         if artwork_url:
-                            return artwork_url.replace('100x100bb.jpg', '3000x3000bb.jpg')
+                            return artwork_url.replace('100x100bb.jpg', '10000x10000bb.jpg')
         if metadata.get('albumartist') and metadata.get('album'):
             search_term = urllib.parse.quote(f"{metadata['albumartist']} {metadata['album']}")
             search_url = f"https://itunes.apple.com/search?term={search_term}&entity=album&media=music&limit=5"
@@ -53,7 +53,7 @@ async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -
                                (local_artist in itunes_artist):
                                 artwork_url = result.get('artworkUrl100')
                                 if artwork_url:
-                                    return artwork_url.replace('100x100bb.jpg', '3000x3000bb.jpg')
+                                    return artwork_url.replace('100x100bb.jpg', '10000x10000bb.jpg')
     except Exception as e:
         logging.warning(f"Pencarian sampul iTunes gagal untuk UPC {metadata.get('upc')}: {e}")
         return None
