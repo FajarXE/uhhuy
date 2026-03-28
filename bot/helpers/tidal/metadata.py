@@ -466,19 +466,18 @@ async def get_artist_metadata(a_meta:dict, r_id, user_id=0):
 
 async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
     try:
-        upc = metadata.get('upc')
-        # Pastikan UPC ada dan valid
-        if upc and upc != "0":
-            url = f"https://itunes.apple.com/lookup?upc={upc}"
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    # Jika barcode cocok, ambil covernya
-                    if data['resultCount'] > 0:
-                        artwork_url = data['results'][0]['artworkUrl100']
-                        return artwork_url.replace('100x100bb', '10000x10000bb')
+        term = f"{metadata.get('artist', '')} {metadata.get('album', '')}"
+        encoded_term = urllib.parse.quote(term)
+        url = f"https://itunes.apple.com/search?term={encoded_term}&entity=album&limit=1"
+        async with session.get(url, timeout=10) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data['resultCount'] > 0:
+                    # Ambil resolusi paling besar (trik API iTunes)
+                    artwork_url = data['results'][0]['artworkUrl100']
+                    return artwork_url.replace('100x100bb', '10000x10000bb')
     except Exception as e:
-        pass
+        LOGGER.warning(f"iTunes cover lookup failed: {e}")
     return None
 
 async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
@@ -512,30 +511,22 @@ async def get_cover(cover_id, meta: dict, thumbnail=False, user_id=0):
             else f'https://resources.tidal.com/images/{cover_id.replace("-", "/")}/1280x1280.jpg'
         )
     
-    # Jangan proses thumbnail ke iTunes/MB agar proses download tetap cepat
+    # Jangan modifikasi thumbnail (untuk efisiensi), hanya modifikasi cover utama
     if thumbnail:
         return await create_cover_file(original_url, meta, thumbnail)
 
-    # PASTIKAN user_id adalah integer agar pembacaan setting akurat
-    try:
-        uid = int(user_id)
-    except:
-        uid = 0
-        
-    cover_source = bot_set.user_data.get(uid, {}).get("tidal_cover_source", "original")
+    # Ambil pengaturan preferensi user
+    cover_source = bot_set.user_data.get(user_id, {}).get("tidal_cover_source", "original")
     final_url = None
 
-    # --- PERBAIKAN DI SINI ---
-    # Buka session sekaligus untuk iTunes maupun MusicBrainz
     if cover_source in ["itunes", "musicbrainz"]:
         async with aiohttp.ClientSession() as session:
             if cover_source == "itunes":
                 final_url = await get_itunes_cover_url(meta, session)
             elif cover_source == "musicbrainz":
                 final_url = await get_musicbrainz_cover_url(meta, session)
-    # ------------------------
 
-    # Jika API gagal menemukan album (hasilnya None), Fallback ke Original Tidal
+    # Fallback ke original jika gagal
     if not final_url:
         final_url = original_url
 
