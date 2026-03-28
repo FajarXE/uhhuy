@@ -1472,6 +1472,36 @@ async def uset_qobuz(client, query):
     
     await uset_cb(client, query, "qobuz")
 
+# --- HANDLER QOBUZ COVER SOURCE SPECIFIC ---
+@Client.on_callback_query(filters.regex("^uqbc_"))
+async def uset_qobuz_cover(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # Akan menghasilkan 'original', 'itunes', atau 'musicbrainz'
+    selected_source = query.data.split('_')[1] 
+    user_id = query.from_user.id
+    
+    # Cek apakah layanan Qobuz aktif
+    has_client = False
+    if BOT_QOBUZ_CLIENTS:
+        has_client = True
+    elif qobuz_manager and qobuz_manager.has_private_session(user_id):
+        has_client = True
+        
+    if not has_client:
+        await query.answer("Layanan Qobuz tidak aktif!", show_alert=True)
+        return
+
+    # Simpan pengaturan ke memory
+    bot_set.user_data.setdefault(user_id, {})["qobuz_cover_source"] = selected_source
+    # Simpan secara permanen ke database
+    await database.save_user_settings(user_id, {"qobuz_cover_source": selected_source})
+    
+    # Reload menu Qobuz agar warna tombol (Hijau/Success) berpindah
+    await uset_cb(client, query, "qobuz")
+
 
 # --- HANDLER BEATPORT SPECIFIC ---
 @Client.on_callback_query(filters.regex("^ubps"))
