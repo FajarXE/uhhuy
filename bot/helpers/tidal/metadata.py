@@ -6,6 +6,7 @@ import aiohttp
 import asyncio
 import urllib.parse
 from datetime import datetime
+from bot.settings import bot_set
 
 # --- Impor LOGGER ---
 from bot.logger import LOGGER
@@ -145,8 +146,7 @@ def parse_genre_field(data):
     return str(data)
 
 # --- FUNGSI UTAMA ---
-
-async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False, client=None):
+async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False, client=None, user_id=0):
     """
     Mengambil metadata track. 
     """
@@ -305,8 +305,8 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
         metadata['date'] = ''
 
     # Cover Art
-    metadata['cover'] = cover if cover else await get_cover(t_meta.get('album', {}).get('cover'), metadata)
-    metadata['thumbnail'] = thumbnail if thumbnail else await get_cover(t_meta.get('album', {}).get('cover'), metadata, True)
+    metadata['cover'] = cover if cover else await get_cover(t_meta.get('album', {}).get('cover'), metadata, False, user_id)
+    metadata['thumbnail'] = thumbnail if thumbnail else await get_cover(t_meta.get('album', {}).get('cover'), metadata, True, user_id)
 
     if not metadata.get('composer') and t_meta.get('composers'):
         metadata['composer'] = ', '.join([c.get('name', '') for c in t_meta['composers']])
@@ -314,7 +314,7 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
     return metadata
 
 
-async def get_album_metadata(album_id, a_meta, t_meta, r_id):
+async def get_album_metadata(album_id, a_meta, t_meta, r_id, user_id=0):
     """
     Mengambil metadata album.
     """
@@ -376,8 +376,8 @@ async def get_album_metadata(album_id, a_meta, t_meta, r_id):
         metadata['genre'] = album_genre
     # -------------------------------------------
 
-    metadata['cover'] = await get_cover(a_meta.get('cover'), metadata)
-    metadata['thumbnail'] = await get_cover(a_meta.get('cover'), metadata, True)
+    metadata['cover'] = await get_cover(a_meta.get('cover'), metadata, False, user_id)
+    metadata['thumbnail'] = await get_cover(a_meta.get('cover'), metadata, True, user_id)
 
     metadata['tracks'] = []
     for track in t_meta['items']:
@@ -401,7 +401,7 @@ async def get_album_metadata(album_id, a_meta, t_meta, r_id):
     return metadata
 
 
-async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id):
+async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id, user_id=0):
     metadata = copy.deepcopy(base_meta)
     metadata['tempfolder'] += f"{r_id}-temp/"
     metadata['itemid'] = playlist_id
@@ -425,8 +425,8 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id):
     metadata['provider'] = 'Tidal'
     metadata['type'] = 'playlist' 
 
-    metadata['cover'] = await get_cover(p_meta.get('image'), metadata)
-    metadata['thumbnail'] = await get_cover(p_meta.get('image'), metadata, True)
+    metadata['cover'] = await get_cover(p_meta.get('image'), metadata, False, user_id)
+    metadata['thumbnail'] = await get_cover(p_meta.get('image'), metadata, True, user_id)
 
     metadata['tracks'] = []
     for item in t_meta['items']:
@@ -452,27 +452,85 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id):
     return metadata
 
 
-async def get_artist_metadata(a_meta:dict, r_id):
+async def get_artist_metadata(a_meta:dict, r_id, user_id=0):
     metadata = copy.deepcopy(base_meta)
     metadata['tempfolder'] += f"{r_id}-temp/"
     metadata['artist'] = a_meta['name']
     metadata['title'] = a_meta['name']
     metadata['provider'] = 'Tidal'
     metadata['type'] = 'artist'
-    metadata['cover'] = await get_cover(a_meta.get('picture'), metadata)
-    metadata['thumbnail'] = await get_cover(a_meta.get('picture'), metadata, True)
+    metadata['cover'] = await get_cover(a_meta.get('picture'), metadata, False, user_id)
+    metadata['thumbnail'] = await get_cover(a_meta.get('picture'), metadata, True, user_id)
     return metadata
 
 
-async def get_cover(cover_id, meta:dict, thumbnail=False):
-    url = None
+async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
+    try:
+        term = f"{metadata.get('artist', '')} {metadata.get('album', '')}"
+        encoded_term = urllib.parse.quote(term)
+        url = f"https://itunes.apple.com/search?term={encoded_term}&entity=album&limit=1"
+        async with session.get(url, timeout=10) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data['resultCount'] > 0:
+                    # Ambil resolusi paling besar (trik API iTunes)
+                    artwork_url = data['results'][0]['artworkUrl100']
+                    return artwork_url.replace('100x100bb', '10000x10000bb')
+    except Exception as e:
+        LOGGER.warning(f"iTunes cover lookup failed: {e}")
+    return None
+
+async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
+    try:
+        if metadata.get('upc') and metadata['upc'] != "0":
+            mb_url = f"https://musicbrainz.org/ws/2/release?query=barcode:{metadata['upc']}&fmt=json"
+            async with session.get(mb_url, headers={'User-Agent': 'TidalBot/1.0'}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get('releases') and len(data['releases']) > 0:
+                        release_id = data['releases'][0]['id']
+                        caa_api = f"https://coverartarchive.org/release/{release_id}"
+                        async with session.get(caa_api) as caa_resp:
+                            if caa_resp.status == 200:
+                                caa_data = await caa_resp.json()
+                                if caa_data.get('images') and len(caa_data['images']) > 0:
+                                    for img in caa_data['images']:
+                                        if img.get('front'): return img['image']
+                                    return caa_data['images'][0]['image']
+    except Exception as e:
+        LOGGER.warning(f"MusicBrainz cover lookup failed: {e}")
+    return None
+
+
+async def get_cover(cover_id, meta: dict, thumbnail=False, user_id=0):
+    original_url = None
     if cover_id:
-        url = (
+        original_url = (
             f'https://resources.tidal.com/images/{cover_id.replace("-", "/")}/80x80.jpg'
             if thumbnail
             else f'https://resources.tidal.com/images/{cover_id.replace("-", "/")}/1280x1280.jpg'
         )
-    return await create_cover_file(url, meta, thumbnail)
+    
+    # Jangan modifikasi thumbnail (untuk efisiensi), hanya modifikasi cover utama
+    if thumbnail:
+        return await create_cover_file(original_url, meta, thumbnail)
+
+    # Ambil pengaturan preferensi user
+    cover_source = bot_set.user_data.get(user_id, {}).get("tidal_cover_source", "original")
+    final_url = None
+
+    if cover_source in ["itunes", "musicbrainz"]:
+        async with aiohttp.ClientSession() as session:
+            if cover_source == "itunes":
+                final_url = await get_itunes_cover_url(meta, session)
+            elif cover_source == "musicbrainz":
+                final_url = await get_musicbrainz_cover_url(meta, session)
+
+    # Fallback ke original jika gagal
+    if not final_url:
+        final_url = original_url
+
+    return await create_cover_file(final_url, meta, thumbnail)
 
 
 def get_artists_name(meta:dict):
