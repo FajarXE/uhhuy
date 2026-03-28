@@ -464,22 +464,21 @@ async def get_artist_metadata(a_meta:dict, r_id, user_id=0):
     return metadata
 
 
-async def get_itunes_cover_url(metadata: dict) -> str | None:
+async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
     try:
-        # Kita menggunakan get_itunes_info bawaan yang punya fitur 'Pembersih Teks'
-        # Kita memasukkan metadata['album'] ke slot 'title' agar namanya ikut dibersihkan
-        itunes_data = await get_itunes_info(
-            metadata.get('artist', 'Unknown'), 
-            metadata.get('album', 'Unknown'), 
-            metadata.get('album', 'Unknown'), 
-            use_album_search=True
-        )
-        
-        if itunes_data and itunes_data.get('artworkUrl100'):
-            # Trik mengubah URL iTunes agar mengembalikan resolusi asli yang paling maksimal
-            return itunes_data['artworkUrl100'].replace('100x100bb', '10000x10000bb')
+        upc = metadata.get('upc')
+        # Pastikan UPC ada dan valid
+        if upc and upc != "0":
+            url = f"https://itunes.apple.com/lookup?upc={upc}"
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Jika barcode cocok, ambil covernya
+                    if data['resultCount'] > 0:
+                        artwork_url = data['results'][0]['artworkUrl100']
+                        return artwork_url.replace('100x100bb', '10000x10000bb')
     except Exception as e:
-        LOGGER.warning(f"iTunes cover lookup failed: {e}")
+        pass
     return None
 
 async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
