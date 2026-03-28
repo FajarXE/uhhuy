@@ -1666,6 +1666,28 @@ async def uset_deezer(client, query):
     
     await uset_cb(client, query, "deezer")
 
+# --- HANDLER DEEZER COVER SOURCE SPECIFIC ---
+@Client.on_callback_query(filters.regex("^udzc_"))
+async def uset_deezer_cover(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    selected_source = query.data.split('_')[1] 
+    user_id = query.from_user.id
+    
+    if not deezer_manager:
+        await query.answer("Layanan Deezer tidak aktif!", show_alert=True)
+        return
+
+    # Simpan ke Memory dan Database
+    bot_set.user_data.setdefault(user_id, {})["deezer_cover_source"] = selected_source
+    from bot.helpers.database.mongo_async import database
+    await database.save_user_settings(user_id, {"deezer_cover_source": selected_source})
+    
+    # Reload menu Deezer
+    await uset_cb(client, query, "deezer")
+
 
 # --- HANDLER KKBOX SPECIFIC ---
 @Client.on_callback_query(filters.regex("^ukks"))
