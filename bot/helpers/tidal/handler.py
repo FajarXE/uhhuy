@@ -75,7 +75,8 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         user['r_id'], 
         cover, 
         thumbnail,
-        client=client 
+        client=client,
+        user_id=user['user_id']
     )
     
     if basefolder:
@@ -213,7 +214,7 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
     except Exception as e:
         raise e
         
-    album_meta = await get_album_metadata(album_id, album_data, tracks_data, user['r_id'])
+    album_meta = await get_album_metadata(album_id, album_data, tracks_data, user['r_id'], user_id=user['user_id'])
 
     if basefolder:
         album_folder = basefolder + f"/{album_meta['title']}"
@@ -304,7 +305,7 @@ async def start_playlist(playlist_id:str, user:dict, upload=True, basefolder=Non
         
     tracks_data = await client.get_playlist_tracks(playlist_id, total_tracks)
     
-    playlist_meta = await get_playlist_metadata(playlist_id, playlist_data, tracks_data, user['r_id'])
+    playlist_meta = await get_playlist_metadata(playlist_id, playlist_data, tracks_data, user['r_id'], user_id=user['user_id'])
 
     if not playlist_meta['tracks']:
         LOGGER.warning(f"Playlist {playlist_id} kosong atau tidak berisi track.")
@@ -391,7 +392,7 @@ async def start_artist(artist_id:int, user:dict):
     client: TidalApi = user['tidal_api']
 
     artist_data = await client.get_artist(artist_id)
-    artist_meta = await get_artist_metadata(artist_data, user['r_id'])
+    artist_meta = await get_artist_metadata(artist_data, user['r_id'], user_id=user['user_id'])
     artist_meta['folderpath'] = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{artist_meta['provider']}/{artist_meta['artist']}"
     artist_meta['folderpath'] = sanitize_filepath(artist_meta['folderpath']) 
     
