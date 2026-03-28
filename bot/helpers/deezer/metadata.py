@@ -138,7 +138,7 @@ async def get_extended_itunes_info(metadata: dict, session: aiohttp.ClientSessio
 def parse_itunes_item(item):
     data = {'found': True, 'cover_url': None, 'date': None, 'copyright': None, 'genre': None, 'label': None}
     if item.get('artworkUrl100'):
-        data['cover_url'] = item['artworkUrl100'].replace('100x100bb.jpg', '1200x1200bb.jpg')
+        data['cover_url'] = item['artworkUrl100'].replace('100x100bb.jpg', '10000x10000bb.jpg')
     if item.get('releaseDate'):
         data['date'] = item['releaseDate'].split('T')[0]
     if item.get('copyright'):
