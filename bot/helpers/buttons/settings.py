@@ -575,8 +575,25 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
         ]
     )
     
-    # --- LOGIKA WARNA TOMBOL MQA & CONVERT ---
     if usetting:
+        # --- LOGIKA TOMBOL COVER SOURCE ---
+        user_dict = bot_set.user_data.get(user_id, {})
+        cover_source = user_dict.get('tidal_cover_source', 'original') # Default Original
+        
+        row_cover = []
+        style_ori = ButtonStyle.SUCCESS if cover_source == 'original' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("Ori Cover", callback_data="utdc_original", style=style_ori))
+        
+        style_itu = ButtonStyle.SUCCESS if cover_source == 'itunes' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("iTunes Cover", callback_data="utdc_itunes", style=style_itu))
+        
+        style_mb = ButtonStyle.SUCCESS if cover_source == 'musicbrainz' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("MB Cover", callback_data="utdc_musicbrainz", style=style_mb))
+        
+        inline_keyboard.append(row_cover)
+        # -----------------------------------
+
+        # --- LOGIKA WARNA TOMBOL MQA & CONVERT ---
         # Logika MQA Fix
         if user_mqa_fix == "ON":
             mqa_text = "MQA Fix: ON"
