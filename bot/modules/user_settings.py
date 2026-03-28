@@ -1432,6 +1432,28 @@ async def uset_tidal(client, query):
     except Exception:
         logging.error(format_exc())
         
+# --- HANDLER TIDAL COVER SOURCE SPECIFIC ---
+@Client.on_callback_query(filters.regex("^utdc_"))
+async def uset_tidal_cover(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # Akan mengambil 'original', 'itunes', atau 'musicbrainz'
+    selected_source = query.data.split('_')[1] 
+    user_id = query.from_user.id
+    
+    if not tidal_manager:
+        await query.answer("Layanan Tidal tidak aktif!", show_alert=True)
+        return
+
+    # Simpan ke Memory dan Database MongoDB
+    bot_set.user_data.setdefault(user_id, {})["tidal_cover_source"] = selected_source
+    await database.save_user_settings(user_id, {"tidal_cover_source": selected_source})
+    
+    # Muat ulang menu Tidal agar tombol yang dipilih berwarna Hijau
+    await uset_cb(client, query, "tidal")
+
 
 # # --- HANDLER SETTING QOBUZ SPECIFIC ---
 @Client.on_callback_query(filters.regex("^uqbs"))
