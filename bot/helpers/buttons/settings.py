@@ -488,16 +488,35 @@ def qb_button(qualities: dict, user_id: int = 0):
         )
         
     if usetting:
+        # --- TAMBAHAN TOMBOL COVER SOURCE ---
+        user_dict = bot_set.user_data.get(user_id, {})
+        cover_source = user_dict.get('qobuz_cover_source', 'itunes') # Default itunes
+        
+        row_cover = []
+        
+        # Tombol Original
+        style_ori = ButtonStyle.SUCCESS if cover_source == 'original' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("Ori Cover", callback_data="uqbc_original", style=style_ori))
+        
+        # Tombol iTunes
+        style_itu = ButtonStyle.SUCCESS if cover_source == 'itunes' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("iTunes Cover", callback_data="uqbc_itunes", style=style_itu))
+        
+        # Tombol MusicBrainz
+        style_mb = ButtonStyle.SUCCESS if cover_source == 'musicbrainz' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("MB Cover", callback_data="uqbc_musicbrainz", style=style_mb))
+        
+        inline_keyboard.append(row_cover)
+        # ------------------------------------
+        
         inline_keyboard.append(
             [
-                # Saya set SUCCESS (Hijau) agar konsisten dengan menu auth lain
                 InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.SUCCESS)
             ]
         )
         
         inline_keyboard.append(
             [
-                # Saya set PRIMARY (Biru) sesuai request sebelumnya
                 InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
             ]
         )
