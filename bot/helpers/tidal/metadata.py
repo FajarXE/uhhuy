@@ -525,13 +525,15 @@ async def get_cover(cover_id, meta: dict, thumbnail=False, user_id=0):
     cover_source = bot_set.user_data.get(uid, {}).get("tidal_cover_source", "original")
     final_url = None
 
-    if cover_source == "itunes":
-        # Panggil fungsi iTunes yang baru disempurnakan
-        final_url = await get_itunes_cover_url(meta)
-    elif cover_source == "musicbrainz":
-        # Panggil MusicBrainz
+    # --- PERBAIKAN DI SINI ---
+    # Buka session sekaligus untuk iTunes maupun MusicBrainz
+    if cover_source in ["itunes", "musicbrainz"]:
         async with aiohttp.ClientSession() as session:
-            final_url = await get_musicbrainz_cover_url(meta, session)
+            if cover_source == "itunes":
+                final_url = await get_itunes_cover_url(meta, session)
+            elif cover_source == "musicbrainz":
+                final_url = await get_musicbrainz_cover_url(meta, session)
+    # ------------------------
 
     # Jika API gagal menemukan album (hasilnya None), Fallback ke Original Tidal
     if not final_url:
