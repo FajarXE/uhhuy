@@ -4,6 +4,7 @@ import copy
 import re
 import asyncio
 from datetime import datetime
+from bot.settings import bot_set
 import aiohttp
 import urllib.parse
 import logging
@@ -174,9 +175,29 @@ async def get_musicbrainz_info(metadata: dict, session: aiohttp.ClientSession) -
     except: pass
     return mb_data
 
+async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
+    try:
+        if metadata.get('upc') and metadata['upc'] not in ["0", ""]:
+            mb_url = f"https://musicbrainz.org/ws/2/release?query=barcode:{metadata['upc']}&fmt=json"
+            async with session.get(mb_url, headers={'User-Agent': 'SiestaBot/2.0'}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get('releases') and len(data['releases']) > 0:
+                        release_id = data['releases'][0]['id']
+                        caa_api = f"https://coverartarchive.org/release/{release_id}"
+                        async with session.get(caa_api) as caa_resp:
+                            if caa_resp.status == 200:
+                                caa_data = await caa_resp.json()
+                                if caa_data.get('images') and len(caa_data['images']) > 0:
+                                    for img in caa_data['images']:
+                                        if img.get('front'): return img['image']
+                                    return caa_data['images'][0]['image']
+    except Exception as e:
+        pass
+    return None
+
 
 # --- MAIN LOGIC ---
-
 async def process_track_metadata(track_id, r_id, cover=None, 
     thumbnail=None, total_tracks=None, album_genre=None, total_disks=None, user: dict = None): 
     
@@ -367,12 +388,25 @@ async def process_track_metadata(track_id, r_id, cover=None,
         metadata['itunesadvisory'] = '0'
 
     # COVER ART
+    # --- LOGIKA SUMBER COVER ---
+    uid = int(user.get('user_id', 0)) if user else 0
+    cover_source = bot_set.user_data.get(uid, {}).get("deezer_cover_source", "itunes") # Default itunes agar perilaku lama tetap jalan
+    
     cover_id = get_val('ALB_PICTURE')
-    final_cover_url = itunes_info.get('cover_url') 
+    final_cover_url = None
+
+    if cover_source == "itunes":
+        final_cover_url = itunes_info.get('cover_url')
+    elif cover_source == "musicbrainz":
+        async with aiohttp.ClientSession() as session:
+            final_cover_url = await get_musicbrainz_cover_url(metadata, session)
+
+    # Fallback ke Original jika API pihak ketiga gagal / disetel ke original
     if not final_cover_url and cover_id:
         final_cover_url = f'https://cdn-images.dzcdn.net/images/cover/{cover_id}/1200x0-none-100-0-0.png'
     if not final_cover_url and os.path.exists(FALLBACK_IMAGE_PATH):
         final_cover_url = FALLBACK_IMAGE_PATH
+    # ---------------------------
 
     metadata['cover'] = await create_cover_file(final_cover_url, metadata)
     metadata['thumbnail'] = await get_cover(cover_id, metadata, True)
@@ -508,12 +542,25 @@ async def process_album_metadata(album_id:int, a_meta:dict, t_meta:list, r_id, u
 
     metadata['genre'] = found_genre or ''
 
+    # --- LOGIKA SUMBER COVER (ALBUM) ---
+    uid = int(user.get('user_id', 0)) if user else 0
+    cover_source = bot_set.user_data.get(uid, {}).get("deezer_cover_source", "itunes")
+    
     cover_id = a_meta.get('ALB_PICTURE', '')
-    final_cover_url = itunes_info.get('cover_url')
+    final_cover_url = None
+    
+    if cover_source == "itunes":
+        final_cover_url = itunes_info.get('cover_url')
+    elif cover_source == "musicbrainz":
+        async with aiohttp.ClientSession() as session:
+            final_cover_url = await get_musicbrainz_cover_url(metadata, session)
+
+    # Fallback
     if not final_cover_url and cover_id:
         final_cover_url = f'https://cdn-images.dzcdn.net/images/cover/{cover_id}/1200x0-none-100-0-0.png'
     if not final_cover_url and os.path.exists(FALLBACK_IMAGE_PATH):
         final_cover_url = FALLBACK_IMAGE_PATH
+    # -----------------------------------
 
     metadata['cover'] = await create_cover_file(final_cover_url, metadata)
     metadata['thumbnail'] = await get_cover(cover_id, metadata, True)
