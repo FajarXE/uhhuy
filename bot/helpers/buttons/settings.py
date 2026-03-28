@@ -870,6 +870,23 @@ def dz_button(quality: dict, user_id: int = None):
             row = []
     
     if usetting:
+        # --- LOGIKA TOMBOL COVER SOURCE ---
+        user_dict = bot_set.user_data.get(user_id, {})
+        cover_source = user_dict.get('deezer_cover_source', 'itunes') # Default itunes
+        
+        row_cover = []
+        style_ori = ButtonStyle.SUCCESS if cover_source == 'original' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("Ori Cover", callback_data="udzc_original", style=style_ori))
+        
+        style_itu = ButtonStyle.SUCCESS if cover_source == 'itunes' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("iTunes Cover", callback_data="udzc_itunes", style=style_itu))
+        
+        style_mb = ButtonStyle.SUCCESS if cover_source == 'musicbrainz' else ButtonStyle.DEFAULT
+        row_cover.append(InlineKeyboardButton("MB Cover", callback_data="udzc_musicbrainz", style=style_mb))
+        
+        buttons.append(row_cover)
+        # -----------------------------------
+        
         # Tombol Private Account & Back (Biru)
         buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_dz_auth", style=ButtonStyle.PRIMARY)])
         buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
