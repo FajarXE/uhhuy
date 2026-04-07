@@ -2,16 +2,16 @@ import json
 import logging
 import re
 import time
+import os
+import urllib.request
 from urllib.parse import parse_qs
 import requests
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
-import os
 
 logger = logging.getLogger(__name__)
 
 # --- [TRICK] AUTO-PATCH PROTOBUF 3.20.1 COMPATIBILITY & FIX IMPORTS ---
-# Script ini akan otomatis membersihkan kode tidak kompatibel dari file .proto
 try:
     proto_dir = os.path.join(os.path.dirname(__file__), 'proto')
     if os.path.exists(proto_dir):
@@ -23,17 +23,14 @@ try:
                 
                 modified = False
                 
-                # 1. Hapus import runtime_version
                 if 'from google.protobuf import runtime_version' in content:
                     content = re.sub(r'from google\.protobuf import runtime_version[^\n]*\n', '', content)
                     modified = True
                 
-                # 2. Hapus fungsi Validate yang bikin error
                 if '_runtime_version.ValidateProtobufRuntimeVersion' in content:
                     content = re.sub(r'_runtime_version\.ValidateProtobufRuntimeVersion\([\s\S]*?\)', '', content)
                     modified = True
                 
-                # 3. [BARU] Perbaiki Import 'votify' yang salah sasaran
                 if 'from votify.api.proto import' in content:
                     content = content.replace('from votify.api.proto import', 'from . import')
                     modified = True
@@ -44,6 +41,33 @@ try:
                     logger.info(f"✅ Auto-patched {file} (Protobuf & Imports Fixed)")
 except Exception as e:
     logger.error(f"Gagal auto-patch proto: {e}")
+# --------------------------------------------------------
+
+# --- [FITUR BARU] AUTO-DOWNLOADER SPOTIFY.DLL ---
+def auto_download_dll(dll_path):
+    # Cek apakah file sudah ada dan ukurannya valid (> 1MB)
+    if os.path.exists(dll_path) and os.path.getsize(dll_path) > 1000000:
+        return True
+        
+    logger.info("⏳ Auto-Downloader: Sedang mengunduh spotify.dll... Mohon tunggu (sekitar 15MB)...")
+    try:
+        # Link backup publik dari komunitas (HuggingFace) yang stabil
+        url = "https://huggingface.co/datasets/XniceCraft/spotify-dll/resolve/main/spotify.dll"
+        urllib.request.urlretrieve(url, dll_path)
+        logger.info("✅ Auto-Downloader: spotify.dll berhasil diunduh dan dipasang!")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Auto-Downloader Gagal: {e}")
+        try:
+            logger.info("⏳ Mencoba link cadangan...")
+            # Link backup cadangan
+            url2 = "https://huggingface.co/datasets/Galkina/spotify-dll/resolve/main/spotify.dll"
+            urllib.request.urlretrieve(url2, dll_path)
+            logger.info("✅ Auto-Downloader (Cadangan): spotify.dll berhasil diunduh!")
+            return True
+        except Exception as e2:
+            logger.error(f"❌ Cadangan Gagal: {e2}")
+            return False
 # --------------------------------------------------------
 
 from .proto.extendedmetadata_pb2 import BatchedEntityRequest, BatchedExtensionResponse, EntityRequest, ExtensionQuery, ExtensionKind
@@ -59,16 +83,16 @@ except ImportError:
     EMULATOR_SIZES = None
 
 TIMEOUT = 30
-DEVICE_AUTH_URL = "https://spclient.wg.spotify.com/device-auth/v1/initiate"
-DEVICE_TOKEN_URL = "https://spclient.wg.spotify.com/device-auth/v1/token"
-DEVICE_RESOLVE_URL = "https://spclient.wg.spotify.com/device-auth/v1/resolve"
+DEVICE_AUTH_URL = "https://accounts.spotify.com/oauth2/device/authorize"
+DEVICE_TOKEN_URL = "https://accounts.spotify.com/api/token"
+DEVICE_RESOLVE_URL = "https://accounts.spotify.com/pair/api/resolve"
 DEVICE_CLIENT_ID = "65b708073fc0480ea92a077233ca87bd"
 DEVICE_SCOPE = "app-remote-control,playlist-modify,playlist-modify-private,playlist-modify-public,playlist-read,playlist-read-collaborative,playlist-read-private,streaming,transfer-auth-session,ugc-image-upload,user-follow-modify,user-follow-read,user-library-modify,user-library-read,user-modify,user-modify-playback-state,user-modify-private,user-personalized,user-read-birthdate,user-read-currently-playing,user-read-email,user-read-play-history,user-read-playback-position,user-read-playback-state,user-read-private,user-read-recently-played,user-top-read"
 DEVICE_FLOW_USER_AGENT = "Spotify/126600447 Win32_x86_64/0 (PC laptop)"
 DEVICE_CLIENT_TOKEN = "AAAyQwhc1wWtqYH7spRtLROv2auz6t7xi6xV0OIlc62hyvNrbjR3Lky8Lh2s7fi8jbjX1k31NBQ6d+mpEcAyXCvrNDmZSgTjuJ1QBVzqHOpP5t4E4kDvB36AfvXmcgZltN5dYgbiHal/R2LNupoZvT1fKocen24bUAHsInYgCtKy+kft4OWN1kaFo8LfNZymZzmXBXfxKfCiO1dKBQPz7Rv5hVPpcoyxkfAl4R5aNdap3iuRdAcaB4Udx28Eu98yrA=="
 
 EXTENDED_METADATA_API_URL = "https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata"
-AUDIO_STREAM_URLS_API_URL = "https://spclient.wg.spotify.com/storage-resolve/v2/files/audio/interactive/11/{format_id}/{file_id}?version=10000000&product=9&platform=39&alt=json"
+AUDIO_STREAM_URLS_API_URL = "https://gue1-spclient.spotify.com/storage-resolve/v2/files/audio/interactive/{format_id}/{file_id}?version=10000000&product=9&platform=39&alt=json"
 PLAYPLAY_LICENSE_API_URL = "https://spclient.wg.spotify.com/playplay/v1/key/{file_id}"
 
 
@@ -155,10 +179,19 @@ class SpotifyDeviceFlow:
 
 class DesktopSpotifyApi:
     def __init__(self, sp_dc: str, spotify_dll_path: str):
+        # 1. Pastikan path absolut
+        abs_dll_path = os.path.abspath(spotify_dll_path)
+        
+        # 2. PANGGIL AUTO-DOWNLOADER DI SINI (Sebelum Emulator menyala)
+        auto_download_dll(abs_dll_path)
+        
         if not KeyEmu:
             raise RuntimeError("unplayplay is not installed or could not be imported.")
         self.sp_dc = sp_dc
-        self.key_emu = KeyEmu(spotify_dll_path)
+        
+        # 3. Gunakan path dari hasil unduhan
+        self.key_emu = KeyEmu(abs_dll_path)
+        
         import httpx
         self.client = httpx.Client(timeout=TIMEOUT)
         self.client.headers.update({
