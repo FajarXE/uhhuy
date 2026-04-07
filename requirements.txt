@@ -29,4 +29,4 @@ uvloop
 httpx
 pybase62
 pkce>=1.0.3
-unplayplay>=0.0.1
+re-unplayplay
