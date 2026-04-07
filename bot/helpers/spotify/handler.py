@@ -58,6 +58,7 @@ async def start_spotify(link: str, user: dict):
     except Exception as e:
         LOGGER.error(f"Spotify Handler Error: {e}", exc_info=True)
         await edit_message(msg, f"❌ **Error:** {str(e)}")
+        raise e
 
 
 async def fetch_artist_genre(client, artist_id):
