@@ -4,6 +4,8 @@ import re
 import time
 import os
 import requests
+import subprocess
+import sys
 from urllib.parse import parse_qs
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
@@ -46,12 +48,20 @@ from .proto.extendedmetadata_pb2 import BatchedEntityRequest, BatchedExtensionRe
 from .proto.playplay_pb2 import PlayPlayLicenseRequest, PlayPlayLicenseResponse, Interactivity, ContentType
 from .proto.audio_files_extension_pb2 import AudioFilesExtensionResponse
 
-# --- [REVOLUSI] MENGGUNAKAN re-unplayplay TANPA spotify.dll ---
+# --- [REVOLUSI] AUTO-INSTALL & MENGGUNAKAN re-unplayplay ---
 try:
     from re_unplayplay import decrypt_and_bind_key, get_token
-except ImportError:
-    decrypt_and_bind_key = None
-    get_token = None
+except Exception as main_e:
+    logger.warning(f"⚠️ Modul re_unplayplay tidak ditemukan ({main_e}). Mencoba Auto-Install...")
+    try:
+        # Memaksa bot menginstal library-nya sendiri saat itu juga!
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "re-unplayplay"])
+        from re_unplayplay import decrypt_and_bind_key, get_token
+        logger.info("✅ Auto-Install re-unplayplay BERHASIL!")
+    except Exception as sub_e:
+        logger.error(f"❌ Auto-Install GAGAL: {sub_e}", exc_info=True)
+        decrypt_and_bind_key = None
+        get_token = None
 # --------------------------------------------------------------
 
 TIMEOUT = 30
