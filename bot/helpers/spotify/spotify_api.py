@@ -38,11 +38,13 @@ from librespot.mercury import MercuryClient
 _OriginalLibrespotTokenProvider = librespot.core.TokenProvider
 
 # --- [FITUR BARU] Import Desktop API untuk FLAC ---
+import logging # Pastikan logging sudah di-import
+
 try:
     from .desktop_api import DesktopSpotifyApi
-    print("✅ [DEBUG] MODUL DESKTOP API BERHASIL DI-IMPORT")
+    logging.getLogger(__name__).info("✅ [DEBUG] MODUL DESKTOP API BERHASIL DI-IMPORT")
 except Exception as e:
-    print(f"❌ [DEBUG] MODUL DESKTOP API GAGAL DI-IMPORT: {e}")
+    logging.getLogger(__name__).error(f"❌ [CRITICAL] MODUL DESKTOP API GAGAL DI-IMPORT: {e}")
     DesktopSpotifyApi = None
 
 # --- [PERBAIKAN FINAL] KONEKSI MONGODB (ANTI-ERROR NO DEFAULT DB) ---
