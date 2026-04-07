@@ -3,9 +3,8 @@ import logging
 import re
 import time
 import os
-import urllib.request
-from urllib.parse import parse_qs
 import requests
+from urllib.parse import parse_qs
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 
@@ -43,31 +42,47 @@ except Exception as e:
     logger.error(f"Gagal auto-patch proto: {e}")
 # --------------------------------------------------------
 
-# --- [FITUR BARU] AUTO-DOWNLOADER SPOTIFY.DLL ---
+# --- [FITUR BARU] AUTO-DOWNLOADER SPOTIFY.DLL (ANTI-BLOKIR 401) ---
 def auto_download_dll(dll_path):
-    # Cek apakah file sudah ada dan ukurannya valid (> 1MB)
     if os.path.exists(dll_path) and os.path.getsize(dll_path) > 1000000:
         return True
         
     logger.info("⏳ Auto-Downloader: Sedang mengunduh spotify.dll... Mohon tunggu (sekitar 15MB)...")
-    try:
-        # Link backup publik dari komunitas (HuggingFace) yang stabil
-        url = "https://huggingface.co/datasets/XniceCraft/spotify-dll/resolve/main/spotify.dll"
-        urllib.request.urlretrieve(url, dll_path)
-        logger.info("✅ Auto-Downloader: spotify.dll berhasil diunduh dan dipasang!")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Auto-Downloader Gagal: {e}")
+    
+    # Menyamar sebagai browser Chrome Windows untuk menembus blokir 401
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    }
+    
+    urls = [
+        "https://huggingface.co/datasets/XniceCraft/spotify-dll/resolve/main/spotify.dll",
+        "https://huggingface.co/datasets/Galkina/spotify-dll/resolve/main/spotify.dll"
+    ]
+    
+    for url in urls:
         try:
-            logger.info("⏳ Mencoba link cadangan...")
-            # Link backup cadangan
-            url2 = "https://huggingface.co/datasets/Galkina/spotify-dll/resolve/main/spotify.dll"
-            urllib.request.urlretrieve(url2, dll_path)
-            logger.info("✅ Auto-Downloader (Cadangan): spotify.dll berhasil diunduh!")
-            return True
-        except Exception as e2:
-            logger.error(f"❌ Cadangan Gagal: {e2}")
-            return False
+            logger.info(f"Mencoba mengunduh dari: {url}")
+            # Menggunakan requests (bukan urllib)
+            response = requests.get(url, headers=headers, stream=True, timeout=60)
+            
+            if response.status_code == 200:
+                with open(dll_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                
+                if os.path.getsize(dll_path) > 1000000:
+                    logger.info("✅ Auto-Downloader: spotify.dll berhasil diunduh dan dipasang!")
+                    return True
+                else:
+                    logger.warning("⚠️ File terlalu kecil, mencoba link cadangan...")
+            else:
+                logger.warning(f"⚠️ Server menolak (Status: {response.status_code})")
+        except Exception as e:
+            logger.error(f"❌ Gagal: {e}")
+            
+    logger.error("❌ Semua link auto-downloader gagal.")
+    return False
 # --------------------------------------------------------
 
 from .proto.extendedmetadata_pb2 import BatchedEntityRequest, BatchedExtensionResponse, EntityRequest, ExtensionQuery, ExtensionKind
@@ -125,7 +140,6 @@ class SpotifyDeviceFlow:
         return response.json()
 
     def _parse_verification_page(self, verification_url: str) -> tuple[str, str]:
-        import requests 
         import urllib.parse
         response = self.client.get(verification_url, follow_redirects=True, timeout=TIMEOUT)
         try:
@@ -179,17 +193,12 @@ class SpotifyDeviceFlow:
 
 class DesktopSpotifyApi:
     def __init__(self, sp_dc: str, spotify_dll_path: str):
-        # 1. Pastikan path absolut
         abs_dll_path = os.path.abspath(spotify_dll_path)
-        
-        # 2. PANGGIL AUTO-DOWNLOADER DI SINI (Sebelum Emulator menyala)
         auto_download_dll(abs_dll_path)
         
         if not KeyEmu:
             raise RuntimeError("unplayplay is not installed or could not be imported.")
         self.sp_dc = sp_dc
-        
-        # 3. Gunakan path dari hasil unduhan
         self.key_emu = KeyEmu(abs_dll_path)
         
         import httpx
