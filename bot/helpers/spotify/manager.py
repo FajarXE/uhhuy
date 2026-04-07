@@ -37,7 +37,8 @@ class SpotifyManager:
         try:
             await asyncio.to_thread(self._sync_init)
             
-            if self.client and self.client.is_authenticated():
+            # [PERBAIKAN] Cek session librespot, bukan is_authenticated()
+            if self.client and getattr(self.client, 'librespot_session', None):
                 LOGGER.info("✅ Spotify: Berhasil Login!")
                 self.authenticated = True 
             else:
