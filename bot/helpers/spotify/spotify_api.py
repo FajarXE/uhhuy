@@ -40,7 +40,9 @@ _OriginalLibrespotTokenProvider = librespot.core.TokenProvider
 # --- [FITUR BARU] Import Desktop API untuk FLAC ---
 try:
     from .desktop_api import DesktopSpotifyApi
-except ImportError:
+    print("✅ [DEBUG] MODUL DESKTOP API BERHASIL DI-IMPORT")
+except Exception as e:
+    print(f"❌ [DEBUG] MODUL DESKTOP API GAGAL DI-IMPORT: {e}")
     DesktopSpotifyApi = None
 
 # --- [PERBAIKAN FINAL] KONEKSI MONGODB (ANTI-ERROR NO DEFAULT DB) ---
@@ -738,7 +740,7 @@ class SpotifyAPI:
         # Ambil sp_dc dari config
         sp_dc = self.config.get("sp_dc") or getattr(Config, "SPOTIFY_SP_DC", None)
         
-        # [PERBAIKAN] Jika sp_dc di config kosong, ambil otomatis dari Database Internal
+        # Jika sp_dc di config kosong, ambil otomatis dari Database Internal
         if not sp_dc and mongo_collection is not None:
             try:
                 rec = mongo_collection.find_one({"type": "spotify_sp_dc"})
@@ -749,6 +751,10 @@ class SpotifyAPI:
                 
         dll_path = self.config.get("spotify_dll_path") or getattr(Config, "SPOTIFY_DLL_PATH", "spotify.dll")
         
+        # --- [TAMBAHKAN BARIS INI UNTUK DEBUG] ---
+        self.logger.info(f"🔍 DEBUG FLAC -> SP_DC terisi: {bool(sp_dc)} | Modul PlayPlay siap: {bool(DesktopSpotifyApi)}")
+        # ------------------------------------------
+
         if sp_dc and DesktopSpotifyApi:
             try:
                 self.logger.info("🛠 Inisialisasi Desktop API (PlayPlay) untuk FLAC...")
