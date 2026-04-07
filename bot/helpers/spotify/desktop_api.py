@@ -10,7 +10,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# --- [TRICK] AUTO-PATCH PROTOBUF 3.20.1 COMPATIBILITY ---
+# --- [TRICK] AUTO-PATCH PROTOBUF 3.20.1 COMPATIBILITY & FIX IMPORTS ---
 # Script ini akan otomatis membersihkan kode tidak kompatibel dari file .proto
 try:
     proto_dir = os.path.join(os.path.dirname(__file__), 'proto')
@@ -22,19 +22,26 @@ try:
                     content = f.read()
                 
                 modified = False
-                # Hapus import runtime_version
+                
+                # 1. Hapus import runtime_version
                 if 'from google.protobuf import runtime_version' in content:
                     content = re.sub(r'from google\.protobuf import runtime_version[^\n]*\n', '', content)
                     modified = True
-                # Hapus fungsi Validate yang bikin error
+                
+                # 2. Hapus fungsi Validate yang bikin error
                 if '_runtime_version.ValidateProtobufRuntimeVersion' in content:
                     content = re.sub(r'_runtime_version\.ValidateProtobufRuntimeVersion\([\s\S]*?\)', '', content)
+                    modified = True
+                
+                # 3. [BARU] Perbaiki Import 'votify' yang salah sasaran
+                if 'from votify.api.proto import' in content:
+                    content = content.replace('from votify.api.proto import', 'from . import')
                     modified = True
                     
                 if modified:
                     with open(filepath, 'w', encoding='utf-8') as f:
                         f.write(content)
-                    logger.info(f"✅ Auto-patched {file} agar support Protobuf 3.20.1")
+                    logger.info(f"✅ Auto-patched {file} (Protobuf & Imports Fixed)")
 except Exception as e:
     logger.error(f"Gagal auto-patch proto: {e}")
 # --------------------------------------------------------
