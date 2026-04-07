@@ -2,17 +2,16 @@ import json
 import logging
 import re
 import time
-import os
-import requests
-import subprocess
-import sys
 from urllib.parse import parse_qs
+import requests
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
+import os
 
 logger = logging.getLogger(__name__)
 
 # --- [TRICK] AUTO-PATCH PROTOBUF 3.20.1 COMPATIBILITY & FIX IMPORTS ---
+# Script ini akan otomatis membersihkan kode tidak kompatibel dari file .proto
 try:
     proto_dir = os.path.join(os.path.dirname(__file__), 'proto')
     if os.path.exists(proto_dir):
@@ -24,14 +23,17 @@ try:
                 
                 modified = False
                 
+                # 1. Hapus import runtime_version
                 if 'from google.protobuf import runtime_version' in content:
                     content = re.sub(r'from google\.protobuf import runtime_version[^\n]*\n', '', content)
                     modified = True
                 
+                # 2. Hapus fungsi Validate yang bikin error
                 if '_runtime_version.ValidateProtobufRuntimeVersion' in content:
                     content = re.sub(r'_runtime_version\.ValidateProtobufRuntimeVersion\([\s\S]*?\)', '', content)
                     modified = True
                 
+                # 3. [BARU] Perbaiki Import 'votify' yang salah sasaran
                 if 'from votify.api.proto import' in content:
                     content = content.replace('from votify.api.proto import', 'from . import')
                     modified = True
@@ -48,33 +50,25 @@ from .proto.extendedmetadata_pb2 import BatchedEntityRequest, BatchedExtensionRe
 from .proto.playplay_pb2 import PlayPlayLicenseRequest, PlayPlayLicenseResponse, Interactivity, ContentType
 from .proto.audio_files_extension_pb2 import AudioFilesExtensionResponse
 
-# --- [REVOLUSI] AUTO-INSTALL & MENGGUNAKAN re-unplayplay ---
 try:
-    from re_unplayplay import decrypt_and_bind_key, get_token
-except Exception as main_e:
-    logger.warning(f"⚠️ Modul re_unplayplay tidak ditemukan ({main_e}). Mencoba Auto-Install...")
-    try:
-        # Memaksa bot menginstal library-nya sendiri saat itu juga!
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "re-unplayplay"])
-        from re_unplayplay import decrypt_and_bind_key, get_token
-        logger.info("✅ Auto-Install re-unplayplay BERHASIL!")
-    except Exception as sub_e:
-        logger.error(f"❌ Auto-Install GAGAL: {sub_e}", exc_info=True)
-        decrypt_and_bind_key = None
-        get_token = None
-# --------------------------------------------------------------
+    from unplayplay.key_emu import KeyEmu
+    from unplayplay.consts import PLAYPLAY_TOKEN, EMULATOR_SIZES
+except ImportError:
+    KeyEmu = None
+    PLAYPLAY_TOKEN = None
+    EMULATOR_SIZES = None
 
 TIMEOUT = 30
-DEVICE_AUTH_URL = "https://accounts.spotify.com/oauth2/device/authorize"
-DEVICE_TOKEN_URL = "https://accounts.spotify.com/api/token"
-DEVICE_RESOLVE_URL = "https://accounts.spotify.com/pair/api/resolve"
+DEVICE_AUTH_URL = "https://spclient.wg.spotify.com/device-auth/v1/initiate"
+DEVICE_TOKEN_URL = "https://spclient.wg.spotify.com/device-auth/v1/token"
+DEVICE_RESOLVE_URL = "https://spclient.wg.spotify.com/device-auth/v1/resolve"
 DEVICE_CLIENT_ID = "65b708073fc0480ea92a077233ca87bd"
 DEVICE_SCOPE = "app-remote-control,playlist-modify,playlist-modify-private,playlist-modify-public,playlist-read,playlist-read-collaborative,playlist-read-private,streaming,transfer-auth-session,ugc-image-upload,user-follow-modify,user-follow-read,user-library-modify,user-library-read,user-modify,user-modify-playback-state,user-modify-private,user-personalized,user-read-birthdate,user-read-currently-playing,user-read-email,user-read-play-history,user-read-playback-position,user-read-playback-state,user-read-private,user-read-recently-played,user-top-read"
 DEVICE_FLOW_USER_AGENT = "Spotify/126600447 Win32_x86_64/0 (PC laptop)"
 DEVICE_CLIENT_TOKEN = "AAAyQwhc1wWtqYH7spRtLROv2auz6t7xi6xV0OIlc62hyvNrbjR3Lky8Lh2s7fi8jbjX1k31NBQ6d+mpEcAyXCvrNDmZSgTjuJ1QBVzqHOpP5t4E4kDvB36AfvXmcgZltN5dYgbiHal/R2LNupoZvT1fKocen24bUAHsInYgCtKy+kft4OWN1kaFo8LfNZymZzmXBXfxKfCiO1dKBQPz7Rv5hVPpcoyxkfAl4R5aNdap3iuRdAcaB4Udx28Eu98yrA=="
 
 EXTENDED_METADATA_API_URL = "https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata"
-AUDIO_STREAM_URLS_API_URL = "https://gue1-spclient.spotify.com/storage-resolve/v2/files/audio/interactive/{format_id}/{file_id}?version=10000000&product=9&platform=39&alt=json"
+AUDIO_STREAM_URLS_API_URL = "https://spclient.wg.spotify.com/storage-resolve/v2/files/audio/interactive/11/{format_id}/{file_id}?version=10000000&product=9&platform=39&alt=json"
 PLAYPLAY_LICENSE_API_URL = "https://spclient.wg.spotify.com/playplay/v1/key/{file_id}"
 
 
@@ -107,6 +101,7 @@ class SpotifyDeviceFlow:
         return response.json()
 
     def _parse_verification_page(self, verification_url: str) -> tuple[str, str]:
+        import requests 
         import urllib.parse
         response = self.client.get(verification_url, follow_redirects=True, timeout=TIMEOUT)
         try:
@@ -159,11 +154,11 @@ class SpotifyDeviceFlow:
         return response.json()
 
 class DesktopSpotifyApi:
-    def __init__(self, sp_dc: str, spotify_dll_path: str=None):
-        if not get_token:
-            raise RuntimeError("Library re-unplayplay gagal dimuat.")
+    def __init__(self, sp_dc: str, spotify_dll_path: str):
+        if not KeyEmu:
+            raise RuntimeError("unplayplay is not installed or could not be imported.")
         self.sp_dc = sp_dc
-        
+        self.key_emu = KeyEmu(spotify_dll_path)
         import httpx
         self.client = httpx.Client(timeout=TIMEOUT)
         self.client.headers.update({
@@ -249,7 +244,7 @@ class DesktopSpotifyApi:
         file_id_bytes = bytes.fromhex(file_id_hex)
         request = PlayPlayLicenseRequest(
             version=5,
-            token=get_token(),
+            token=PLAYPLAY_TOKEN.VALUE,
             interactivity=Interactivity.INTERACTIVE,
             content_type=ContentType.AUDIO_TRACK,
         )
@@ -268,10 +263,9 @@ class DesktopSpotifyApi:
         license_resp = PlayPlayLicenseResponse()
         license_resp.ParseFromString(response.content)
         
-        # Eksekusi Dekripsi NATIVE tanpa DLL
-        decryption_key = decrypt_and_bind_key(
-            license_resp.obfuscated_key,
-            file_id_bytes[:16]
+        decryption_key = self.key_emu.get_aes_key(
+            obfuscated_key=license_resp.obfuscated_key,
+            content_id=file_id_bytes[: EMULATOR_SIZES.CONTENT_ID],
         )
         return bytes(decryption_key)
 
