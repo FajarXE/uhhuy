@@ -42,59 +42,17 @@ except Exception as e:
     logger.error(f"Gagal auto-patch proto: {e}")
 # --------------------------------------------------------
 
-# --- [FITUR BARU] AUTO-DOWNLOADER SPOTIFY.DLL (JALUR RESMI) ---
-def auto_download_dll(dll_path):
-    import os
-    import subprocess
-    import urllib.request
-    
-    if os.path.exists(dll_path) and os.path.getsize(dll_path) > 1000000:
-        return True
-        
-    logger.info("⏳ Auto-Downloader: Mendownload installer resmi Spotify (~90MB)...")
-    
-    try:
-        work_dir = os.path.dirname(dll_path)
-        installer_path = os.path.join(work_dir, "SpotifyFullSetup.exe")
-        
-        # 1. Download langsung dari server resmi Spotify (Anti-Blokir)
-        urllib.request.urlretrieve("https://download.scdn.co/SpotifyFullSetup.exe", installer_path)
-        logger.info("✅ Installer terunduh. Sedang membongkar dan mengambil spotify.dll...")
-        
-        # 2. Ekstrak menggunakan 7-Zip (Bawaan mesin Linux/Render)
-        subprocess.run(
-            ["7z", "e", installer_path, "spotify.dll", "-o" + work_dir, "-y"], 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE, 
-            check=True
-        )
-        
-        # 3. Hapus installer agar penyimpanan Render tidak penuh
-        if os.path.exists(installer_path):
-            os.remove(installer_path)
-            
-        if os.path.exists(dll_path) and os.path.getsize(dll_path) > 1000000:
-            logger.info("🎉 Auto-Downloader: spotify.dll berhasil diekstrak dan siap digunakan!")
-            return True
-            
-    except Exception as e:
-        logger.error(f"❌ Auto-Downloader Ekstrak Gagal: {e}")
-            
-    logger.error("❌ Gagal mengekstrak. Fitur FLAC mungkin akan dilewati.")
-    return False
-# --------------------------------------------------------
-
 from .proto.extendedmetadata_pb2 import BatchedEntityRequest, BatchedExtensionResponse, EntityRequest, ExtensionQuery, ExtensionKind
 from .proto.playplay_pb2 import PlayPlayLicenseRequest, PlayPlayLicenseResponse, Interactivity, ContentType
 from .proto.audio_files_extension_pb2 import AudioFilesExtensionResponse
 
+# --- [REVOLUSI] MENGGUNAKAN re-unplayplay TANPA spotify.dll ---
 try:
-    from unplayplay.key_emu import KeyEmu
-    from unplayplay.consts import PLAYPLAY_TOKEN, EMULATOR_SIZES
+    from re_unplayplay import decrypt_and_bind_key, get_token
 except ImportError:
-    KeyEmu = None
-    PLAYPLAY_TOKEN = None
-    EMULATOR_SIZES = None
+    decrypt_and_bind_key = None
+    get_token = None
+# --------------------------------------------------------------
 
 TIMEOUT = 30
 DEVICE_AUTH_URL = "https://accounts.spotify.com/oauth2/device/authorize"
@@ -191,14 +149,10 @@ class SpotifyDeviceFlow:
         return response.json()
 
 class DesktopSpotifyApi:
-    def __init__(self, sp_dc: str, spotify_dll_path: str):
-        abs_dll_path = os.path.abspath(spotify_dll_path)
-        auto_download_dll(abs_dll_path)
-        
-        if not KeyEmu:
-            raise RuntimeError("unplayplay is not installed or could not be imported.")
+    def __init__(self, sp_dc: str, spotify_dll_path: str=None):
+        if not get_token:
+            raise RuntimeError("Library re-unplayplay gagal dimuat.")
         self.sp_dc = sp_dc
-        self.key_emu = KeyEmu(abs_dll_path)
         
         import httpx
         self.client = httpx.Client(timeout=TIMEOUT)
@@ -285,7 +239,7 @@ class DesktopSpotifyApi:
         file_id_bytes = bytes.fromhex(file_id_hex)
         request = PlayPlayLicenseRequest(
             version=5,
-            token=PLAYPLAY_TOKEN.VALUE,
+            token=get_token(),
             interactivity=Interactivity.INTERACTIVE,
             content_type=ContentType.AUDIO_TRACK,
         )
@@ -304,9 +258,10 @@ class DesktopSpotifyApi:
         license_resp = PlayPlayLicenseResponse()
         license_resp.ParseFromString(response.content)
         
-        decryption_key = self.key_emu.get_aes_key(
-            obfuscated_key=license_resp.obfuscated_key,
-            content_id=file_id_bytes[: EMULATOR_SIZES.CONTENT_ID],
+        # Eksekusi Dekripsi NATIVE tanpa DLL
+        decryption_key = decrypt_and_bind_key(
+            license_resp.obfuscated_key,
+            file_id_bytes[:16]
         )
         return bytes(decryption_key)
 
