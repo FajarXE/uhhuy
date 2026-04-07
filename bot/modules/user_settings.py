@@ -87,7 +87,7 @@ except ImportError:
 # --- IMPORT BUTTONS ---
 # Pastikan Anda sudah menambahkan 'beatport_user_auth_buttons' di bot/helpers/buttons/settings.py
 from ..helpers.buttons.settings import (
-    usetting_button, tidal_quality_button, 
+    usetting_button, tidal_quality_button, us_spotify_button,
     qb_button, bp_button, dz_button, kk_button,
     bs_button, sc_button, np_button, id_button,
     bugs_button, lyrics_button, mv_button,
@@ -163,6 +163,42 @@ async def set_vk_cmd(client, message):
 async def del_vk_cmd(client, message):
     if await check_user(msg=message):
         await _del_token(message, 'viking_token', 'Vikingfiles')
+
+
+# ==================================
+# SPOTIFY USER SETTINGS
+# ==================================
+@Client.on_callback_query(filters.regex("^usS$"))
+async def user_spotify_cb(client, query):
+    if not await check_user(msg=query.message):
+        return
+        
+    quality = {
+        "LOSSLESS": "FLAC (PlayPlay)",
+        "VERY_HIGH": "Ogg 320k",
+        "HIGH": "Ogg 160k",
+        "NORMAL": "Ogg 96k"
+    }
+    
+    user_id = query.from_user.id
+    current = await database.get_user_variable(user_id, "SPOTIFY_QUALITY") or "VERY_HIGH"
+    
+    if current in quality:
+        quality[current] += ' ✅'
+        
+    text = "**PENGATURAN SPOTIFY PENGGUNA**\nPilih prioritas kualitas Spotify Anda:"
+    await edit_message(query.message, text, markup=us_spotify_button(quality))
+
+@Client.on_callback_query(filters.regex(r"^usS_(.+)"))
+async def user_spotify_qual_cb(client, query):
+    if not await check_user(msg=query.message):
+        return
+        
+    to_set = query.matches[0].group(1)
+    user_id = query.from_user.id
+    
+    await database.set_user_variable(user_id, "SPOTIFY_QUALITY", to_set)
+    await user_spotify_cb(client, query)
 
 
 # ==================================
