@@ -16,47 +16,54 @@ class SpotifyManager:
 
     async def initialize_clients(self):
         """
-        Dijalankan saat startup. 
-        [UPDATED] Kompatibel dengan MongoDB (Tidak memaksa file fisik harus ada).
+        Dijalankan saat startup. Memuat kredensial dari ENV, Database, atau File.
         """
         LOGGER.info("Spotify: Menginisialisasi...")
         
-        # 1. Cek ENV (Legacy Support - Jika user lupa hapus ENV)
-        # Gunakan getattr untuk safety jika config tidak punya atribut tersebut
+        # --- [1] AMBIL DATA DARI DATABASE (MONGODB) ---
+        from bot.helpers.database.mongo_async import database
+        
+        # Ambil Token Login OAuth
+        saved_creds = await database.get_variable("SPOTIFY_CREDENTIALS_JSON")
+        if saved_creds:
+            Config.SPOTIFY_CREDENTIALS_JSON = saved_creds
+            LOGGER.info("Spotify: Kredensial login dimuat dari Database.")
+            
+        # Ambil Cookie sp_dc (Untuk FLAC)
+        saved_sp_dc = await database.get_variable("SPOTIFY_SP_DC")
+        if saved_sp_dc:
+            Config.SPOTIFY_SP_DC = saved_sp_dc
+            LOGGER.info("Spotify: Cookie sp_dc dimuat dari Database.")
+
+        # --- [2] PENANGANAN FILE KREDENSIAL ---
         env_creds = getattr(Config, 'SPOTIFY_CREDENTIALS_JSON', None)
         
         if env_creds:
-            LOGGER.info("Spotify: Kredensial ditemukan di ENV Variables.")
             try:
                 os.makedirs(os.path.dirname(self.credentials_path), exist_ok=True)
                 with open(self.credentials_path, "w") as f:
                     f.write(env_creds)
             except Exception as e:
-                LOGGER.warning(f"Gagal menulis ENV ke file (Akan mencoba MongoDB): {e}")
+                LOGGER.warning(f"Gagal menulis kredensial ke file: {e}")
         
-        # 2. [LOGIKA BARU] Cek File Fisik (Hanya Info, BUKAN Syarat Wajib)
         if not os.path.exists(self.credentials_path):
-            LOGGER.info(f"File kredensial fisik belum ada. Bot akan mencoba menarik data dari MongoDB via API...")
-            # KITA HAPUS 'return' DISINI AGAR PROSES TIDAK BERHENTI
+            LOGGER.warning("Spotify: File credentials.json tidak ditemukan. Harap login via /spotify_login.")
+            self.authenticated = False
+            return
 
-        # 3. Inisialisasi Client
+        # --- [3] INISIALISASI API ---
         try:
-            # Jalankan di thread terpisah agar tidak memblokir async loop saat startup
+            # Jalankan di thread agar tidak memblokir bot saat booting
             await asyncio.to_thread(self._sync_init)
             
-            # Cek apakah sesi berhasil dibuat
-            # Kita cek librespot_session karena itu indikator utama login sukses
-            if self.client and self.client.librespot_session:
-                self.authenticated = True
-                LOGGER.info("✅ Spotify: Login Berhasil (Siap Download)!")
+            if self.client and self.client.is_authenticated():
+                LOGGER.info("✅ Spotify: Berhasil Login!")
+                self.authenticated = True 
             else:
-                LOGGER.warning("⚠️ Spotify: Login belum aktif. Silakan jalankan /spotify_login jika download gagal.")
-                # Kita set True sementara agar bot tidak menolak perintah download, 
-                # karena kadang API butuh waktu untuk connect.
+                LOGGER.warning("⚠️ Spotify: Client terinisialisasi tapi tidak terautentikasi.")
                 self.authenticated = True 
         except Exception as e:
             LOGGER.error(f"❌ Spotify: Error Init -> {e}")
-            # Tetap set authenticated True agar user bisa mencoba command /spotify_login lagi tanpa restart
             self.authenticated = True
 
     def _sync_init(self):
@@ -65,29 +72,26 @@ class SpotifyManager:
             "username": "BotUser",
             "client_id": Config.SPOTIFY_CLIENT_ID,
             "client_secret": Config.SPOTIFY_CLIENT_SECRET,
-            "credentials_location": self.credentials_path 
+            "credentials_location": self.credentials_path,
+            # Teruskan SP_DC ke API agar bisa digunakan oleh Desktop API (PlayPlay)
+            "sp_dc": getattr(Config, "SPOTIFY_SP_DC", None)
         }
         
-        # Inisialisasi API
-        # Saat kelas ini dipanggil, dia akan otomatis menjalankan _load_credentials_and_init_session
-        # yang sudah kita modifikasi untuk membaca MongoDB.
         self.client = SpotifyAPI(config=config)
         
-        # Panggil fungsi autentikasi eksplisit jika ada
+        # Load sesi
         if hasattr(self.client, 'authenticate_stream_api'):
             self.client.authenticate_stream_api()
         elif hasattr(self.client, '_load_credentials_and_init_session'):
             self.client._load_credentials_and_init_session()
 
     def get_client(self):
-        # Selalu kembalikan client jika objeknya ada
-        # Biarkan spotify_api.py yang menangani error jika token mati
-        if self.client:
-            return self.client
-        return None
+        return self.client if self.client else None
     
     async def shutdown(self):
-        pass
+        if self.client:
+            # Tambahkan logika close session jika diperlukan oleh librespot-python
+            pass
 
 # Instance Global
 spotify_manager = SpotifyManager()
