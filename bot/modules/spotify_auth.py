@@ -4,16 +4,14 @@ from config import Config
 from bot import CMD
 from bot.helpers.spotify.credentials_manager import HeadlessSpotifyAuth
 from bot.helpers.spotify.manager import spotify_manager
-from bot.helpers.database.mongo_async import database # Import database
 
-# Simpan sesi auth sementara di memori
+# [PERBAIKAN] Menggunakan koneksi DB internal yang aman
+from bot.helpers.spotify.spotify_api import mongo_collection
+
 auth_sessions = {}
 
 @Client.on_message(filters.command("spotify_login") & filters.user(list(Config.ADMINS)))
 async def spotify_login_cmd(client, message: Message):
-    """
-    Command untuk memulai proses login Spotify (OAuth).
-    """
     user_id = message.from_user.id
     auth_handler = HeadlessSpotifyAuth()
     auth_sessions[user_id] = auth_handler
@@ -58,28 +56,24 @@ async def spotify_token_cmd(client, message: Message):
         with open(creds_path, "w") as f:
             f.write(json_creds)
             
-        # Simpan ke MongoDB agar tidak hilang saat restart di Render
-        await database.set_variable("SPOTIFY_CREDENTIALS_JSON", json_creds)
-            
-        # Init ulang manager
+        # Catatan: Kita tidak perlu lagi menulis JSON ke DB di sini secara manual,
+        # karena file spotify_api.py akan otomatis membacanya dan menyimpannya 
+        # ke Database internalnya saat proses initialize di bawah ini!
+        
         await spotify_manager.initialize_clients()
         
         final_msg = (
             "✅ <b>LOGIN BERHASIL!</b>\n\n"
-            "Bot sekarang bisa mendownload dari Spotify.\n\n"
-            "⚠️ <b>INFO RENDER:</b> Kredensial telah disimpan di Database MongoDB."
+            "Bot sekarang bisa mendownload dari Spotify.\n"
+            "Kredensial telah disimpan secara permanen ke Database Internal."
         )
         await status_msg.edit_text(final_msg)
         auth_sessions.pop(user_id, None)
     else:
         await status_msg.edit_text(f"❌ <b>Login Gagal:</b>\n{result}")
 
-# --- [FITUR BARU] SET COOKIE SPOTIFY DC VIA TELEGRAM ---
 @Client.on_message(filters.command("set_spotify_dc") & filters.user(list(Config.ADMINS)))
 async def set_spotify_dc_cmd(client, message: Message):
-    """
-    Menyimpan cookie sp_dc untuk fitur PlayPlay FLAC.
-    """
     if len(message.command) < 2:
         return await message.reply_text(
             "⚠️ **Format Salah!**\n"
@@ -87,16 +81,18 @@ async def set_spotify_dc_cmd(client, message: Message):
         )
     
     cookie = message.text.split(None, 1)[1].strip()
-    status_msg = await message.reply_text("⏳ Menyimpan Cookie sp_dc ke Database...")
+    status_msg = await message.reply_text("⏳ Menyimpan Cookie sp_dc ke Database Internal...")
     
     try:
-        # Simpan ke Database
-        await database.set_variable("SPOTIFY_SP_DC", cookie)
-        
-        # Update config di memori
+        # Simpan menggunakan koneksi PyMongo internal yang aman dari crash
+        if mongo_collection is not None:
+            mongo_collection.update_one(
+                {"type": "spotify_sp_dc"}, 
+                {"$set": {"data": cookie}}, 
+                upsert=True
+            )
+            
         Config.SPOTIFY_SP_DC = cookie
-        
-        # Re-init client agar mendeteksi sp_dc baru
         await spotify_manager.initialize_clients()
         
         await status_msg.edit_text(
