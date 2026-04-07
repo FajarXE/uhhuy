@@ -14,6 +14,7 @@ from bot.helpers.message import edit_message, send_message
 from bot.helpers.uploder import track_upload, album_upload, playlist_upload, zip_handler
 from bot.helpers.metadata import set_metadata, create_cover_file 
 from bot.helpers.spotify.manager import spotify_manager
+from bot.helpers.database.mongo_async import database # <-- [BARU] Import database
 import bot.helpers.translations as lang
 
 LOGGER = logging.getLogger("SpotifyHandler")
@@ -106,7 +107,7 @@ def map_spotify_to_bot_metadata(track_info, user, is_episode=False, custom_genre
         'totalvolume': "1",
         'genre': final_genre,
         'duration': track_info.duration, 
-        'quality': "High (320kbps)",
+        'quality': getattr(track_info, 'quality', "High (320kbps)"), # <-- [BARU] Ambil dari track_info
         'provider': "Spotify",
         'explicit': explicit_val,
         'isrc': isrc,
@@ -134,18 +135,22 @@ async def process_track(client, track_id, user, is_episode=False):
     await edit_message(msg, f"⬇️ **Spotify:** Mengunduh {'Episode' if is_episode else 'Lagu'}...")
 
     try:
+        # --- [BARU] Mengambil kualitas Spotify dari database user ---
+        user_id_val = user.get('user_id') or user.get('id')
+        spotify_quality = await database.get_user_variable(user_id_val, "SPOTIFY_QUALITY") or "VERY_HIGH"
+
         if is_episode:
-             track_info = await asyncio.to_thread(client.get_episode_info, track_id, "HIGH", None)
+             track_info = await asyncio.to_thread(client.get_episode_info, track_id, spotify_quality, None)
         else:
-             track_info = await asyncio.to_thread(client.get_track_info, track_id, "HIGH", None)
+             track_info = await asyncio.to_thread(client.get_track_info, track_id, spotify_quality, None)
              
         if not track_info: raise Exception("Gagal mengambil metadata.")
 
         download_result = None
         if is_episode:
-             download_result = await asyncio.to_thread(client.get_episode_download, track_id=track_id, quality_tier="HIGH")
+             download_result = await asyncio.to_thread(client.get_episode_download, track_id=track_id, quality_tier=spotify_quality)
         else:
-             download_result = await asyncio.to_thread(client.get_track_download, track_id=track_id, quality_tier="HIGH")
+             download_result = await asyncio.to_thread(client.get_track_download, track_id=track_id, quality_tier=spotify_quality)
 
         if not download_result or not download_result.temp_file_path:
             raise Exception("Gagal mengunduh stream audio.")
@@ -158,7 +163,10 @@ async def process_track(client, track_id, user, is_episode=False):
         
         clean_artist = meta['artist'].replace("/", "_")
         clean_title = meta['title'].replace("/", "_")
-        final_filename = f"{clean_artist} - {clean_title}.ogg"
+        
+        # Ekstensi menyesuaikan codec (FLAC/OGG)
+        file_ext = ".flac" if spotify_quality == "LOSSLESS" and download_result.temp_file_path.endswith('.flac') else ".ogg"
+        final_filename = f"{clean_artist} - {clean_title}{file_ext}"
         
         r_id = user.get('r_id', 'unknown')
         user_folder = f"{Config.DOWNLOAD_BASE_DIR}/{r_id}/Spotify"
@@ -178,7 +186,6 @@ async def process_track(client, track_id, user, is_episode=False):
             meta['thumbnail'] = thumb_path
             
         await edit_message(msg, "🏷 **Spotify:** Menulis Metadata...")
-        user_id_val = user.get('user_id') or user.get('id')
         await set_metadata(meta, user_id_val)
 
         await edit_message(msg, "⬆️ **Spotify:** Mengunggah...")
@@ -195,12 +202,16 @@ async def process_single_track(client, track, user, parent_info, user_folder, cu
         # Jeda anti-ban khusus Spotify agar koneksi TCP tidak dicurigai
         await asyncio.sleep(random.uniform(1.0, 3.5))
         
-        download_result = await asyncio.to_thread(client.get_track_download, track_id=track.id, quality_tier="HIGH")
+        # --- [BARU] Mengambil kualitas Spotify dari database user ---
+        user_id_val = user.get('user_id') or user.get('id')
+        spotify_quality = await database.get_user_variable(user_id_val, "SPOTIFY_QUALITY") or "VERY_HIGH"
+
+        download_result = await asyncio.to_thread(client.get_track_download, track_id=track.id, quality_tier=spotify_quality)
         if not download_result or not download_result.temp_file_path: return None
 
         full_track_info = None
         try:
-            full_track_info = await asyncio.to_thread(client.get_track_info, track.id, "HIGH", None)
+            full_track_info = await asyncio.to_thread(client.get_track_info, track.id, spotify_quality, None)
         except: pass
 
         target_info = full_track_info if full_track_info else track
@@ -212,18 +223,21 @@ async def process_single_track(client, track, user, parent_info, user_folder, cu
 
         meta = map_spotify_to_bot_metadata(target_info, user, custom_genre=custom_genre)
         
+        # Ekstensi menyesuaikan
+        file_ext = ".flac" if spotify_quality == "LOSSLESS" and download_result.temp_file_path.endswith('.flac') else ".ogg"
+        
         if not is_playlist:
             meta['totaltracks'] = str(len(parent_info.tracks))
             meta['album'] = parent_info.name
             meta['cover'] = parent_info.all_track_cover_jpg_url
             clean_title = meta['title'].replace("/", "_")
             track_str = str(meta['tracknumber']).zfill(2)
-            filename = f"{track_str} - {clean_title}.ogg"
+            filename = f"{track_str} - {clean_title}{file_ext}"
         else:
             clean_artist = meta['artist'].replace("/", "_")
             clean_title = meta['title'].replace("/", "_")
             track_str = str(meta['tracknumber']).zfill(2)
-            filename = f"{track_str} - {clean_artist} - {clean_title}.ogg"
+            filename = f"{track_str} - {clean_artist} - {clean_title}{file_ext}"
             
         final_path = os.path.join(user_folder, filename)
         shutil.move(download_result.temp_file_path, final_path)
@@ -237,15 +251,13 @@ async def process_single_track(client, track, user, parent_info, user_folder, cu
                 t_path = await create_cover_file(thumb_source, meta, thumbnail=True)
                 meta['thumbnail'] = t_path
             
-            user_id_val = user.get('user_id') or user.get('id')
-            
-            # --- [FIX OGG HEADER ERROR] ---
-            # Kita bungkus set_metadata dengan try-except agar jika OGG korup (0x00),
+            # --- [FIX OGG/FLAC HEADER ERROR] ---
+            # Kita bungkus set_metadata dengan try-except agar jika file korup (0x00),
             # proses tidak menghentikan lagu lain di album!
             try:
                 await set_metadata(meta, user_id_val)
             except Exception as e:
-                LOGGER.error(f"Gagal menulis metadata (File OGG mungkin korup dari Spotify): {e}")
+                LOGGER.error(f"Gagal menulis metadata (File audio mungkin korup dari Spotify): {e}")
                 os.remove(final_path)
                 return None
             # -------------------------------
@@ -281,6 +293,10 @@ async def process_album(client, album_id, user):
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
     r_id = user.get('r_id', 'unknown')
     
+    # Ambil kualitas user untuk album info text (Opsional)
+    user_id_val = user.get('user_id') or user.get('id')
+    spotify_quality = await database.get_user_variable(user_id_val, "SPOTIFY_QUALITY") or "VERY_HIGH"
+    
     meta_album = {
         'title': album_info.name,
         'artist': album_info.artist,
@@ -289,7 +305,7 @@ async def process_album(client, album_id, user):
         'provider': 'Spotify',
         'date': str(album_info.release_year),
         'release_date': str(album_info.release_year),
-        'quality': "High (320kbps)",
+        'quality': "Lossless/FLAC" if spotify_quality == "LOSSLESS" else "High (320kbps)",
         'totaltracks': str(total),
         'totalvolumes': "1",
         'explicit': False,
@@ -372,6 +388,9 @@ async def process_playlist(client, playlist_id, user):
     
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
     r_id = user.get('r_id', 'unknown')
+    
+    user_id_val = user.get('user_id') or user.get('id')
+    spotify_quality = await database.get_user_variable(user_id_val, "SPOTIFY_QUALITY") or "VERY_HIGH"
 
     meta_playlist = {
         'title': playlist_info.name,
@@ -381,7 +400,7 @@ async def process_playlist(client, playlist_id, user):
         'provider': 'Spotify',
         'totaltracks': str(total),
         'totalvolumes': "1",
-        'quality': "High (320kbps)",
+        'quality': "Lossless/FLAC" if spotify_quality == "LOSSLESS" else "High (320kbps)",
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{r_id}-temp/"
     }
     
