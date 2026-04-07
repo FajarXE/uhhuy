@@ -42,46 +42,45 @@ except Exception as e:
     logger.error(f"Gagal auto-patch proto: {e}")
 # --------------------------------------------------------
 
-# --- [FITUR BARU] AUTO-DOWNLOADER SPOTIFY.DLL (ANTI-BLOKIR 401) ---
+# --- [FITUR BARU] AUTO-DOWNLOADER SPOTIFY.DLL (JALUR RESMI) ---
 def auto_download_dll(dll_path):
+    import os
+    import subprocess
+    import urllib.request
+    
     if os.path.exists(dll_path) and os.path.getsize(dll_path) > 1000000:
         return True
         
-    logger.info("⏳ Auto-Downloader: Sedang mengunduh spotify.dll... Mohon tunggu (sekitar 15MB)...")
+    logger.info("⏳ Auto-Downloader: Mendownload installer resmi Spotify (~90MB)...")
     
-    # Menyamar sebagai browser Chrome Windows untuk menembus blokir 401
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-    }
-    
-    urls = [
-        "https://huggingface.co/datasets/XniceCraft/spotify-dll/resolve/main/spotify.dll",
-        "https://huggingface.co/datasets/Galkina/spotify-dll/resolve/main/spotify.dll"
-    ]
-    
-    for url in urls:
-        try:
-            logger.info(f"Mencoba mengunduh dari: {url}")
-            # Menggunakan requests (bukan urllib)
-            response = requests.get(url, headers=headers, stream=True, timeout=60)
+    try:
+        work_dir = os.path.dirname(dll_path)
+        installer_path = os.path.join(work_dir, "SpotifyFullSetup.exe")
+        
+        # 1. Download langsung dari server resmi Spotify (Anti-Blokir)
+        urllib.request.urlretrieve("https://download.scdn.co/SpotifyFullSetup.exe", installer_path)
+        logger.info("✅ Installer terunduh. Sedang membongkar dan mengambil spotify.dll...")
+        
+        # 2. Ekstrak menggunakan 7-Zip (Bawaan mesin Linux/Render)
+        subprocess.run(
+            ["7z", "e", installer_path, "spotify.dll", "-o" + work_dir, "-y"], 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            check=True
+        )
+        
+        # 3. Hapus installer agar penyimpanan Render tidak penuh
+        if os.path.exists(installer_path):
+            os.remove(installer_path)
             
-            if response.status_code == 200:
-                with open(dll_path, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                
-                if os.path.getsize(dll_path) > 1000000:
-                    logger.info("✅ Auto-Downloader: spotify.dll berhasil diunduh dan dipasang!")
-                    return True
-                else:
-                    logger.warning("⚠️ File terlalu kecil, mencoba link cadangan...")
-            else:
-                logger.warning(f"⚠️ Server menolak (Status: {response.status_code})")
-        except Exception as e:
-            logger.error(f"❌ Gagal: {e}")
+        if os.path.exists(dll_path) and os.path.getsize(dll_path) > 1000000:
+            logger.info("🎉 Auto-Downloader: spotify.dll berhasil diekstrak dan siap digunakan!")
+            return True
             
-    logger.error("❌ Semua link auto-downloader gagal.")
+    except Exception as e:
+        logger.error(f"❌ Auto-Downloader Ekstrak Gagal: {e}")
+            
+    logger.error("❌ Gagal mengekstrak. Fitur FLAC mungkin akan dilewati.")
     return False
 # --------------------------------------------------------
 
