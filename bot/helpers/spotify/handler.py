@@ -137,8 +137,8 @@ async def process_track(client, track_id, user, is_episode=False):
     try:
         # --- [BARU] Mengambil kualitas Spotify dari database user ---
         user_id_val = user.get('user_id') or user.get('id')
-        spotify_quality = await database.get_user_variable(user_id_val, "SPOTIFY_QUALITY") or "VERY_HIGH"
-
+        spotify_quality = user.get("spotify_qual", "VERY_HIGH")
+        
         if is_episode:
              track_info = await asyncio.to_thread(client.get_episode_info, track_id, spotify_quality, None)
         else:
@@ -204,7 +204,7 @@ async def process_single_track(client, track, user, parent_info, user_folder, cu
         
         # --- [BARU] Mengambil kualitas Spotify dari database user ---
         user_id_val = user.get('user_id') or user.get('id')
-        spotify_quality = await database.get_user_variable(user_id_val, "SPOTIFY_QUALITY") or "VERY_HIGH"
+        spotify_quality = user.get("spotify_qual", "VERY_HIGH")
 
         download_result = await asyncio.to_thread(client.get_track_download, track_id=track.id, quality_tier=spotify_quality)
         if not download_result or not download_result.temp_file_path: return None
@@ -295,7 +295,7 @@ async def process_album(client, album_id, user):
     
     # Ambil kualitas user untuk album info text (Opsional)
     user_id_val = user.get('user_id') or user.get('id')
-    spotify_quality = await database.get_user_variable(user_id_val, "SPOTIFY_QUALITY") or "VERY_HIGH"
+    spotify_quality = user.get("spotify_qual", "VERY_HIGH")
     
     meta_album = {
         'title': album_info.name,
@@ -388,10 +388,10 @@ async def process_playlist(client, playlist_id, user):
     
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
     r_id = user.get('r_id', 'unknown')
-    
-    user_id_val = user.get('user_id') or user.get('id')
-    spotify_quality = await database.get_user_variable(user_id_val, "SPOTIFY_QUALITY") or "VERY_HIGH"
 
+    user_id_val = user.get('user_id') or user.get('id')
+    spotify_quality = user.get("spotify_qual", "VERY_HIGH")
+    
     meta_playlist = {
         'title': playlist_info.name,
         'artist': playlist_info.creator,
