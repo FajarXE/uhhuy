@@ -37,6 +37,12 @@ from librespot.mercury import MercuryClient
 # Store reference to original LibrespotTokenProvider before any patching
 _OriginalLibrespotTokenProvider = librespot.core.TokenProvider
 
+# --- [FITUR BARU] Import Desktop API untuk FLAC ---
+try:
+    from .desktop_api import DesktopSpotifyApi
+except ImportError:
+    DesktopSpotifyApi = None
+
 # --- [PERBAIKAN FINAL] KONEKSI MONGODB (ANTI-ERROR NO DEFAULT DB) ---
 try:
     from pymongo import MongoClient
@@ -725,6 +731,21 @@ class SpotifyAPI:
         os.makedirs(self.credentials_dir, exist_ok=True) 
         self.credentials_file_path = os.path.join(self.credentials_dir, CREDENTIALS_FILE_NAME)       
         self.logger.info(f"Credentials will be stored/loaded from: {self.credentials_file_path}")
+
+        # --- [FITUR BARU] Inisialisasi Desktop API untuk FLAC ---
+        self.desktop_api = None
+        # Ambil sp_dc dan path dll dari config (Anda bisa atur ini di config.py Anda)
+        sp_dc = self.config.get("sp_dc") or getattr(Config, "SPOTIFY_SP_DC", None)
+        dll_path = self.config.get("spotify_dll_path") or getattr(Config, "SPOTIFY_DLL_PATH", "spotify.dll")
+        
+        if sp_dc and DesktopSpotifyApi:
+            try:
+                self.logger.info("🛠 Inisialisasi Desktop API (PlayPlay) untuk FLAC...")
+                self.desktop_api = DesktopSpotifyApi(sp_dc, dll_path)
+                self.desktop_api.authenticate()
+                self.logger.info("✅ Desktop API FLAC Ready!")
+            except Exception as e:
+                self.logger.error(f"❌ Gagal inisialisasi Desktop API (FLAC nonaktif): {e}")
 
     def perform_token_refresh(self) -> bool:
         """
@@ -1620,6 +1641,44 @@ class SpotifyAPI:
         except Exception as e:
             self.logger.error(f"Gagal memparsing Track ID: {e}")
             raise SpotifyApiError(f"Track ID tidak valid: {e}")
+
+        # --- [FITUR BARU] DOWNLOAD FLAC VIA PLAYPLAY ---
+        if qt_str in ["LOSSLESS", "FLAC", "HIFI"] and self.desktop_api:
+            self.logger.info(f"🌟 Memulai Download FLAC via PlayPlay untuk ID: {track_id}")
+            try:
+                tid_b62 = tid.to_base62()
+                
+                # Coba ambil info stream format 16 (FLAC 16-bit)
+                stream_info = self.desktop_api.get_flac_stream_info(tid_b62, 16)
+                if not stream_info:
+                    # Coba format 22 (FLAC 24-bit) jika 16-bit tidak ada
+                    stream_info = self.desktop_api.get_flac_stream_info(tid_b62, 22)
+
+                if stream_info:
+                    file_id_hex, stream_url = stream_info
+                    self.logger.info("🔑 Mengambil Decryption Key PlayPlay...")
+                    decryption_key = self.desktop_api.get_playplay_key(file_id_hex)
+                    
+                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".flac")
+                    temp_file.close() # Tutup agar bisa ditulis oleh Desktop API
+                    
+                    self.logger.info("⬇️ Mengunduh dan mendekripsi stream FLAC...")
+                    self.desktop_api.download_and_decrypt(stream_url, decryption_key, temp_file.name)
+                    
+                    if os.path.exists(temp_file.name) and os.path.getsize(temp_file.name) > 1024:
+                        self.logger.info(f"✅ Download FLAC Berhasil: {temp_file.name}")
+                        return TrackDownloadInfo(
+                            download_type=DownloadEnum.TEMP_FILE_PATH,
+                            temp_file_path=temp_file.name,
+                            file_url=None
+                        )
+                    else:
+                        self.logger.error("❌ File FLAC kosong, fallback ke OGG...")
+                else:
+                    self.logger.warning("⚠️ Lagu tidak tersedia format FLAC. Fallback OGG 320kbps.")
+            except Exception as e:
+                self.logger.error(f"❌ Gagal proses FLAC, fallback ke OGG: {e}")
+        # --- END FITUR FLAC ---
 
         # --- LOOP RETRY (Ditingkatkan menjadi 5x) ---
         max_retries = 5 
