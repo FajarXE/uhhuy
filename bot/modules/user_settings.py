@@ -181,7 +181,9 @@ async def user_spotify_cb(client, query):
     }
     
     user_id = query.from_user.id
-    current = await database.get_user_variable(user_id, "SPOTIFY_QUALITY") or "VERY_HIGH"
+    
+    # [PERBAIKAN] Mengambil dari memory cache (bot_set)
+    current = bot_set.user_data.get(user_id, {}).get("spotify_qual", "VERY_HIGH")
     
     if current in quality:
         quality[current] += ' ✅'
@@ -197,7 +199,10 @@ async def user_spotify_qual_cb(client, query):
     to_set = query.matches[0].group(1)
     user_id = query.from_user.id
     
-    await database.set_user_variable(user_id, "SPOTIFY_QUALITY", to_set)
+    # [PERBAIKAN] Menyimpan menggunakan format bawaan bot Anda yang benar
+    bot_set.user_data.setdefault(user_id, {})["spotify_qual"] = to_set
+    await database.save_user_settings(user_id, {"spotify_qual": to_set})
+    
     await user_spotify_cb(client, query)
 
 
