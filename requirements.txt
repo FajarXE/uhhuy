@@ -22,7 +22,7 @@ pycryptodome
 yt-dlp
 urllib3
 git+https://github.com/kokarare1212/librespot-python
-protobuf>=4.25.0
+protobuf==3.20.1
 speedtest-cli
 aioaria2
 uvloop
