@@ -734,8 +734,19 @@ class SpotifyAPI:
 
         # --- [FITUR BARU] Inisialisasi Desktop API untuk FLAC ---
         self.desktop_api = None
-        # Ambil sp_dc dan path dll dari config (Anda bisa atur ini di config.py Anda)
+        
+        # Ambil sp_dc dari config
         sp_dc = self.config.get("sp_dc") or getattr(Config, "SPOTIFY_SP_DC", None)
+        
+        # [PERBAIKAN] Jika sp_dc di config kosong, ambil otomatis dari Database Internal
+        if not sp_dc and mongo_collection is not None:
+            try:
+                rec = mongo_collection.find_one({"type": "spotify_sp_dc"})
+                if rec and "data" in rec:
+                    sp_dc = rec["data"]
+            except Exception:
+                pass
+                
         dll_path = self.config.get("spotify_dll_path") or getattr(Config, "SPOTIFY_DLL_PATH", "spotify.dll")
         
         if sp_dc and DesktopSpotifyApi:
