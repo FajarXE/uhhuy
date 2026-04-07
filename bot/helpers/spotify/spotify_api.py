@@ -40,12 +40,6 @@ _OriginalLibrespotTokenProvider = librespot.core.TokenProvider
 # --- [FITUR BARU] Import Desktop API untuk FLAC ---
 import logging # Pastikan logging sudah di-import
 
-try:
-    from .desktop_api import DesktopSpotifyApi
-    logging.getLogger(__name__).info("✅ [DEBUG] MODUL DESKTOP API BERHASIL DI-IMPORT")
-except Exception as e:
-    logging.getLogger(__name__).error(f"❌ [CRITICAL] MODUL DESKTOP API GAGAL DI-IMPORT: {e}")
-    DesktopSpotifyApi = None
 
 # --- [PERBAIKAN FINAL] KONEKSI MONGODB (ANTI-ERROR NO DEFAULT DB) ---
 try:
@@ -739,6 +733,14 @@ class SpotifyAPI:
         # --- [FITUR BARU] Inisialisasi Desktop API untuk FLAC ---
         self.desktop_api = None
         
+        # [KITA PINDAHKAN IMPORT KE SINI AGAR TEREKAM LOG!]
+        try:
+            from .desktop_api import DesktopSpotifyApi
+            self.logger.info("✅ [DEBUG] MODUL DESKTOP API BERHASIL DI-IMPORT")
+        except Exception as e:
+            self.logger.error(f"❌ [CRITICAL] GAGAL MENGIMPORT DESKTOP API: {e}", exc_info=True)
+            DesktopSpotifyApi = None
+
         # Ambil sp_dc dari config
         sp_dc = self.config.get("sp_dc") or getattr(Config, "SPOTIFY_SP_DC", None)
         
@@ -753,9 +755,7 @@ class SpotifyAPI:
                 
         dll_path = self.config.get("spotify_dll_path") or getattr(Config, "SPOTIFY_DLL_PATH", "spotify.dll")
         
-        # --- [TAMBAHKAN BARIS INI UNTUK DEBUG] ---
         self.logger.info(f"🔍 DEBUG FLAC -> SP_DC terisi: {bool(sp_dc)} | Modul PlayPlay siap: {bool(DesktopSpotifyApi)}")
-        # ------------------------------------------
 
         if sp_dc and DesktopSpotifyApi:
             try:
