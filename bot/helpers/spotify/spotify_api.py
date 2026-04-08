@@ -757,14 +757,29 @@ class SpotifyAPI:
 
         # --- [FITUR BARU] AUTO-EXTRACT ZIP JIKA FILE DLL TERKOMPRESI ---
         import zipfile
+        import glob
         zip_path = dll_path.replace(".dll", ".zip")
-        if not os.path.exists(dll_path) and os.path.exists(zip_path):
-            self.logger.info(f"📦 File {dll_path} tidak ditemukan. Mengekstrak dari {zip_path}...")
+        
+        # Cari dulu apakah ada file .dll apa saja di folder tersebut
+        existing_dlls = glob.glob(os.path.join(os.path.dirname(os.path.abspath(zip_path)) or ".", "**", "*.dll"), recursive=True)
+        
+        if existing_dlls:
+            dll_path = existing_dlls[0] # Gunakan yang sudah ada
+        elif os.path.exists(zip_path):
+            self.logger.info(f"📦 Mengekstrak file dari {zip_path}...")
             try:
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     extract_dir = os.path.dirname(os.path.abspath(zip_path)) or "."
                     zip_ref.extractall(extract_dir)
-                self.logger.info("✅ Ekstraksi Spotify.dll berhasil!")
+                self.logger.info("✅ Ekstraksi ZIP berhasil!")
+                
+                # Cari lagi file dll-nya setelah diekstrak (mengabaikan huruf besar/kecil/folder)
+                extracted_dlls = glob.glob(os.path.join(extract_dir, "**", "*.dll"), recursive=True)
+                if extracted_dlls:
+                    dll_path = extracted_dlls[0]
+                    self.logger.info(f"✅ File DLL aktual ditemukan di: {dll_path}")
+                else:
+                    self.logger.error("❌ File .dll tidak ditemukan di dalam file ZIP!")
             except Exception as zip_e:
                 self.logger.error(f"❌ Gagal mengekstrak ZIP: {zip_e}")
         # -----------------------------------------------------------------
