@@ -6,9 +6,6 @@ import os
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 
-# [BARU] Import Config untuk mengambil pengaturan proxy
-from config import Config
-
 logger = logging.getLogger(__name__)
 
 # --- [TRICK] AUTO-PATCH PROTOBUF ---
@@ -73,18 +70,11 @@ class DesktopSpotifyApi:
         self.key_emu = KeyEmu(spotify_dll_path)
         
         import httpx
-        
-        # --- PERBAIKAN: Set kwargs dinamis berdasarkan ada/tidaknya proxy di config ---
-        proxy_url = getattr(Config, "SPOTIFY_PROXY", None)
-        client_kwargs = {"timeout": TIMEOUT}
-        
-        if proxy_url:
-            logger.info(f"🔄 Menggunakan Proxy Spotify: {proxy_url}")
-            client_kwargs["proxy"] = proxy_url
-        else:
-            logger.warning("⚠️ Tidak ada Proxy Spotify yang diatur. FLAC mungkin terkena 403 (Render IP).")
-
-        self.client = httpx.Client(**client_kwargs)
+        # --- PERBAIKAN 1: Tambahkan Proxy SOCKS5 ---
+        self.client = httpx.Client(
+            timeout=TIMEOUT,
+            proxy="socks5h://hdzire:hdzire@85.17.40.203:1080"
+        )
         
         self.client.headers.update({
             "accept": "application/json",
@@ -108,7 +98,8 @@ class DesktopSpotifyApi:
         self._access_token = None
         
     def authenticate(self):
-        # Menggunakan self.client agar proxy dan header bypass ikut terbawa
+        # --- PERBAIKAN 2: Gunakan self.client yang sudah terpasang proxy & header ---
+        # Menghapus httpx.get() lokal yang mengabaikan semua konfigurasi di atas
         response = self.client.get(URL_AUTH)
         response.raise_for_status()
         token_data = response.json()
@@ -213,14 +204,13 @@ class DesktopSpotifyApi:
         )
         
         import httpx
-        
-        # --- PERBAIKAN: Ambil proxy untuk Stream Download ---
-        proxy_url = getattr(Config, "SPOTIFY_PROXY", None)
-        stream_kwargs = {"timeout": TIMEOUT}
-        if proxy_url:
-            stream_kwargs["proxy"] = proxy_url
-
-        with httpx.stream("GET", stream_url, **stream_kwargs) as response:
+        # --- PERBAIKAN 3: Gunakan Proxy juga untuk Download Stream ---
+        with httpx.stream(
+            "GET", 
+            stream_url, 
+            timeout=TIMEOUT,
+            proxy="socks5h://hdzire:hdzire@85.17.40.203:1080"
+        ) as response:
             response.raise_for_status()
             with open(output_path, "wb") as f:
                 for chunk in response.iter_bytes(chunk_size=16384):
