@@ -437,17 +437,9 @@ class Config:
     # Daftar di developer.spotify.com
     SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "65b708073fc0480ea92a077233ca87bd")
     SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", "")
-
-    # --- [TAMBAHAN UNTUK SPOTIFY FLAC/PLAYPLAY] ---
-    SPOTIFY_SP_DC = os.environ.get("SPOTIFY_SP_DC", "")
-    SPOTIFY_DLL_PATH = os.environ.get("SPOTIFY_DLL_PATH", "spotify.dll") # Gunakan spotify.so jika di Linux
-
-    # [BARU] Variabel Proxy Spotify dari Render
-    SPOTIFY_PROXY = getenv("SPOTIFY_PROXY", None)
     
     # Variabel ini akan menyimpan JSON Token Login agar tidak hilang saat Restart di Render
     SPOTIFY_CREDENTIALS_JSON = getenv("SPOTIFY_CREDENTIALS_JSON", None)
-    
 #--------------------
 # --- BATAS TAMBAHAN ---
 
