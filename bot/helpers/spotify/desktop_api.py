@@ -183,13 +183,17 @@ class DesktopSpotifyApi:
         
     def authenticate(self):
         import httpx
-        # [FIX 404 ERROR] Spotify mematikan endpoint Device Auth. 
-        # Kita bypass langsung menggunakan Endpoint Web Player Token resmi yang anti-404!
+        
+        # [PERBAIKAN] Menggunakan URL resmi Spotify Web Player
+        url = "https://open.spotify.com/get_access_token?reason=transport&productType=web_player"
+        
+        # Buat request langsung ke Web Player
         response = httpx.get(
-            "https://open.spotify.com/get_access_token?reason=transport&productType=web_player",
+            url,
             cookies={"sp_dc": self.sp_dc},
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+                "Accept": "application/json"
             },
             timeout=30
         )
@@ -197,6 +201,9 @@ class DesktopSpotifyApi:
         token_data = response.json()
         
         self._access_token = token_data.get("accessToken")
+        
+        if not self._access_token:
+            raise ValueError("Gagal mengambil Access Token! Cookie sp_dc mungkin kadaluarsa.")
         
         self.client.headers.update({
             "authorization": f"Bearer {self._access_token}",
