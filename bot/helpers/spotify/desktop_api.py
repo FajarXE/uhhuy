@@ -73,7 +73,7 @@ class DesktopSpotifyApi:
         # --- PERBAIKAN 1: Tambahkan Proxy SOCKS5 ---
         self.client = httpx.Client(
             timeout=TIMEOUT,
-            proxy="socks5h://hdzire:hdzire@85.17.40.203:1080"
+            proxy="http://hdzire:hdzire@85.17.40.203:1080"
         )
         
         self.client.headers.update({
@@ -209,7 +209,7 @@ class DesktopSpotifyApi:
             "GET", 
             stream_url, 
             timeout=TIMEOUT,
-            proxy="socks5h://hdzire:hdzire@85.17.40.203:1080"
+            proxy="http://hdzire:hdzire@85.17.40.203:1080"
         ) as response:
             response.raise_for_status()
             with open(output_path, "wb") as f:
