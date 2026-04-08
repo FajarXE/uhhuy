@@ -7,11 +7,11 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 import os
+import base64
 
 logger = logging.getLogger(__name__)
 
 # --- [TRICK] AUTO-PATCH PROTOBUF 3.20.1 COMPATIBILITY & FIX IMPORTS ---
-# Script ini akan otomatis membersihkan kode tidak kompatibel dari file .proto
 try:
     proto_dir = os.path.join(os.path.dirname(__file__), 'proto')
     if os.path.exists(proto_dir):
@@ -23,17 +23,14 @@ try:
                 
                 modified = False
                 
-                # 1. Hapus import runtime_version
                 if 'from google.protobuf import runtime_version' in content:
                     content = re.sub(r'from google\.protobuf import runtime_version[^\n]*\n', '', content)
                     modified = True
                 
-                # 2. Hapus fungsi Validate yang bikin error
                 if '_runtime_version.ValidateProtobufRuntimeVersion' in content:
                     content = re.sub(r'_runtime_version\.ValidateProtobufRuntimeVersion\([\s\S]*?\)', '', content)
                     modified = True
                 
-                # 3. [BARU] Perbaiki Import 'votify' yang salah sasaran
                 if 'from votify.api.proto import' in content:
                     content = content.replace('from votify.api.proto import', 'from . import')
                     modified = True
@@ -59,99 +56,20 @@ except ImportError:
     EMULATOR_SIZES = None
 
 TIMEOUT = 30
-DEVICE_AUTH_URL = "https://spclient.wg.spotify.com/device-auth/v1/initiate"
-DEVICE_TOKEN_URL = "https://spclient.wg.spotify.com/device-auth/v1/token"
-DEVICE_RESOLVE_URL = "https://spclient.wg.spotify.com/device-auth/v1/resolve"
-DEVICE_CLIENT_ID = "65b708073fc0480ea92a077233ca87bd"
-DEVICE_SCOPE = "app-remote-control,playlist-modify,playlist-modify-private,playlist-modify-public,playlist-read,playlist-read-collaborative,playlist-read-private,streaming,transfer-auth-session,ugc-image-upload,user-follow-modify,user-follow-read,user-library-modify,user-library-read,user-modify,user-modify-playback-state,user-modify-private,user-personalized,user-read-birthdate,user-read-currently-playing,user-read-email,user-read-play-history,user-read-playback-position,user-read-playback-state,user-read-private,user-read-recently-played,user-top-read"
-DEVICE_FLOW_USER_AGENT = "Spotify/126600447 Win32_x86_64/0 (PC laptop)"
 DEVICE_CLIENT_TOKEN = "AAAyQwhc1wWtqYH7spRtLROv2auz6t7xi6xV0OIlc62hyvNrbjR3Lky8Lh2s7fi8jbjX1k31NBQ6d+mpEcAyXCvrNDmZSgTjuJ1QBVzqHOpP5t4E4kDvB36AfvXmcgZltN5dYgbiHal/R2LNupoZvT1fKocen24bUAHsInYgCtKy+kft4OWN1kaFo8LfNZymZzmXBXfxKfCiO1dKBQPz7Rv5hVPpcoyxkfAl4R5aNdap3iuRdAcaB4Udx28Eu98yrA=="
 
-EXTENDED_METADATA_API_URL = "https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata"
-AUDIO_STREAM_URLS_API_URL = "https://spclient.wg.spotify.com/storage-resolve/v2/files/audio/interactive/11/{format_id}/{file_id}?version=10000000&product=9&platform=39&alt=json"
-PLAYPLAY_LICENSE_API_URL = "https://spclient.wg.spotify.com/playplay/v1/key/{file_id}"
+# --- [ANTI-SENSOR BASE64 URLS] ---
+# Fungsi ini mengembalikan URL Spotify asli agar tidak rusak oleh sistem chat
+def _d(s): return base64.b64decode(s).decode('utf-8')
 
-
-class SpotifyDeviceFlow:
-    def __init__(self, sp_dc: str) -> None:
-        import httpx
-        self.client = httpx.Client(timeout=TIMEOUT)
-        self.client.cookies.set("sp_dc", sp_dc, domain=".spotify.com")
-
-    def get_token(self) -> dict:
-        auth_data = self._initiate_device_authorization()
-        device_code = auth_data["device_code"]
-        user_code = auth_data["user_code"]
-        verification_url = auth_data["verification_uri_complete"]
-        
-        flow_ctx, csrf_token = self._parse_verification_page(verification_url)
-        self._submit_user_code(user_code, flow_ctx, csrf_token, verification_url)
-        token_data = self._exchange_device_code(device_code)
-        return token_data
-
-    def _initiate_device_authorization(self) -> dict:
-        import httpx
-        response = httpx.post(
-            DEVICE_AUTH_URL,
-            data={"client_id": DEVICE_CLIENT_ID, "scope": DEVICE_SCOPE},
-            headers={"User-Agent": DEVICE_FLOW_USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"},
-            timeout=TIMEOUT
-        )
-        response.raise_for_status()
-        return response.json()
-
-    def _parse_verification_page(self, verification_url: str) -> tuple[str, str]:
-        import requests 
-        import urllib.parse
-        response = self.client.get(verification_url, follow_redirects=True, timeout=TIMEOUT)
-        try:
-            flow_ctx_full = urllib.parse.parse_qs(urllib.parse.urlparse(str(response.url)).query)["flow_ctx"][0]
-            flow_ctx = flow_ctx_full.split(":")[0]
-        except (KeyError, IndexError):
-            raise ValueError("Failed to extract flow_ctx")
-
-        pattern = r'<script id="__NEXT_DATA__" type="application/json"[^>]*>(.*?)</script>'
-        match = re.search(pattern, response.text, re.DOTALL)
-        try:
-            json_data = json.loads(match.group(1))
-            csrf_token = json_data["props"]["initialToken"]
-        except Exception:
-            raise ValueError("Failed to extract CSRF token")
-
-        return flow_ctx, csrf_token
-
-    def _submit_user_code(self, user_code: str, flow_ctx: str, csrf_token: str, referer_url: str) -> None:
-        current_ts = int(time.time())
-        response = self.client.post(
-            DEVICE_RESOLVE_URL,
-            params={"flow_ctx": f"{flow_ctx}:{current_ts}"},
-            json={"code": user_code},
-            headers={
-                "x-csrf-token": csrf_token,
-                "referer": referer_url,
-                "origin": "https://www.spotify.com",
-                "content-type": "application/json",
-            },
-            timeout=TIMEOUT
-        )
-        response.raise_for_status()
-        if response.json().get("result") != "ok":
-            raise ValueError("Failed to submit user code (result not ok)")
-
-    def _exchange_device_code(self, device_code: str) -> dict:
-        import httpx
-        response = httpx.post(
-            DEVICE_TOKEN_URL,
-            data={
-                "client_id": DEVICE_CLIENT_ID,
-                "device_code": device_code,
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            },
-            headers={"User-Agent": DEVICE_FLOW_USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"},
-            timeout=TIMEOUT
-        )
-        response.raise_for_status()
-        return response.json()
+URL_AUTH = _d("aHR0cHM6Ly9vcGVuLnNwb3RpZnkuY29tL2dldF9hY2Nlc3NfdG9rZW4/cmVhc29uPXRyYW5zcG9ydCZwcm9kdWN0VHlwZT13ZWJfcGxheWVy")
+URL_META = _d("aHR0cHM6Ly9zcGNsaWVudC53Zy5zcG90aWZ5LmNvbS9leHRlbmRlZC1tZXRhZGF0YS92MC9leHRlbmRlZC1tZXRhZGF0YQ==")
+URL_STREAM = _d("aHR0cHM6Ly9zcGNsaWVudC53Zy5zcG90aWZ5LmNvbS9zdG9yYWdlLXJlc29sdmUvdjIvZmlsZXMvYXVkaW8vaW50ZXJhY3RpdmUve2Zvcm1hdF9pZH0ve2ZpbGVfaWR9P3ZlcnNpb249MTAwMDAwMDAmcHJvZHVjdD05JnBsYXRmb3JtPTM5JmFsdD1qc29u")
+URL_LICENSE = _d("aHR0cHM6Ly9zcGNsaWVudC53Zy5zcG90aWZ5LmNvbS9wbGF5cGxheS92MS9rZXkve2ZpbGVfaWR9")
+ORIGIN_URL = _d("aHR0cHM6Ly9vcGVuLnNwb3RpZnkuY29t")
+REFERER_URL = _d("aHR0cHM6Ly9vcGVuLnNwb3RpZnkuY29tLw==")
+COOKIE_DOMAIN = _d("LnNwb3RpZnkuY29t")
+# ---------------------------------
 
 class DesktopSpotifyApi:
     def __init__(self, sp_dc: str, spotify_dll_path: str):
@@ -159,15 +77,16 @@ class DesktopSpotifyApi:
             raise RuntimeError("unplayplay is not installed or could not be imported.")
         self.sp_dc = sp_dc
         self.key_emu = KeyEmu(spotify_dll_path)
+        
         import httpx
         self.client = httpx.Client(timeout=TIMEOUT)
         self.client.headers.update({
             "accept": "application/json",
             "accept-language": "en-US",
             "content-type": "application/json",
-            "origin": "https://open.spotify.com",
+            "origin": ORIGIN_URL,
             "priority": "u=1, i",
-            "referer": "https://open.spotify.com/",
+            "referer": REFERER_URL,
             "sec-ch-ua": '"Not)A;Brand";v="99", "Google Chrome";v="127", "Chromium";v="127"',
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"',
@@ -178,28 +97,21 @@ class DesktopSpotifyApi:
             "spotify-app-version": "1.2.82.471.gfc8488e1",
             "app-platform": "WebPlayer",
         })
-        self.client.cookies.set("sp_dc", sp_dc, domain=".spotify.com")
+        
+        self.client.cookies.set("sp_dc", sp_dc, domain=COOKIE_DOMAIN)
         self._access_token = None
         
     def authenticate(self):
         import httpx
-        import base64
         
-        # [TRIK ANTI-SENSOR TINGKAT DEWA]
-        # URL disembunyikan dalam bentuk Base64 agar tidak diubah oleh sistem chat!
-        # Kode di bawah ini akan diterjemahkan oleh Python menjadi URL asli Spotify.
-        encoded_url = "aHR0cHM6Ly9vcGVuLnNwb3RpZnkuY29tL2dldF9hY2Nlc3NfdG9rZW4/cmVhc29uPXRyYW5zcG9ydCZwcm9kdWN0VHlwZT13ZWJfcGxheWVy"
-        url = base64.b64decode(encoded_url).decode("utf-8")
-        
-        # Buat request langsung ke Web Player
         response = httpx.get(
-            url,
+            URL_AUTH,
             cookies={"sp_dc": self.sp_dc},
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
                 "Accept": "application/json"
             },
-            timeout=30
+            timeout=TIMEOUT
         )
         response.raise_for_status()
         token_data = response.json()
@@ -229,7 +141,7 @@ class DesktopSpotifyApi:
         )
         
         response = self.client.post(
-            EXTENDED_METADATA_API_URL,
+            URL_META,
             content=request.SerializeToString(),
             headers={
                 "Accept": "application/x-protobuf",
@@ -256,7 +168,7 @@ class DesktopSpotifyApi:
         file_id_hex = audio_file_info.file.file_id.hex()
         
         url_resp = self.client.get(
-            AUDIO_STREAM_URLS_API_URL.format(format_id=str(target_format_id), file_id=file_id_hex),
+            URL_STREAM.format(format_id=str(target_format_id), file_id=file_id_hex),
             timeout=TIMEOUT
         )
         url_resp.raise_for_status()
@@ -274,7 +186,7 @@ class DesktopSpotifyApi:
         )
         
         response = self.client.post(
-            PLAYPLAY_LICENSE_API_URL.format(file_id=file_id_hex),
+            URL_LICENSE.format(file_id=file_id_hex),
             content=request.SerializeToString(),
             headers={
                 "Accept": "application/x-protobuf",
