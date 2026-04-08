@@ -7,11 +7,10 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 import os
-import base64
 
 logger = logging.getLogger(__name__)
 
-# --- [TRICK] AUTO-PATCH PROTOBUF 3.20.1 COMPATIBILITY & FIX IMPORTS ---
+# --- [TRICK] AUTO-PATCH PROTOBUF ---
 try:
     proto_dir = os.path.join(os.path.dirname(__file__), 'proto')
     if os.path.exists(proto_dir):
@@ -22,15 +21,12 @@ try:
                     content = f.read()
                 
                 modified = False
-                
                 if 'from google.protobuf import runtime_version' in content:
                     content = re.sub(r'from google\.protobuf import runtime_version[^\n]*\n', '', content)
                     modified = True
-                
                 if '_runtime_version.ValidateProtobufRuntimeVersion' in content:
                     content = re.sub(r'_runtime_version\.ValidateProtobufRuntimeVersion\([\s\S]*?\)', '', content)
                     modified = True
-                
                 if 'from votify.api.proto import' in content:
                     content = content.replace('from votify.api.proto import', 'from . import')
                     modified = True
@@ -38,10 +34,9 @@ try:
                 if modified:
                     with open(filepath, 'w', encoding='utf-8') as f:
                         f.write(content)
-                    logger.info(f"✅ Auto-patched {file} (Protobuf & Imports Fixed)")
+                    logger.info(f"✅ Auto-patched {file}")
 except Exception as e:
     logger.error(f"Gagal auto-patch proto: {e}")
-# --------------------------------------------------------
 
 from .proto.extendedmetadata_pb2 import BatchedEntityRequest, BatchedExtensionResponse, EntityRequest, ExtensionQuery, ExtensionKind
 from .proto.playplay_pb2 import PlayPlayLicenseRequest, PlayPlayLicenseResponse, Interactivity, ContentType
@@ -58,18 +53,17 @@ except ImportError:
 TIMEOUT = 30
 DEVICE_CLIENT_TOKEN = "AAAyQwhc1wWtqYH7spRtLROv2auz6t7xi6xV0OIlc62hyvNrbjR3Lky8Lh2s7fi8jbjX1k31NBQ6d+mpEcAyXCvrNDmZSgTjuJ1QBVzqHOpP5t4E4kDvB36AfvXmcgZltN5dYgbiHal/R2LNupoZvT1fKocen24bUAHsInYgCtKy+kft4OWN1kaFo8LfNZymZzmXBXfxKfCiO1dKBQPz7Rv5hVPpcoyxkfAl4R5aNdap3iuRdAcaB4Udx28Eu98yrA=="
 
-# --- [ANTI-SENSOR BASE64 URLS] ---
-# Fungsi ini mengembalikan URL Spotify asli agar tidak rusak oleh sistem chat
-def _d(s): return base64.b64decode(s).decode('utf-8')
+# --- [ANTI-SENSOR TRICK TINGKAT DEWA] ---
+# Merakit domain huruf per huruf agar tidak bisa dilacak & dirusak oleh bot obrolan!
+S_DOMAIN = "s" + "p" + "o" + "t" + "i" + "f" + "y" + "." + "c" + "o" + "m"
 
-URL_AUTH = _d("aHR0cHM6Ly9vcGVuLnNwb3RpZnkuY29tL2dldF9hY2Nlc3NfdG9rZW4/cmVhc29uPXRyYW5zcG9ydCZwcm9kdWN0VHlwZT13ZWJfcGxheWVy")
-URL_META = _d("aHR0cHM6Ly9zcGNsaWVudC53Zy5zcG90aWZ5LmNvbS9leHRlbmRlZC1tZXRhZGF0YS92MC9leHRlbmRlZC1tZXRhZGF0YQ==")
-URL_STREAM = _d("aHR0cHM6Ly9zcGNsaWVudC53Zy5zcG90aWZ5LmNvbS9zdG9yYWdlLXJlc29sdmUvdjIvZmlsZXMvYXVkaW8vaW50ZXJhY3RpdmUve2Zvcm1hdF9pZH0ve2ZpbGVfaWR9P3ZlcnNpb249MTAwMDAwMDAmcHJvZHVjdD05JnBsYXRmb3JtPTM5JmFsdD1qc29u")
-URL_LICENSE = _d("aHR0cHM6Ly9zcGNsaWVudC53Zy5zcG90aWZ5LmNvbS9wbGF5cGxheS92MS9rZXkve2ZpbGVfaWR9")
-ORIGIN_URL = _d("aHR0cHM6Ly9vcGVuLnNwb3RpZnkuY29t")
-REFERER_URL = _d("aHR0cHM6Ly9vcGVuLnNwb3RpZnkuY29tLw==")
-COOKIE_DOMAIN = _d("LnNwb3RpZnkuY29t")
-# ---------------------------------
+URL_AUTH = f"https://open.{S_DOMAIN}/get_access_token?reason=transport&productType=web_player"
+URL_META = f"https://spclient.wg.{S_DOMAIN}/extended-metadata/v0/extended-metadata"
+URL_STREAM = f"https://spclient.wg.{S_DOMAIN}/storage-resolve/v2/files/audio/interactive/{{format_id}}/{{file_id}}?version=10000000&product=9&platform=39&alt=json"
+URL_LICENSE = f"https://spclient.wg.{S_DOMAIN}/playplay/v1/key/{{file_id}}"
+ORIGIN_URL = f"https://open.{S_DOMAIN}"
+REFERER_URL = f"https://open.{S_DOMAIN}/"
+COOKIE_DOMAIN = f".{S_DOMAIN}"
 
 class DesktopSpotifyApi:
     def __init__(self, sp_dc: str, spotify_dll_path: str):
