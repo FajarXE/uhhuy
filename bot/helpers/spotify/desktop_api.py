@@ -182,9 +182,22 @@ class DesktopSpotifyApi:
         self._access_token = None
         
     def authenticate(self):
-        flow = SpotifyDeviceFlow(self.sp_dc)
-        token_data = flow.get_token()
-        self._access_token = token_data["access_token"]
+        import httpx
+        # [FIX 404 ERROR] Spotify mematikan endpoint Device Auth. 
+        # Kita bypass langsung menggunakan Endpoint Web Player Token resmi yang anti-404!
+        response = httpx.get(
+            "https://open.spotify.com/get_access_token?reason=transport&productType=web_player",
+            cookies={"sp_dc": self.sp_dc},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        token_data = response.json()
+        
+        self._access_token = token_data.get("accessToken")
+        
         self.client.headers.update({
             "authorization": f"Bearer {self._access_token}",
             "client-token": DEVICE_CLIENT_TOKEN
