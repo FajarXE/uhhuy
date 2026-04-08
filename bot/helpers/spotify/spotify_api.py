@@ -754,6 +754,20 @@ class SpotifyAPI:
                 pass
                 
         dll_path = self.config.get("spotify_dll_path") or getattr(Config, "SPOTIFY_DLL_PATH", "spotify.dll")
+
+        # --- [FITUR BARU] AUTO-EXTRACT ZIP JIKA FILE DLL TERKOMPRESI ---
+        import os, zipfile
+        zip_path = dll_path.replace(".dll", ".zip")
+        if not os.path.exists(dll_path) and os.path.exists(zip_path):
+            self.logger.info(f"📦 File {dll_path} tidak ditemukan. Mengekstrak dari {zip_path}...")
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    extract_dir = os.path.dirname(os.path.abspath(zip_path)) or "."
+                    zip_ref.extractall(extract_dir)
+                self.logger.info("✅ Ekstraksi Spotify.dll berhasil!")
+            except Exception as zip_e:
+                self.logger.error(f"❌ Gagal mengekstrak ZIP: {zip_e}")
+        # -----------------------------------------------------------------
         
         self.logger.info(f"🔍 DEBUG FLAC -> SP_DC terisi: {bool(sp_dc)} | Modul PlayPlay siap: {bool(DesktopSpotifyApi)}")
 
