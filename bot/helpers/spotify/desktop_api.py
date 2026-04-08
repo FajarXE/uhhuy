@@ -184,7 +184,7 @@ class DesktopSpotifyApi:
     def authenticate(self):
         import httpx
         
-        # [PERBAIKAN] Menggunakan URL resmi Spotify Web Player
+        # [PERBAIKAN FINAL] Menggunakan URL resmi Spotify Web Player yang sebenarnya!
         url = "https://open.spotify.com/get_access_token?reason=transport&productType=web_player"
         
         # Buat request langsung ke Web Player
