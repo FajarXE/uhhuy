@@ -756,7 +756,7 @@ class SpotifyAPI:
         dll_path = self.config.get("spotify_dll_path") or getattr(Config, "SPOTIFY_DLL_PATH", "spotify.dll")
 
         # --- [FITUR BARU] AUTO-EXTRACT ZIP JIKA FILE DLL TERKOMPRESI ---
-        import os, zipfile
+        import zipfile
         zip_path = dll_path.replace(".dll", ".zip")
         if not os.path.exists(dll_path) and os.path.exists(zip_path):
             self.logger.info(f"📦 File {dll_path} tidak ditemukan. Mengekstrak dari {zip_path}...")
