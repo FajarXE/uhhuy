@@ -730,16 +730,8 @@ class SpotifyAPI:
         self.credentials_file_path = os.path.join(self.credentials_dir, CREDENTIALS_FILE_NAME)       
         self.logger.info(f"Credentials will be stored/loaded from: {self.credentials_file_path}")
 
-        # --- [FITUR BARU] Inisialisasi Desktop API untuk FLAC ---
         self.desktop_api = None
-        
-        # [KITA PINDAHKAN IMPORT KE SINI AGAR TEREKAM LOG!]
-        try:
-            from .desktop_api import DesktopSpotifyApi
-            self.logger.info("✅ [DEBUG] MODUL DESKTOP API BERHASIL DI-IMPORT")
-        except Exception as e:
-            self.logger.error(f"❌ [CRITICAL] GAGAL MENGIMPORT DESKTOP API: {e}", exc_info=True)
-            DesktopSpotifyApi = None
+        DesktopSpotifyApi = None
 
         # Ambil sp_dc dari config
         sp_dc = self.config.get("sp_dc") or getattr(Config, "SPOTIFY_SP_DC", None)
