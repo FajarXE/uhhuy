@@ -89,33 +89,3 @@ async def spotify_token_cmd(client, message: Message):
         auth_sessions.pop(user_id, None)
     else:
         await status_msg.edit_text(f"❌ <b>GAGAL:</b>\n{result}")
-
-@Client.on_message(filters.command("set_spotify_dc") & filters.user(list(Config.ADMINS)))
-async def set_spotify_dc_cmd(client, message: Message):
-    """
-    Menyimpan cookie sp_dc untuk FLAC (PlayPlay) ke Database.
-    """
-    if len(message.command) < 2:
-        return await message.reply_text("⚠️ **Format Salah!**\nGunakan: <code>/set_spotify_dc [cookie_sp_dc_anda]</code>")
-    
-    cookie = message.text.split(None, 1)[1].strip()
-    status_msg = await message.reply_text("⏳ Menyimpan Cookie sp_dc secara permanen...")
-    
-    try:
-        # [ANTI-RESET RENDER] Simpan LANGSUNG ke MongoDB!
-        if mongo_collection is not None:
-            mongo_collection.update_one(
-                {"type": "spotify_sp_dc"}, 
-                {"$set": {"data": cookie}}, 
-                upsert=True
-            )
-            
-        Config.SPOTIFY_SP_DC = cookie
-        await spotify_manager.initialize_clients()
-        
-        await status_msg.edit_text(
-            "✅ **Cookie sp_dc berhasil disimpan PERMANEN ke Database!**\n"
-            "Fitur FLAC sudah aktif dan tidak akan hilang saat bot restart."
-        )
-    except Exception as e:
-        await status_msg.edit_text(f"❌ **Gagal menyimpan cookie:** {e}")
