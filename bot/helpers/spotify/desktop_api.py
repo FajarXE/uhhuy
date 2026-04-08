@@ -70,7 +70,12 @@ class DesktopSpotifyApi:
         self.key_emu = KeyEmu(spotify_dll_path)
         
         import httpx
-        self.client = httpx.Client(timeout=TIMEOUT)
+        # --- PERBAIKAN 1: Tambahkan Proxy SOCKS5 ---
+        self.client = httpx.Client(
+            timeout=TIMEOUT,
+            proxy="socks5h://hdzire:hdzire@85.17.40.203:1080"
+        )
+        
         self.client.headers.update({
             "accept": "application/json",
             "accept-language": "en-US",
@@ -93,16 +98,9 @@ class DesktopSpotifyApi:
         self._access_token = None
         
     def authenticate(self):
-        import httpx
-        response = httpx.get(
-            URL_AUTH,
-            cookies={"sp_dc": self.sp_dc},
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-                "Accept": "application/json"
-            },
-            timeout=TIMEOUT
-        )
+        # --- PERBAIKAN 2: Gunakan self.client yang sudah terpasang proxy & header ---
+        # Menghapus httpx.get() lokal yang mengabaikan semua konfigurasi di atas
+        response = self.client.get(URL_AUTH)
         response.raise_for_status()
         token_data = response.json()
         
@@ -206,7 +204,13 @@ class DesktopSpotifyApi:
         )
         
         import httpx
-        with httpx.stream("GET", stream_url, timeout=TIMEOUT) as response:
+        # --- PERBAIKAN 3: Gunakan Proxy juga untuk Download Stream ---
+        with httpx.stream(
+            "GET", 
+            stream_url, 
+            timeout=TIMEOUT,
+            proxy="socks5h://hdzire:hdzire@85.17.40.203:1080"
+        ) as response:
             response.raise_for_status()
             with open(output_path, "wb") as f:
                 for chunk in response.iter_bytes(chunk_size=16384):
