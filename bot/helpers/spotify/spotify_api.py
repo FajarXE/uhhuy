@@ -1596,10 +1596,10 @@ class SpotifyAPI:
         # 2. Mapping Kualitas Audio
         quality_map = {
             "LOW": LibrespotAudioQualityEnum.NORMAL,
-            "NORMAL": LibrespotAudioQualityEnum.HIGH,
-            "HIGH": LibrespotAudioQualityEnum.VERY_HIGH,
-            "HIFI": LibrespotAudioQualityEnum.VERY_HIGH,
-            "VERY_HIGH": LibrespotAudioQualityEnum.VERY_HIGH
+            "NORMAL": LibrespotAudioQualityEnum.NORMAL,
+            "HIGH": LibrespotAudioQualityEnum.HIGH,
+            "VERY_HIGH": LibrespotAudioQualityEnum.VERY_HIGH,
+            "HIFI": LibrespotAudioQualityEnum.VERY_HIGH
         }
         
         qt_str = str(quality_tier).upper() if quality_tier else "HIGH"
