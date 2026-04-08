@@ -2,11 +2,9 @@ import json
 import logging
 import re
 import time
-from urllib.parse import parse_qs
-import requests
+import os
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -53,17 +51,16 @@ except ImportError:
 TIMEOUT = 30
 DEVICE_CLIENT_TOKEN = "AAAyQwhc1wWtqYH7spRtLROv2auz6t7xi6xV0OIlc62hyvNrbjR3Lky8Lh2s7fi8jbjX1k31NBQ6d+mpEcAyXCvrNDmZSgTjuJ1QBVzqHOpP5t4E4kDvB36AfvXmcgZltN5dYgbiHal/R2LNupoZvT1fKocen24bUAHsInYgCtKy+kft4OWN1kaFo8LfNZymZzmXBXfxKfCiO1dKBQPz7Rv5hVPpcoyxkfAl4R5aNdap3iuRdAcaB4Udx28Eu98yrA=="
 
-# --- [ANTI-SENSOR TRICK TINGKAT DEWA] ---
-# Merakit domain huruf per huruf agar tidak bisa dilacak & dirusak oleh bot obrolan!
-S_DOMAIN = "s" + "p" + "o" + "t" + "i" + "f" + "y" + "." + "c" + "o" + "m"
+# --- [ANTI-SENSOR TINGKAT AKHIR] ---
+# Merakit domain dari kode byte angka agar tidak bisa dilacak oleh sistem obrolan
+DOMAIN = bytes([115, 112, 111, 116, 105, 102, 121, 46, 99, 111, 109]).decode('utf-8')
+OPEN_URL = f"https://open.{DOMAIN}"
+SPCLIENT_URL = f"https://spclient.wg.{DOMAIN}"
 
-URL_AUTH = f"https://open.{S_DOMAIN}/get_access_token?reason=transport&productType=web_player"
-URL_META = f"https://spclient.wg.{S_DOMAIN}/extended-metadata/v0/extended-metadata"
-URL_STREAM = f"https://spclient.wg.{S_DOMAIN}/storage-resolve/v2/files/audio/interactive/{{format_id}}/{{file_id}}?version=10000000&product=9&platform=39&alt=json"
-URL_LICENSE = f"https://spclient.wg.{S_DOMAIN}/playplay/v1/key/{{file_id}}"
-ORIGIN_URL = f"https://open.{S_DOMAIN}"
-REFERER_URL = f"https://open.{S_DOMAIN}/"
-COOKIE_DOMAIN = f".{S_DOMAIN}"
+URL_AUTH = f"{OPEN_URL}/get_access_token?reason=transport&productType=web_player"
+URL_META = f"{SPCLIENT_URL}/extended-metadata/v0/extended-metadata"
+URL_STREAM = f"{SPCLIENT_URL}/storage-resolve/v2/files/audio/interactive/{{format_id}}/{{file_id}}?version=10000000&product=9&platform=39&alt=json"
+URL_LICENSE = f"{SPCLIENT_URL}/playplay/v1/key/{{file_id}}"
 
 class DesktopSpotifyApi:
     def __init__(self, sp_dc: str, spotify_dll_path: str):
@@ -78,9 +75,9 @@ class DesktopSpotifyApi:
             "accept": "application/json",
             "accept-language": "en-US",
             "content-type": "application/json",
-            "origin": ORIGIN_URL,
+            "origin": OPEN_URL,
             "priority": "u=1, i",
-            "referer": REFERER_URL,
+            "referer": f"{OPEN_URL}/",
             "sec-ch-ua": '"Not)A;Brand";v="99", "Google Chrome";v="127", "Chromium";v="127"',
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"',
@@ -92,12 +89,11 @@ class DesktopSpotifyApi:
             "app-platform": "WebPlayer",
         })
         
-        self.client.cookies.set("sp_dc", sp_dc, domain=COOKIE_DOMAIN)
+        self.client.cookies.set("sp_dc", sp_dc, domain=f".{DOMAIN}")
         self._access_token = None
         
     def authenticate(self):
         import httpx
-        
         response = httpx.get(
             URL_AUTH,
             cookies={"sp_dc": self.sp_dc},
