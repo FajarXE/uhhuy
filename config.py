@@ -67,6 +67,9 @@ class Config:
 #--------------------
     # --- TAMBAHAN PROXY GLOBAL ---
     QOBUZ_PROXY = getenv("QOBUZ_PROXY", None)
+    # Otomatis ubah socks5h menjadi socks5 agar tidak crash di aiohttp
+    if QOBUZ_PROXY and QOBUZ_PROXY.startswith("socks5h://"):
+        QOBUZ_PROXY = QOBUZ_PROXY.replace("socks5h://", "socks5://")
     # -----------------------------
     
     QOBUZ_ACCOUNTS = []
