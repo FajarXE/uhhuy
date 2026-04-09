@@ -417,6 +417,7 @@ async def run_download_task(link: str, user: dict):
                "Region Locked" in error_str or \
                "Link Bandcamp tidak valid" in error_str or \
                "Link tidak valid" in error_str or \
+               "Link tidak dikenali" in error_str or \
                "halaman sistem" in error_str or \
                "Gagal mengambil profil artis" in error_str or \
                "404" in error_str or \
