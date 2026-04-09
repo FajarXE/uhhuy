@@ -233,7 +233,21 @@ class QoClient:
 
     async def login(self):
         self.get_tokens()
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) 
+        
+        # --- LOGIKA SOCKS PROXY CONNECTOR GLOBAL ---
+        connector = None
+        if getattr(Config, 'QOBUZ_PROXY', None):
+            try:
+                from aiohttp_socks import ProxyConnector
+                connector = ProxyConnector.from_url(Config.QOBUZ_PROXY)
+            except ImportError:
+                LOGGER.warning("QOBUZ: Modul aiohttp_socks tidak terinstall! Mengabaikan Proxy.")
+        # -------------------------------------------
+
+        self.session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=60)
+        ) 
         self.session.headers.update(
             {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0",
