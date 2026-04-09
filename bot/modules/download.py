@@ -462,7 +462,7 @@ async def run_download_task(link: str, user: dict):
                 pass
 
 
-@Client.on_message(filters.command(CMD.DOWNLOAD))
+@Client.on_message(filters.command(CMD.DOWNLOAD) | filters.regex(r"https?://[^\s]+"))
 async def download_track(c, msg:Message):
     if await check_user(msg=msg):
         
