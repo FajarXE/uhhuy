@@ -65,6 +65,9 @@ class Config:
 
 # QOBUZ
 #--------------------
+    # --- TAMBAHAN PROXY GLOBAL ---
+    QOBUZ_PROXY = getenv("QOBUZ_PROXY", None)
+    # -----------------------------
     
     QOBUZ_ACCOUNTS = []
     i = 1
@@ -73,6 +76,7 @@ class Config:
         user_token = getenv(f"QOBUZ_TOKEN_{i}")
         email = getenv(f"QOBUZ_EMAIL_{i}")
         password = getenv(f"QOBUZ_PASSWORD_{i}")
+        
         account_data = {}
         if user_id and user_token:
             logging.info(f"Ditemukan Qobuz Akun #{i} (User/Token)")
@@ -135,7 +139,7 @@ class Config:
 
     _fix_mqa_raw = getenv("TIDAL_FIX_MQA", "TRUE").upper()
     TIDAL_FIX_MQA = "ON" if _fix_mqa_raw in ["TRUE", "1", "Y", "YES", "ON"] else "OFF"
-    # --- AKHIR PERBAIKAN ---
+
 #--------------------    
 
 # BEATPORT
