@@ -3,6 +3,7 @@ import base64
 from collections import OrderedDict
 
 from requests import Session
+from config import Config  # <--- IMPORT CONFIG DI SINI
 
 # Modified code based on DashLt's spoofbuz
 
@@ -14,10 +15,6 @@ _APP_ID_REGEX = re.compile(
     r'production:{api:{appId:"(?P<app_id>\d{9})",appSecret:"\w{32}"'
 )
 
-_BUNDLE_URL_REGEX = re.compile(
-    r'<script src="(/resources/\d+\.\d+\.\d+-[a-z]\d{3}/bundle\.js)"></script>'
-)
-
 _BASE_URL = "https://play.qobuz.com"
 _BUNDLE_URL_REGEX = re.compile(
     r'<script src="(/resources/\d+\.\d+\.\d+-[a-z]\d{3}/bundle\.js)"></script>'
@@ -27,6 +24,14 @@ _BUNDLE_URL_REGEX = re.compile(
 class Bundle:
     def __init__(self):
         self._session = Session()
+
+        # --- SUNTIKAN PROXY GLOBAL ---
+        if getattr(Config, 'QOBUZ_PROXY', None):
+            self._session.proxies = {
+                "http": Config.QOBUZ_PROXY,
+                "https": Config.QOBUZ_PROXY
+            }
+        # -----------------------------
 
         response = self._session.get(f"{_BASE_URL}/login")
         response.raise_for_status()
