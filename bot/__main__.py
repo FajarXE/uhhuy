@@ -138,26 +138,16 @@ async def login_single_client(creds: dict):
         await client.login()
         BOT_QOBUZ_CLIENTS[account_id] = client
         logging.info(f"Main: Qobuz #{account_id} LOGIN SUKSES.")
-    except asyncio.TimeoutError:
-        logging.error(f"Main: Qobuz #{account_id} GAGAL: Koneksi Timeout (Server lambat / Proxy sibuk).")
-        if 'client' in locals() and hasattr(client, 'close_session'):
-            await client.close_session()
     except Exception as e:
-        # Jika e kosong (blank), ambil representasi aslinya menggunakan repr()
-        err_msg = str(e) if str(e) else repr(e)
-        logging.error(f"Main: Qobuz #{account_id} GAGAL: {err_msg}")
+        logging.error(f"Main: Qobuz #{account_id} GAGAL: {e}")
         if 'client' in locals() and hasattr(client, 'close_session'):
             await client.close_session()
 
 async def load_all_bot_qobuz_clients():
     if not Config.QOBUZ_ACCOUNTS: return
-    logging.info(f"Main: Mencoba login {len(Config.QOBUZ_ACCOUNTS)} akun Qobuz secara berurutan...")
-    
-    # --- PERBAIKAN: Login satu per satu dengan jeda 1.5 detik ---
-    for acc in Config.QOBUZ_ACCOUNTS:
-        await login_single_client(acc)
-        await asyncio.sleep(1.5) 
-    # -------------------------------------------------------------
+    logging.info(f"Main: Mencoba login {len(Config.QOBUZ_ACCOUNTS)} akun Qobuz...")
+    tasks = [login_single_client(acc) for acc in Config.QOBUZ_ACCOUNTS]
+    await asyncio.gather(*tasks)
 
 
 async def start_services():
