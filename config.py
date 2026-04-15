@@ -65,17 +65,13 @@ class Config:
 
 # QOBUZ
 #--------------------
-    # --- TAMBAHAN PROXY GLOBAL ---
     QOBUZ_PROXY = getenv("QOBUZ_PROXY", None)
-    # Otomatis ubah socks5h menjadi socks5 agar tidak crash di aiohttp
     if QOBUZ_PROXY and QOBUZ_PROXY.startswith("socks5h://"):
         QOBUZ_PROXY = QOBUZ_PROXY.replace("socks5h://", "socks5://")
-    # -----------------------------
-
-    # --- [FITUR BARU] Kustom APP ID & APP SECRET ---
+    
+    # Global Fallback (Opsional, jika ada akun yang tidak punya app_id spesifik)
     QOBUZ_APP_ID = getenv("QOBUZ_APP_ID", None)
     QOBUZ_APP_SECRET = getenv("QOBUZ_APP_SECRET", None)
-    # -----------------------------------------------
     
     QOBUZ_ACCOUNTS = []
     i = 1
@@ -84,6 +80,11 @@ class Config:
         user_token = getenv(f"QOBUZ_TOKEN_{i}")
         email = getenv(f"QOBUZ_EMAIL_{i}")
         password = getenv(f"QOBUZ_PASSWORD_{i}")
+        
+        # --- [TAMBAHAN] Tangkap kredensial spesifik per-akun ---
+        app_id = getenv(f"QOBUZ_APP_ID_{i}")
+        app_secret = getenv(f"QOBUZ_APP_SECRET_{i}")
+        # --------------------------------------------------------
         
         account_data = {}
         if user_id and user_token:
@@ -96,6 +97,11 @@ class Config:
             if i > 1:
                  logging.info(f"Selesai memuat {i-1} akun Qobuz.")
             break
+            
+        # Jika akun ini memiliki app_id & secret spesifik, simpan ke dictionary
+        if app_id and app_secret:
+            account_data["app_id"] = app_id
+            account_data["app_secret"] = app_secret
         
         account_data["id"] = i
         QOBUZ_ACCOUNTS.append(account_data)
