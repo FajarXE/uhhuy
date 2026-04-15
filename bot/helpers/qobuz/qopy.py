@@ -18,11 +18,17 @@ from bot.helpers.database.mongo_async import database
 from bot.settings import bot_set
 
 class QoClient:
-    def __init__(self, email=None, password=None, user_id=None, user_token=None):
+    def __init__(self, email=None, password=None, user_id=None, user_token=None, app_id=None, app_secret=None):
         self.email = email
         self.password = password
         self.user_id = str(user_id) if user_id else None
         self.user_token = user_token
+        
+        # --- [TAMBAHAN] Simpan kredensial spesifik akun ---
+        self.custom_app_id = str(app_id) if app_id else None
+        self.custom_app_secret = str(app_secret) if app_secret else None
+        # --------------------------------------------------
+        
         self.uat = None
         self.label = None
         self.sec = None
@@ -32,7 +38,27 @@ class QoClient:
         self.ratelimit = aiolimiter.AsyncLimiter(30, 60)
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.quality = 6 # Default 6 (Lossless)
-        
+
+    def get_tokens(self):
+        # 1. Prioritaskan App ID & Secret spesifik dari Akun tersebut
+        if self.custom_app_id and self.custom_app_secret:
+            self.id = self.custom_app_id
+            self.secrets = [self.custom_app_secret]
+            LOGGER.info(f"QOBUZ : Akun ini menggunakan APP_ID spesifik ({self.id}) dari .env")
+            
+        # 2. Fallback ke App ID Global jika akun tidak memiliki pengaturan spesifik
+        elif Config.QOBUZ_APP_ID and Config.QOBUZ_APP_SECRET:
+            self.id = str(Config.QOBUZ_APP_ID)
+            self.secrets = [str(Config.QOBUZ_APP_SECRET)]
+            LOGGER.info(f"QOBUZ : Menggunakan APP_ID Global ({self.id}) dari .env")
+            
+        # 3. Fallback terakhir ke Bundle Scraper (Dinamis Web)
+        else:
+            LOGGER.info("QOBUZ : Mengambil App ID & Secret dinamis via Bundle Scraper...")
+            bundle = Bundle()
+            self.id = str(bundle.get_app_id())
+            self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
+
     async def api_call(self, epoint, **kwargs):
         if epoint == "user/login":
             if kwargs.get('email'):
