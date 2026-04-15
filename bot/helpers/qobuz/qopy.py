@@ -373,7 +373,7 @@ class QobuzManager:
         return {} 
 
     async def add_user_account(self, tg_user_id, email=None, password=None, q_user_id=None, q_token=None, app_id=None, app_secret=None):
-        """Melakukan otentikasi via Email ATAU Token, lalu menyimpannya ke MongoDB/Memory."""
+        """Melakukan otentikasi via Email ATAU Token, dan mempertahankan sesi tetap hidup di Memory."""
         
         # 1. Inisialisasi klien berdasarkan data yang masuk
         if email and password:
@@ -392,10 +392,14 @@ class QobuzManager:
             final_q_user_id = temp_client.user_id
             final_q_token = temp_client.uat # Ambil token aktif
         except Exception as e:
+            # Tutup sesi HANYA jika login gagal
             await temp_client.close_session()
             return False, f"Gagal validasi akun ({login_mode}): {str(e)}"
         
-        await temp_client.close_session()
+        # --- [PERBAIKAN PENTING] ---
+        # BAGIAN INI DIHAPUS: await temp_client.close_session() 
+        # Tujuannya agar sesi tetap hidup dan bisa langsung dipakai unduh
+        # ---------------------------
 
         tg_user_id = int(tg_user_id)
         
@@ -426,13 +430,17 @@ class QobuzManager:
         bot_set.user_data[tg_user_id]['qobuz_accounts'] = new_list
         await database.save_user_settings(tg_user_id, {'qobuz_accounts': new_list})
         
-        # 4. Hapus cache lama
+        # 4. Bersihkan cache lama dan MASUKKAN sesi yang baru
         if tg_user_id in self.user_clients:
             for c in self.user_clients[tg_user_id]:
                 await c.close_session()
-            del self.user_clients[tg_user_id]
+                
+        # --- [PERBAIKAN UTAMA] ---
+        # Simpan sesi yang berhasil login langsung ke RAM agar siap pakai
+        self.user_clients[tg_user_id] = [temp_client]
+        # -------------------------
             
-        return True, f"Akun {label} berhasil diautentikasi dan disimpan permanen!"
+        return True, f"Akun {label} berhasil diautentikasi dan siap digunakan detik ini juga!"
 
     async def remove_specific_account(self, tg_user_id, target_q_uid):
         tg_user_id = int(tg_user_id)
@@ -471,7 +479,7 @@ class QobuzManager:
     async def get_user_clients(self, tg_user_id):
         tg_user_id = int(tg_user_id)
         
-        # 1. Cek Cache Memory (Sesi yang sedang aktif)
+        # 1. Cek Cache Memory (Sesi yang sedang aktif / siap pakai)
         if tg_user_id in self.user_clients:
             active_clients = [c for c in self.user_clients[tg_user_id] if c.session and not c.session.closed]
             if active_clients:
@@ -483,13 +491,33 @@ class QobuzManager:
             accounts = bot_set.user_data[tg_user_id].get('qobuz_accounts', [])
             
             for acc in accounts:
-                client = QoClient(user_id=acc['user_id'], user_token=acc['token'])
+                # --- [PERBAIKAN 1] ---
+                # Pastikan app_id dan app_secret ikut dipanggil dari database
+                client = QoClient(
+                    user_id=acc['user_id'], 
+                    user_token=acc['token'],
+                    app_id=acc.get('app_id'),
+                    app_secret=acc.get('app_secret')
+                )
+                # ---------------------
+                
                 try:
                     await client.login()
-                    client.label = f"{client.label} (Pribadi)"
+                    
+                    # Buat label lebih informatif (menampilkan email jika login via email)
+                    email_label = acc.get('email', client.label)
+                    client.label = f"{email_label} (Private)"
+                    
                     loaded_clients.append(client)
                 except Exception as e:
                     LOGGER.error(f"Gagal login ulang akun user {tg_user_id} (ID: {acc['user_id']}): {e}")
+                    
+                    # --- [PERBAIKAN 2: MENCEGAH MEMORY LEAK] ---
+                    # Tutup sesi HANYA jika login ulang ini gagal, 
+                    # agar tidak memicu error "Unclosed client session"
+                    if client.session and not client.session.closed:
+                        await client.close_session()
+                    # -------------------------------------------
             
             if loaded_clients:
                 self.user_clients[tg_user_id] = loaded_clients
