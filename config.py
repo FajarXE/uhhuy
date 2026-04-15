@@ -71,6 +71,11 @@ class Config:
     if QOBUZ_PROXY and QOBUZ_PROXY.startswith("socks5h://"):
         QOBUZ_PROXY = QOBUZ_PROXY.replace("socks5h://", "socks5://")
     # -----------------------------
+
+    # --- [FITUR BARU] Kustom APP ID & APP SECRET ---
+    QOBUZ_APP_ID = getenv("QOBUZ_APP_ID", None)
+    QOBUZ_APP_SECRET = getenv("QOBUZ_APP_SECRET", None)
+    # -----------------------------------------------
     
     QOBUZ_ACCOUNTS = []
     i = 1
