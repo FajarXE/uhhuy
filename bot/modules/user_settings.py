@@ -529,7 +529,7 @@ async def uset_hra_instr_handler(client, query):
 # QOBUZ PRIVATE AUTH (MULTI-ACCOUNT)
 # ==================================
 
-# 1. COMMAND LOGIN (/qobuz_login user_id token)
+# 1. COMMAND LOGIN (Mendukung Email/Pass ATAU UserID/Token)
 @Client.on_message(filters.command("qobuz_login"))
 async def uset_qb_login_cmd(client, message):
     if not await check_user(msg=message):
@@ -541,27 +541,47 @@ async def uset_qb_login_cmd(client, message):
     if len(args) < 3:
         return await message.reply_text(
             "❌ **Format Salah**\n"
-            "Gunakan: <code>/qobuz_login user_id user_token</code>\n\n"
-            "Cara mendapatkan User ID & Token:\n"
-            "1. Buka player.qobuz.com -> Login\n"
-            "2. Buka Console (F12) -> Application -> Local Storage\n"
-            "3. Cari key `current_user`\n"
-            "   - user_id: angka di `id`\n"
-            "   - user_token: string di `credential.parameters.user_auth_token`"
+            "Gunakan salah satu format berikut:\n\n"
+            "**Via Email:**\n"
+            "<code>/qobuz_login email password [app_id] [app_secret]</code>\n\n"
+            "**Via Token:**\n"
+            "<code>/qobuz_login qobuz_user_id token [app_id] [app_secret]</code>"
         )
     
-    q_user_id = args[1]
-    q_token = args[2] 
+    # Deteksi apakah menggunakan Email atau User ID
+    input_satu = args[1]
+    input_dua = args[2]
     
-    status_msg = await message.reply_text("🔄 **Verifying Qobuz Account...**")
+    app_id = args[3] if len(args) > 3 else None
+    app_secret = args[4] if len(args) > 4 else None
+    
+    status_msg = await message.reply_text("🔄 **Verifying Qobuz Account...**\nSedang memvalidasi kredensial...")
     
     try:
-        success, info = await qobuz_manager.add_user_account(user_id, q_user_id, q_token)
+        if "@" in input_satu:
+            # Mode Email & Password
+            success, info = await qobuz_manager.add_user_account(
+                tg_user_id=user_id, 
+                email=input_satu, 
+                password=input_dua, 
+                app_id=app_id, 
+                app_secret=app_secret
+            )
+        else:
+            # Mode User ID & Token
+            success, info = await qobuz_manager.add_user_account(
+                tg_user_id=user_id, 
+                q_user_id=input_satu, 
+                q_token=input_dua, 
+                app_id=app_id, 
+                app_secret=app_secret
+            )
+        
         if success:
             await status_msg.edit_text(
                 f"✅ **{info}**\n\n"
-                f"Akun ID: <code>{q_user_id}</code>\n"
-                f"Bot akan mencoba akun ini secara otomatis jika akun lain gagal/region lock."
+                f"App ID Kustom: <code>{'Ya' if app_id else 'Tidak'}</code>\n"
+                f"Sesi pribadi Anda berhasil disimpan."
             )
         else:
             await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
