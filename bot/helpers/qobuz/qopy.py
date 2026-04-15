@@ -372,47 +372,67 @@ class QobuzManager:
     def _read_db(self):
         return {} 
 
-    async def add_user_account(self, tg_user_id, q_user_id, q_token):
-        """Menambahkan akun ke MongoDB dan Memory."""
-        temp_client = QoClient(user_id=q_user_id, user_token=q_token)
+    async def add_user_account(self, tg_user_id, email=None, password=None, q_user_id=None, q_token=None, app_id=None, app_secret=None):
+        """Melakukan otentikasi via Email ATAU Token, lalu menyimpannya ke MongoDB/Memory."""
+        
+        # 1. Inisialisasi klien berdasarkan data yang masuk
+        if email and password:
+            temp_client = QoClient(email=email, password=password, app_id=app_id, app_secret=app_secret)
+            login_mode = "Email"
+        elif q_user_id and q_token:
+            temp_client = QoClient(user_id=q_user_id, user_token=q_token, app_id=app_id, app_secret=app_secret)
+            login_mode = "Token"
+        else:
+            return False, "Data kredensial tidak lengkap."
+        
         try:
+            # Login otomatis membedakan jalur berdasarkan parameter yang ada di QoClient
             await temp_client.login()
             label = temp_client.label
+            final_q_user_id = temp_client.user_id
+            final_q_token = temp_client.uat # Ambil token aktif
         except Exception as e:
             await temp_client.close_session()
-            return False, f"Login Gagal: {str(e)}"
+            return False, f"Gagal validasi akun ({login_mode}): {str(e)}"
         
         await temp_client.close_session()
 
         tg_user_id = int(tg_user_id)
         
-        # 1. Pastikan dictionary user ada di Memory
+        # 2. Proses simpan ke Memory (bot_set)
         if tg_user_id not in bot_set.user_data:
             bot_set.user_data[tg_user_id] = {}
             
         current_accounts = bot_set.user_data[tg_user_id].get('qobuz_accounts', [])
         
-        # 2. Update List (Hapus jika ada yang sama, lalu tambahkan yang baru)
-        new_list = [acc for acc in current_accounts if str(acc['user_id']) != str(q_user_id)]
+        # Hapus akun lama jika user_id Qobuz-nya sama
+        new_list = [acc for acc in current_accounts if str(acc.get('user_id')) != str(final_q_user_id)]
         
+        # Siapkan payload
         new_account = {
-            "user_id": str(q_user_id),
-            "token": q_token,
+            "user_id": str(final_q_user_id),
+            "email": email if email else str(final_q_user_id), # Gunakan email atau UID untuk label
+            "token": final_q_token,
             "label": label
         }
+        
+        if app_id and app_secret:
+            new_account["app_id"] = app_id
+            new_account["app_secret"] = app_secret
+
         new_list.append(new_account)
         
-        # 3. Simpan ke Memory & MongoDB
+        # 3. Simpan ke Memory & DB
         bot_set.user_data[tg_user_id]['qobuz_accounts'] = new_list
         await database.save_user_settings(tg_user_id, {'qobuz_accounts': new_list})
         
-        # 4. Reset Cache
+        # 4. Hapus cache lama
         if tg_user_id in self.user_clients:
             for c in self.user_clients[tg_user_id]:
                 await c.close_session()
             del self.user_clients[tg_user_id]
             
-        return True, f"Akun {label} berhasil disimpan permanen!"
+        return True, f"Akun {label} berhasil diautentikasi dan disimpan permanen!"
 
     async def remove_specific_account(self, tg_user_id, target_q_uid):
         tg_user_id = int(tg_user_id)
