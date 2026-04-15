@@ -806,15 +806,16 @@ def qb_user_auth_buttons(accounts_list: list):
         buttons.append([InlineKeyboardButton("🔻 CLICK BELOW TO DELETE 🔻", callback_data="ignore")])
         for acc in accounts_list:
             label = acc.get('label', 'Unknown')
+            # Jika login via email, tampilkan email. Jika via token, tampilkan UID/Label
+            email_label = acc.get('email', label) 
             q_uid = acc.get('user_id', '0')
-            btn_text = f"🗑️ {label} ({q_uid})"
+            
+            btn_text = f"🗑️ {email_label} ({q_uid})"
             callback = f"uset_qb_rm_{q_uid}"
-            # Style: DANGER
             buttons.append([InlineKeyboardButton(btn_text, callback_data=callback, style=ButtonStyle.DANGER)])
             
-    # Style: SUCCESS
-    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT (USER ID & TOKEN)", callback_data="uset_qb_instr", style=ButtonStyle.SUCCESS)])
-    # Style: PRIMARY
+    # Teks instruksi diubah agar merepresentasikan dukungan ganda (Email ATAU Token)
+    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT (EMAIL / TOKEN)", callback_data="uset_qb_instr", style=ButtonStyle.SUCCESS)])
     buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_qobuz", style=ButtonStyle.PRIMARY)])
     
     return InlineKeyboardMarkup(buttons)
