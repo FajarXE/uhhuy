@@ -442,7 +442,7 @@ class Config:
 #--------------------
     # Default Client ID ini adalah ID umum, tapi disarankan pakai punya sendiri
     # Daftar di developer.spotify.com
-    SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "65b708073fc0480ea92a077233ca87bd")
+    SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "")
     SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", "")
     
     # Variabel ini akan menyimpan JSON Token Login agar tidak hilang saat Restart di Render
