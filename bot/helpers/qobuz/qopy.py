@@ -251,19 +251,24 @@ class QoClient:
             return False
 
     def get_tokens(self):
-        # [FITUR BARU] Prioritaskan App ID dan Secret statis dari Config
-        if Config.QOBUZ_APP_ID and Config.QOBUZ_APP_SECRET:
+        # 1. Prioritaskan App ID & Secret spesifik dari Akun tersebut
+        if self.custom_app_id and self.custom_app_secret:
+            self.id = self.custom_app_id
+            self.secrets = [self.custom_app_secret]
+            LOGGER.info(f"QOBUZ : Akun ini menggunakan APP_ID spesifik ({self.id}) dari .env")
+            
+        # 2. Fallback ke App ID Global jika akun tidak memiliki pengaturan spesifik
+        elif Config.QOBUZ_APP_ID and Config.QOBUZ_APP_SECRET:
             self.id = str(Config.QOBUZ_APP_ID)
             self.secrets = [str(Config.QOBUZ_APP_SECRET)]
-            LOGGER.info(f"QOBUZ : Menggunakan statis APP_ID ({self.id}) dari .env")
+            LOGGER.info(f"QOBUZ : Menggunakan APP_ID Global ({self.id}) dari .env")
+            
+        # 3. Fallback terakhir ke Bundle Scraper (Dinamic Web)
         else:
-            # Fallback: Gunakan dinamis scraper jika .env kosong
             LOGGER.info("QOBUZ : Mengambil App ID & Secret dinamis via Bundle Scraper...")
             bundle = Bundle()
             self.id = str(bundle.get_app_id())
-            self.secrets = [
-                secret for secret in bundle.get_secrets().values() if secret
-            ]
+            self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
 
     async def login(self):
         self.get_tokens()
