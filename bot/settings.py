@@ -1,4 +1,4 @@
-# [GANTI FILE: bot/settings.py]
+# [FILE: bot/settings.py]
 
 import os
 import json
@@ -13,22 +13,8 @@ from config import Config
 from bot.logger import LOGGER
 
 from .helpers.database.mongo_async import database
-# MODIFIKASI: Impor qobuz_api Dihapus
-# from .helpers.qobuz.qopy import qobuz_api 
-
-# --- MODIFIKASI: Hapus impor 'deezerapi' yang rusak ---
-# from .helpers.deezer.dzapi import deezerapi
-# --- BATAS MODIFIKASI ---
-
-# --- MODIFIKASI: Impor 'tidalapi' yang rusak DIHAPUS ---
-# from .helpers.tidal.tidal_api import tidalapi 
-# --- MODIFIKASI SELESAI ---
 from .helpers.translations import lang_available
-
-# --- MODIFIKASI: Impor manajer baru ---
 from .helpers.tidal.manager import tidal_manager
-# --- MODIFIKASI SELESAI ---
-
 
 def __encrypt_string__(string):
     s = bytes(string, 'utf-8')
@@ -43,63 +29,36 @@ def __decrypt_string__(string):
     except:
         return string
 
-loop = asyncio.new_event_loop()
-set_db = loop.run_until_complete(database.get_variable())
+# --- [FIX] PENGHAPUSAN EVENT LOOP GLOBAL ---
+# Baris loop = asyncio.new_event_loop() dihapus dari sini.
+# Kueri database dipindahkan ke dalam set_language() agar berjalan di loop yang benar.
+# -------------------------------------------
 
 class BotSettings:
     def __init__(self):
-        # --- MODIFIKASI: self.deezer tetap False sebagai default ---
-        # Ini akan diatur ke True oleh bot utama setelah manajer berhasil login.
         self.deezer = False
-        # --- BATAS MODIFIKASI ---
-        
-        # MODIFIKASI: Atribut self.qobuz Dihapus
-        # self.qobuz = False 
-        
-        # --- MODIFIKASI: Atribut self.tidal Dihapus ---
-        # self.tidal = None 
-        # --- MODIFIKASI SELESAI ---
-        
         self.admins = Config.ADMINS
-        self.set_db = set_db
-
+        
+        # Inisialisasi atribut dengan nilai kosong/default
+        self.set_db = {}
         self.bot_lang = None
-        self.auth_users = self.set_db.get('AUTH_USERS', [])
-        self.auth_chats = self.set_db.get('AUTH_CHATS', [])
-
+        self.auth_users = []
+        self.auth_chats = []
         self.rclone = False
-        self.check_upload_mode()
-
-        self.anti_spam = self.set_db.get('ANTI_SPAM', "OFF")
-
-        self.bot_public = self.set_db.get('BOT_PUBLIC')
-
-        self.art_poster = self.set_db.get('ART_POSTER')
-
-        self.playlist_sort = self.set_db.get('PLAYLIST_SORT')
-        self.disable_sort_link = self.set_db.get('PLAYLIST_LINK_DISABLE')
-
-        self.artist_batch = self.set_db.get('ARTIST_BATCH_UPLOAD')
-        self.playlist_conc = self.set_db.get('PLAYLIST_CONCURRENT')
-        
-        link_option = self.set_db.get('RCLONE_LINK_OPTIONS')
-        self.link_options = link_option if self.rclone and link_option else 'False'
-
-        self.album_zip = self.set_db.get('ALBUM_ZIP')
-        self.playlist_zip = self.set_db.get('PLAYLIST_ZIP')
-        self.artist_zip = self.set_db.get('ARTIST_ZIP')
-
-        # --- MODIFIKASI: Hapus self.clients (tidak digunakan di sini) ---
-        # self.clients = []
-        # --- MODIFIKASI SELESAI ---
-        
+        self.anti_spam = "OFF"
+        self.bot_public = None
+        self.art_poster = None
+        self.playlist_sort = None
+        self.disable_sort_link = None
+        self.artist_batch = None
+        self.playlist_conc = None
+        self.link_options = 'False'
+        self.album_zip = None
+        self.playlist_zip = None
+        self.artist_zip = None
+        self.upload_mode = 'Telegram'
         self.user_data = {}
-        
-        # --- MODIFIKASI: Tambahkan variabel can_enable_tidal ---
-        # Ini dibutuhkan oleh provider_settings.py untuk menampilkan tombol Login
         self.can_enable_tidal = Config.ENABLE_TIDAL
-        # --- MODIFIKASI SELESAI ---
-
 
     def check_upload_mode(self):
         if os.path.exists('rclone.conf'):
@@ -122,29 +81,34 @@ class BotSettings:
             self.upload_mode = db_upload
         else:
             self.upload_mode = 'Telegram'
+            
+        link_option = self.set_db.get('RCLONE_LINK_OPTIONS')
+        self.link_options = link_option if self.rclone and link_option else 'False'
     
-
-    # MODIFIKASI: Seluruh fungsi login_qobuz(self) Dihapus
-    # (Ini sekarang ditangani di __main__.py)
-
-    # --- MODIFIKASI: Hapus seluruh fungsi 'login_deezer' ---
-    # Logika ini sekarang ditangani oleh 'deezer_manager' saat startup.
-    # --- BATAS MODIFIKASI ---
-
-
-    # --- MODIFIKASI: Hapus seluruh fungsi 'login_tidal' ---
-    # Logika ini sekarang ditangani oleh 'tidal_manager' saat startup.
-    # --- BATAS MODIFIKASI ---
-
-    
-    # --- MODIFIKASI: Hapus seluruh fungsi 'save_tidal_login' ---
-    # Logika ini sekarang ditangani oleh 'provider_settings.py'.
-    # --- BATAS MODIFIKASI ---
-        
-
     async def set_language(self):
-        bot_lang = await database.get_variable()
-        self.bot_lang = bot_lang.get("BOT_LANGUAGE", "en")
+        # --- [FIX] AMBIL DATA DATABASE DI SINI ---
+        # Karena ini dieksekusi di start_services(), uvloop sudah pasti aktif!
+        self.set_db = await database.get_variable()
+        
+        # Isi semua pengaturan yang sebelumnya ada di __init__
+        self.auth_users = self.set_db.get('AUTH_USERS', [])
+        self.auth_chats = self.set_db.get('AUTH_CHATS', [])
+        self.anti_spam = self.set_db.get('ANTI_SPAM', "OFF")
+        self.bot_public = self.set_db.get('BOT_PUBLIC')
+        self.art_poster = self.set_db.get('ART_POSTER')
+        self.playlist_sort = self.set_db.get('PLAYLIST_SORT')
+        self.disable_sort_link = self.set_db.get('PLAYLIST_LINK_DISABLE')
+        self.artist_batch = self.set_db.get('ARTIST_BATCH_UPLOAD')
+        self.playlist_conc = self.set_db.get('PLAYLIST_CONCURRENT')
+        self.album_zip = self.set_db.get('ALBUM_ZIP')
+        self.playlist_zip = self.set_db.get('PLAYLIST_ZIP')
+        self.artist_zip = self.set_db.get('ARTIST_ZIP')
+        
+        # Eksekusi pengecekan mode upload setelah set_db terisi
+        self.check_upload_mode()
+        # -----------------------------------------
+
+        self.bot_lang = self.set_db.get("BOT_LANGUAGE", "en")
         for item in lang_available:
             logging.info(item.__language__ == self.bot_lang)
             if item.__language__ == self.bot_lang:
@@ -154,17 +118,8 @@ class BotSettings:
     async def initialize_users(self) -> dict:
         user_data = await database.initialize_users()
         
-        # --- MODIFIKASI: Gunakan self.deezer (bool) ---
-        # Kita tidak lagi melampirkan 'user_data' ke klien di sini
-        # --- BATAS MODIFIKASI ---
-        
-        # MODIFIKASI: Blok if self.qobuz Dihapus
-        
-        # --- MODIFIKASI: Muat data pengguna ke manajer ---
-        # (Kita asumsikan manajer sudah diinisialisasi di __main__.py)
         if tidal_manager and tidal_manager.clients:
             tidal_manager.user_data = user_data
-        # --- MODIFIKASI SELESAI ---
             
         self.user_data = user_data
 
