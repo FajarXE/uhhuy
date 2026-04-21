@@ -28,5 +28,6 @@ uvloop
 pkce>=1.0.3
 unplayplay>=0.0.1
 protobuf
-httpx
 pybase62
+httpx[socks]
+socksio
