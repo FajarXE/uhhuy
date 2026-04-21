@@ -3,77 +3,53 @@
 from pyrogram import Client, filters
 from bot import Config
 from bot.helpers.spotify.manager import spotify_manager
-from bot.logger import LOGGER
-import urllib.parse
+import json
 
 @Client.on_message(filters.command("login_spotify") & filters.private)
 async def login_spotify_handler(client, message):
-    if message.from_user.id not in Config.ADMINS:
-        return
+    if message.from_user.id not in Config.ADMINS: return
 
     client_id = Config.SPOTIFY_CLIENT_ID
-    if not client_id:
-        return await message.reply("❌ `SPOTIFY_CLIENT_ID` belum diisi di .env!")
-
-    # Alamat Redirect yang didaftarkan di Dashboard Spotify
     redirect_uri = "http://127.0.0.1:4381/login"
+    scopes = "user-read-private%20user-read-email%20playlist-read-private%20streaming%20user-library-read"
     
-    # Daftar Scope yang diizinkan untuk User Premium
-    scopes = [
-        "user-read-private", 
-        "user-read-email", 
-        "playlist-read-private", 
-        "playlist-read-collaborative", 
-        "user-library-read", 
-        "streaming", 
-        "user-read-playback-state", 
-        "user-modify-playback-state", 
-        "user-read-currently-playing",
-        "user-library-modify"
-    ]
-    
-    # Membangun URL secara otomatis (Tanpa kesalahan ketik)
-    params = {
-        "client_id": client_id,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "scope": " ".join(scopes),
-        "show_dialog": "true" # Memaksa muncul pilihan akun
-    }
-    
-    # URL resmi Spotify Authorization
-    auth_url = f"https://accounts.spotify.com/authorize?{urllib.parse.urlencode(params)}"
+    auth_url = f"https://accounts.spotify.com/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&scope={scopes}"
 
     text = (
-        "🔐 **LOGIN SPOTIFY PREMIUM**\n\n"
-        "Klik link di bawah untuk menghubungkan bot ke akun Spotify Anda:\n\n"
-        f"1️⃣ **[KLIK DI SINI UNTUK LOGIN]({auth_url})**\n\n"
-        "2️⃣ Klik **'Agree'** atau **'Setuju'**.\n"
-        "3️⃣ Browser akan error 'Site cannot be reached' (127.0.0.1) — **ABAIKAN SAJA**.\n"
-        "4️⃣ **Salin SELURUH URL** yang ada di kolom alamat browser.\n"
-        "5️⃣ Kirim ke sini dengan format:\n"
-        "`/spotify_token [URL_YANG_DISALIN]`"
+        "🔐 **LOGIN SPOTIFY (WEB API)**\n\n"
+        f"1. [KLIK DI SINI UNTUK LOGIN]({auth_url})\n"
+        "2. Salin URL error (127.0.0.1) setelah 'Agree'.\n"
+        "3. Kirim ke bot: `/spotify_token [URL]`"
     )
-    
     await message.reply(text, disable_web_page_preview=True)
 
 @Client.on_message(filters.command("spotify_token") & filters.private)
 async def spotify_token_handler(client, message):
-    if message.from_user.id not in Config.ADMINS:
-        return
-
-    if len(message.command) < 2:
-        return await message.reply("❌ Format: `/spotify_token [URL_DARI_BROWSER]`")
+    if message.from_user.id not in Config.ADMINS: return
+    if len(message.command) < 2: return
 
     url = message.text.split(None, 1)[1].strip()
-    msg = await message.reply("⏳ **Menghubungkan ke Spotify...**")
+    msg = await message.reply("⏳ **Sedang memproses...**")
 
+    # Manager pintar akan otomatis tahu ini token Metadata atau Streaming
+    result = await spotify_manager.complete_login(url)
+    
+    if result == "METADATA":
+        await msg.edit("✅ **Login Metadata Berhasil!**\nSekarang coba download lagu, jika bot 'stuck', lihat link di Log Render.")
+    elif result == "STREAMING":
+        await msg.edit("✅ **Login Streaming (Librespot) Berhasil!**\nSekarang bot sudah bisa download lagu di Render.")
+    else:
+        await msg.edit("❌ **Gagal!** URL salah atau sudah kadaluarsa.")
+
+# Perintah Cadangan (Jika cara otomatis gagal)
+@Client.on_message(filters.command("set_librespot") & filters.private)
+async def set_librespot_handler(client, message):
+    if message.from_user.id not in Config.ADMINS: return
+    if len(message.command) < 2: return
     try:
-        success = await spotify_manager.complete_login(url)
-        if success:
-            await msg.edit("✅ **LOGIN BERHASIL!**\nSesi Anda telah aman disimpan di Database MongoDB. Bot siap mengunduh lagu Spotify.")
-        else:
-            await msg.edit("❌ **TOKEN GAGAL!**\nURL tidak valid atau sudah kadaluarsa. Coba klik link login lagi.")
-    except Exception as e:
-        LOGGER.error(f"Spotify Auth Error: {e}")
-        await msg.edit(f"❌ **Error:** `{str(e)}`")
+        json_str = message.text.split(None, 1)[1]
+        await database.set_bot_setting("spotify_librespot", json_str)
+        await spotify_manager.initialize_clients()
+        await message.reply("✅ Sesi Librespot berhasil disuntikkan secara manual.")
+    except:
+        await message.reply("❌ Gagal menyuntikkan JSON.")
