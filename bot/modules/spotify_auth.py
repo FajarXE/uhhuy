@@ -9,18 +9,29 @@ import urllib.parse
 async def login_spotify_handler(client, message):
     if message.from_user.id not in Config.ADMINS: return
 
+    # DAFTAR SCOPE LENGKAP (Sesuai permintaan log error)
+    scopes = [
+        "user-read-private", "user-read-email", "user-library-read", 
+        "user-library-modify", "streaming", "user-read-playback-state", 
+        "user-modify-playback-state", "user-read-currently-playing", 
+        "user-read-recently-played", "user-top-read", 
+        "user-read-playback-position", "playlist-read-private", 
+        "playlist-read-collaborative"
+    ]
+    
     params = {
         "client_id": Config.SPOTIFY_CLIENT_ID,
         "response_type": "code",
         "redirect_uri": "http://127.0.0.1:4381/login",
-        "scope": "user-read-private user-read-email playlist-read-private streaming user-library-read user-library-modify",
+        "scope": " ".join(scopes), # Otomatis jadi spasi antar scope
         "show_dialog": "true"
     }
     
     auth_url = f"https://accounts.spotify.com/authorize?{urllib.parse.urlencode(params)}"
 
     text = (
-        "🔐 **SPOTIFY LOGIN (HP MODE)**\n\n"
+        "🔐 **SPOTIFY LOGIN (FULL SCOPES)**\n\n"
+        "Mesin download meminta izin tambahan. Silakan login ulang melalui link di bawah:\n\n"
         f"1. [KLIK DI SINI UNTUK LOGIN]({auth_url})\n"
         "2. Klik **'Agree'**.\n"
         "3. Salin URL error `127.0.0.1` dari browser.\n"
@@ -33,9 +44,9 @@ async def token_handler(client, message):
     if message.from_user.id not in Config.ADMINS or len(message.command) < 2: return
     
     url = message.text.split(None, 1)[1].strip()
-    msg = await message.reply("⏳ Memproses login Spotify...")
+    msg = await message.reply("⏳ Memperbarui sesi dengan izin lengkap...")
     
     if await spotify_manager.complete_login(url):
-        await msg.edit("✅ **LOGIN BERHASIL!**\nSemua sesi (Metadata & Streaming) telah diaktifkan. Bot siap mendownload.")
+        await msg.edit("✅ **LOGIN BERHASIL!**\nSekarang izin sudah lengkap. Silakan coba kirim link lagu lagi.")
     else:
-        await msg.edit("❌ **GAGAL!** Pastikan Redirect URI di Dashboard Spotify sudah diatur ke `http://127.0.0.1:4381/login`.")
+        await msg.edit("❌ **GAGAL!** Pastikan Anda menyalin URL dengan benar.")
