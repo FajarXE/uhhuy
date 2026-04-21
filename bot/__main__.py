@@ -47,7 +47,7 @@ def safe_import(module_path, class_name):
         return None
 
 deezer_manager = safe_import('bot.helpers.deezer.manager', 'deezer_manager')
-beatport_manager = safe_import('bot.helpers.beatport.manager', 'deezer_manager') # Sesuaikan jika ini typo di kode asli
+beatport_manager = safe_import('bot.helpers.beatport.manager', 'beatport_manager')
 tidal_manager = safe_import('bot.helpers.tidal.manager', 'tidal_manager')
 kkbox_manager = safe_import('bot.helpers.kkbox.manager', 'kkbox_manager')
 beatsource_manager = safe_import('bot.helpers.beatsource.manager', 'beatsource_manager')
