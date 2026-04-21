@@ -16,6 +16,11 @@ from .manager import spotify_manager
 async def start_spotify(link: str, user: dict):
     user_id = user['user_id']
     bot_msg = user.get('bot_msg')
+
+    # --- TAMBAHKAN INI ---
+    # Memastikan file session ada di disk sebelum mesin bekerja
+    await spotify_manager.initialize_clients()
+    # ----------------------
     
     module = spotify_manager.session
     if not module:
