@@ -83,7 +83,7 @@ class SpotifyManager:
             
             await self.initialize_clients()
             return True
-        exceptException as e:
+            except Exception as e:
             logging.error(f"Login Error: {e}")
             return False
 
