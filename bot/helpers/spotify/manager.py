@@ -1,53 +1,70 @@
-# [FILE: bot/helpers/spotify/manager.py]
+# [UPDATE: bot/helpers/spotify/manager.py]
 
-import logging
+import os
 import asyncio
+import logging
 from bot import Config
-from .interface import ModuleInterface 
-
-# --- MOCK OBJECT UNTUK MENGELABUI ORPHEUSDL ---
-class MockOrpheusConfig:
-    def __init__(self, settings_dict):
-        # OrpheusDL akan mencari atribut ini saat proses inisialisasi
-        self.module_settings = settings_dict
-# ---------------------------------------------
+from bot.helpers.database.mongo_async import database
+from .interface import ModuleInterface
 
 class SpotifyManager:
     def __init__(self):
         self.session = None
-        self.quality = "VERY_HIGH"
 
     async def initialize_clients(self):
-        logging.info("Spotify: Memulai inisialisasi...")
+        """Dijalankan saat bot startup"""
+        logging.info("Spotify: Memeriksa database untuk sesi lama...")
+        
+        # 1. Ambil token dari MongoDB
+        saved_creds = await database.get_bot_setting("spotify_creds")
+        
+        conf_path = os.path.join(os.getcwd(), "config", "spotify")
+        os.makedirs(conf_path, exist_ok=True)
+        token_file = os.path.join(conf_path, "credentials.json")
+
+        if saved_creds:
+            with open(token_file, "w") as f:
+                f.write(saved_creds)
+            logging.info("Spotify: Sesi berhasil dipulihkan dari Database.")
+
+        # 2. Inisialisasi ModuleInterface OrpheusDL
         try:
-            # 1. Siapkan pengaturan kredensial Anda
-            settings_dict = {
-                'client_id': Config.SPOTIFY_CLIENT_ID,
-                'client_secret': Config.SPOTIFY_CLIENT_SECRET,
+            settings = {
+                'client_id': Config.SPOTIFY_CLIENT_ID, 
+                'client_secret': Config.SPOTIFY_CLIENT_SECRET
             }
+            # MockConfig adalah class pembantu untuk menyuplai settings ke Orpheus
+            from .manager_utils import MockOrpheusConfig 
+            mock_config = MockOrpheusConfig(settings)
             
-            # 2. Bungkus dictionary ke dalam Mock Object
-            mock_config = MockOrpheusConfig(settings_dict)
-            
-            # 3. Lemparkan objek palsu tersebut ke ModuleInterface
-            self.session = await asyncio.to_thread(
-                ModuleInterface, 
-                mock_config
-            )
-            
-            logging.info("Spotify: Inisialisasi berhasil.")
+            self.session = await asyncio.to_thread(ModuleInterface, mock_config)
         except Exception as e:
-            logging.error(f"Spotify Init Error: {e}")
+            logging.error(f"Spotify Startup Error: {e}")
 
-    async def shutdown(self):
-        if self.session:
-            logging.info("Spotify: Menutup sesi...")
-            try:
-                if hasattr(self.session, 'cleanup'):
-                    await asyncio.to_thread(self.session.cleanup)
-                elif hasattr(self.session, 'close'):
-                    await asyncio.to_thread(self.session.close)
-            except Exception as e:
-                logging.debug(f"Spotify shutdown catch: {e}")
+    async def complete_login(self, url):
+        """Menukar URL dari user menjadi token dan simpan ke DB"""
+        if not self.session:
+            return False
+            
+        try:
+            # Gunakan fungsi internal OrpheusDL untuk memproses URL login
+            # Catatan: Nama fungsi mungkin berbeda tergantung versi, biasanya 'handle_auth_url'
+            await asyncio.to_thread(self.session.handle_auth_url, url)
+            
+            # Jika berhasil, Orpheus akan menulis file credentials.json secara otomatis
+            token_file = os.path.join(os.getcwd(), "config", "spotify", "credentials.json")
+            
+            if os.path.exists(token_file):
+                with open(token_file, "r") as f:
+                    content = f.read()
+                
+                # SIMPAN KE MONGODB
+                await database.set_bot_setting("spotify_creds", content)
+                return True
+        except Exception as e:
+            logging.error(f"Spotify Login Exchange Error: {e}")
+        
+        return False
 
+# Inisialisasi instance global
 spotify_manager = SpotifyManager()
