@@ -1,7 +1,7 @@
 aiofiles
 aiohttp
 aiolimiter
-async_pymongo
+motor
 gevent
 gunicorn
 flask
