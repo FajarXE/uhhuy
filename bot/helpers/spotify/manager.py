@@ -7,10 +7,14 @@ from bot import Config
 from bot.helpers.database.mongo_async import database
 from .interface import ModuleInterface 
 
-# Mock Object untuk memenuhi ekspektasi OrpheusDL
+# --- REVISI MOCK OBJECT ---
 class MockOrpheusConfig:
     def __init__(self, settings_dict):
+        # Tambahkan atribut yang diminta oleh OrpheusDL core
         self.module_settings = settings_dict
+        self.module_error = None      # <--- FIX: Tambahkan ini
+        self.global_settings = {}     # <--- Tambahkan ini sebagai pengaman
+# --------------------------
 
 class SpotifyManager:
     def __init__(self):
@@ -19,7 +23,7 @@ class SpotifyManager:
     async def initialize_clients(self):
         logging.info("Spotify: Memeriksa database untuk sesi lama...")
         
-        # Ambil token dari MongoDB menggunakan fungsi baru kita
+        # Ambil token dari MongoDB (menggunakan fungsi baru di mongo_async.py)
         saved_creds = await database.get_bot_setting("spotify_creds")
         
         conf_path = os.path.join(os.getcwd(), "config", "spotify")
@@ -32,14 +36,19 @@ class SpotifyManager:
             logging.info("Spotify: Sesi berhasil dipulihkan dari Database.")
 
         try:
+            # 1. Siapkan settings
             settings_dict = {
                 'client_id': Config.SPOTIFY_CLIENT_ID,
                 'client_secret': Config.SPOTIFY_CLIENT_SECRET,
             }
+            
+            # 2. Bungkus ke MockConfig yang sudah diperbaiki
             mock_config = MockOrpheusConfig(settings_dict)
             
-            # Inisialisasi ModuleInterface OrpheusDL
+            # 3. Inisialisasi ModuleInterface
+            # Kita gunakan thread agar tidak memblokir uvloop utama
             self.session = await asyncio.to_thread(ModuleInterface, mock_config)
+            
             logging.info("Spotify: Inisialisasi berhasil.")
         except Exception as e:
             logging.error(f"Spotify Init Error: {e}")
