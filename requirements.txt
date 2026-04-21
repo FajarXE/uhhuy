@@ -25,3 +25,8 @@ git+https://github.com/kokarare1212/librespot-python
 speedtest-cli
 aioaria2
 uvloop
+pkce>=1.0.3
+unplayplay>=0.0.1
+protobuf
+httpx
+pybase62
