@@ -35,28 +35,29 @@ async def process_spotify_track(link: str, user: dict, module, quality: str):
     bot_msg = user['bot_msg']
     track_id = link.split('/')[-1].split('?')[0]
     
-    # 1. Map string kualitas user ke QualityEnum OrpheusDL
-    # 'FLAC' di bot Anda dipetakan ke LOSSLESS di Orpheus
+    # 1. Map string kualitas ke Enum
     if quality == "FLAC":
         target_quality = QualityEnum.LOSSLESS
         target_codec = CodecEnum.FLAC
     else:
-        target_quality = QualityEnum.HIGH # VERY_HIGH (320kbps)
+        target_quality = QualityEnum.HIGH
         target_codec = CodecEnum.VORBIS
 
-    # 2. Buat objek CodecOptions (Dibutuhkan oleh get_track_info)
-    codec_opts = CodecOptions(
-        codec=target_codec,
-        allow_multichannel=False
-    )
+    # 2. Buat objek CodecOptions secara posisional
+    # Kita masukkan target_codec sebagai argumen pertama tanpa menyebutkan nama 'codec='
+    try:
+        codec_opts = CodecOptions(target_codec, False) 
+    except TypeError:
+        # Jika masih gagal, coba gunakan nama parameter 'codec_enum' (beberapa fork menggunakan ini)
+        codec_opts = CodecOptions(codec_enum=target_codec, allow_multichannel=False)
 
-    # 3. Ambil Metadata dengan argumen lengkap
+    # 3. Ambil Metadata
     try:
         meta = await asyncio.to_thread(
             module.get_track_info, 
             track_id, 
-            target_quality, # Argumen ke-2: quality_tier
-            codec_opts      # Argumen ke-3: codec_options
+            target_quality, 
+            codec_opts
         )
     except Exception as e:
         LOGGER.error(f"Metadata Error: {e}")
