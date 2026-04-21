@@ -236,7 +236,7 @@ async def shutdown_all_services():
         deezer_manager, beatport_manager, tidal_manager, kkbox_manager,
         beatsource_manager, soundcloud_manager, napster_manager, idagio_manager,
         nugs_manager, bugs_manager, highresaudio_manager, moov_manager,
-        jiosaavn_manager, gaana_manager, bandcamp_manager, livephish_manager, beatstars_manager, khinsider_manager
+        jiosaavn_manager, gaana_manager, bandcamp_manager, livephish_manager, beatstars_manager, khinsider_manager, spotify_manager
     ]
     for mgr in managers_list:
         if mgr and hasattr(mgr, 'shutdown'):
