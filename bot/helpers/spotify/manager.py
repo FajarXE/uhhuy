@@ -21,9 +21,11 @@ class SpotifyManager:
     def __init__(self):
         self.session = None
         self.conf_path = os.path.join(os.getcwd(), "bot", "config", "spotify")
+        # Masukkan proxy Anda ke variabel agar mudah dikelola
+        self.proxy = "socks5h://hdzire:hdzire@85.17.40.203:1080"
 
     async def initialize_clients(self):
-        logging.info(f"Spotify: Menyiapkan sesi dengan Proxy SOCKS5h...")
+        logging.info(f"Spotify: Menginisialisasi sesi via Proxy {self.proxy.split('@')[-1]}...")
         os.makedirs(self.conf_path, exist_ok=True)
 
         saved_creds = await database.get_bot_setting("spotify_creds")
@@ -35,13 +37,14 @@ class SpotifyManager:
             with open(os.path.join(self.conf_path, "librespot_credentials.json"), "w") as f:
                 f.write(saved_creds)
 
-        # Konfigurasi Settings dengan Proxy SOCKS5h Anda
+        # Gunakan Device Name yang lebih umum agar tidak dicurigai sebagai Bot
         settings_data = {
             "username": saved_user or "",
             "client_id": Config.SPOTIFY_CLIENT_ID,
             "client_secret": Config.SPOTIFY_CLIENT_SECRET,
-            "device_name": "Orpheus-Render",
-            "proxy": "socks5h://hdzire:hdzire@85.17.40.203:1080" # PROXY DI SINI
+            "device_name": "Spotify Desktop", # Menyamar sebagai aplikasi desktop resmi
+            "proxy": self.proxy,
+            "bitrate": 320 # Paksa ke kualitas tertinggi
         }
         
         with open(os.path.join(self.conf_path, "settings.json"), "w") as f:
@@ -49,7 +52,7 @@ class SpotifyManager:
 
         try:
             self.session = await asyncio.to_thread(ModuleInterface, MockOrpheusConfig(settings_data))
-            logging.info(f"Spotify: Mesin siap digunakan (User: {saved_user})")
+            logging.info(f"Spotify: Mesin siap (User: {saved_user})")
         except Exception as e:
             logging.error(f"Spotify Startup Error: {e}")
 
@@ -63,8 +66,8 @@ class SpotifyManager:
             auth_str = f"{Config.SPOTIFY_CLIENT_ID}:{Config.SPOTIFY_CLIENT_SECRET}"
             b64_auth = base64.b64encode(auth_str.encode()).decode()
             
-            # Request token juga lewat proxy agar aman
-            async with httpx.AsyncClient(proxies="socks5h://hdzire:hdzire@85.17.40.203:1080") as client:
+            # Gunakan proxy juga saat menukar token agar lokasi konsisten
+            async with httpx.AsyncClient(proxies=self.proxy) as client:
                 resp = await client.post("https://accounts.spotify.com/api/token", data={
                     "grant_type": "authorization_code", "code": code,
                     "redirect_uri": "http://127.0.0.1:4381/login"
