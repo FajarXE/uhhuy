@@ -9,9 +9,21 @@ class MongoDB:
     """
     
     def __init__(self) -> None:
-        # Mengganti AsyncClient dengan AsyncIOMotorClient
-        self.db = AsyncIOMotorClient(Config.DATABASE_URL)
-        self.client = self.db[Config.BOT_USERNAME]
+        self._db = None
+        self._client = None
+    
+    @property
+    def db(self):
+        # Klien baru dibuat saat dipanggil pertama kali di dalam uvloop
+        if self._db is None:
+            self._db = AsyncIOMotorClient(Config.DATABASE_URL)
+        return self._db
+        
+    @property
+    def client(self):
+        if self._client is None:
+            self._client = self.db[Config.BOT_USERNAME]
+        return self._client
     
     async def initialize_users(self) -> dict:
         exists = await self.db[Config.BOT_USERNAME].users.find_one({})
