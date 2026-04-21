@@ -3,53 +3,40 @@
 from pyrogram import Client, filters
 from bot import Config
 from bot.helpers.spotify.manager import spotify_manager
-import json
 
 @Client.on_message(filters.command("login_spotify") & filters.private)
 async def login_spotify_handler(client, message):
     if message.from_user.id not in Config.ADMINS: return
-
-    client_id = Config.SPOTIFY_CLIENT_ID
-    redirect_uri = "http://127.0.0.1:4381/login"
-    scopes = "user-read-private%20user-read-email%20playlist-read-private%20streaming%20user-library-read"
     
-    auth_url = f"https://accounts.spotify.com/authorize?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&scope={scopes}"
+    # Link 1: Untuk Metadata (Aplikasi Anda)
+    client_id = Config.SPOTIFY_CLIENT_ID
+    url_meta = f"https://accounts.spotify.com/authorize?response_type=code&client_id={client_id}&redirect_uri=http://127.0.0.1:4381/login&scope=user-read-private%20user-read-email%20playlist-read-private"
+    
+    # Link 2: Untuk Streaming (Official Desktop)
+    url_stream = spotify_manager.get_streaming_link()
 
     text = (
-        "🔐 **LOGIN SPOTIFY (WEB API)**\n\n"
-        f"1. [KLIK DI SINI UNTUK LOGIN]({auth_url})\n"
-        "2. Salin URL error (127.0.0.1) setelah 'Agree'.\n"
-        "3. Kirim ke bot: `/spotify_token [URL]`"
+        "🔐 **SPOTIFY AUTHENTICATION CENTER**\n\n"
+        "Anda harus melakukan login pada **KEDUA** link di bawah ini secara bergantian:\n\n"
+        f"1️⃣ **[LOGIN METADATA]({url_meta})**\n"
+        "   *(Agar bot bisa baca judul lagu)*\n\n"
+        f"2️⃣ **[LOGIN STREAMING]({url_stream})**\n"
+        "   *(Agar bot bisa download file musik)*\n\n"
+        "**Cara:** Klik link -> Agree -> Salin URL error `127.0.0.1` -> Kirim ke bot dengan `/spotify_token [URL]`"
     )
     await message.reply(text, disable_web_page_preview=True)
 
 @Client.on_message(filters.command("spotify_token") & filters.private)
-async def spotify_token_handler(client, message):
-    if message.from_user.id not in Config.ADMINS: return
-    if len(message.command) < 2: return
-
-    url = message.text.split(None, 1)[1].strip()
-    msg = await message.reply("⏳ **Sedang memproses...**")
-
-    # Manager pintar akan otomatis tahu ini token Metadata atau Streaming
-    result = await spotify_manager.complete_login(url)
+async def token_handler(client, message):
+    if message.from_user.id not in Config.ADMINS or len(message.command) < 2: return
     
-    if result == "METADATA":
-        await msg.edit("✅ **Login Metadata Berhasil!**\nSekarang coba download lagu, jika bot 'stuck', lihat link di Log Render.")
-    elif result == "STREAMING":
-        await msg.edit("✅ **Login Streaming (Librespot) Berhasil!**\nSekarang bot sudah bisa download lagu di Render.")
+    url = message.text.split(None, 1)[1].strip()
+    msg = await message.reply("⏳ Memproses token...")
+    
+    res = await spotify_manager.complete_login(url)
+    if res == "METADATA":
+        await msg.edit("✅ **Sesi Metadata Berhasil!** Sekarang silakan klik link nomor 2 (Streaming).")
+    elif res == "STREAMING":
+        await msg.edit("✅ **Sesi Streaming Berhasil!** Bot sekarang sudah siap tempur di Render.")
     else:
-        await msg.edit("❌ **Gagal!** URL salah atau sudah kadaluarsa.")
-
-# Perintah Cadangan (Jika cara otomatis gagal)
-@Client.on_message(filters.command("set_librespot") & filters.private)
-async def set_librespot_handler(client, message):
-    if message.from_user.id not in Config.ADMINS: return
-    if len(message.command) < 2: return
-    try:
-        json_str = message.text.split(None, 1)[1]
-        await database.set_bot_setting("spotify_librespot", json_str)
-        await spotify_manager.initialize_clients()
-        await message.reply("✅ Sesi Librespot berhasil disuntikkan secara manual.")
-    except:
-        await message.reply("❌ Gagal menyuntikkan JSON.")
+        await msg.edit("❌ **Gagal!** Token tidak valid atau salah urutan. Pastikan klik link dari bot, bukan dari Log Render.")
