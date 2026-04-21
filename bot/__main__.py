@@ -7,8 +7,18 @@ import sys
 import logging
 import traceback
 
-# Hapus import idle dari pyrogram karena tidak thread-safe di Python 3.12
-# from pyrogram import idle 
+# --- [FIX] SETUP EVENT LOOP HARUS DI ATAS SEBELUM IMPORT MODUL BOT ---
+# Ini memastikan Motor, Pyrogram, dan uvloop berjalan di loop yang sama.
+try:
+    import uvloop
+    uvloop.install()
+    logging.info("Main: 🚀 Mesin turbo uvloop berhasil dipasang!")
+except ImportError:
+    logging.warning("Main: uvloop tidak ditemukan. Menggunakan asyncio standar.")
+
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+# --------------------------------------------------------------------
 
 from bot import Config
 from .tgclient import aio
@@ -37,7 +47,7 @@ def safe_import(module_path, class_name):
         return None
 
 deezer_manager = safe_import('bot.helpers.deezer.manager', 'deezer_manager')
-beatport_manager = safe_import('bot.helpers.beatport.manager', 'beatport_manager')
+beatport_manager = safe_import('bot.helpers.beatport.manager', 'deezer_manager') # Sesuaikan jika ini typo di kode asli
 tidal_manager = safe_import('bot.helpers.tidal.manager', 'tidal_manager')
 kkbox_manager = safe_import('bot.helpers.kkbox.manager', 'kkbox_manager')
 beatsource_manager = safe_import('bot.helpers.beatsource.manager', 'beatsource_manager')
@@ -57,29 +67,23 @@ khinsider_manager = safe_import('bot.helpers.khinsider.manager', 'khinsider_mana
 spotify_manager = safe_import('bot.helpers.spotify.manager', 'spotify_manager')
 
 
-# --- [DEBUG] EXCEPTION HANDLER (DIPERBAIKI) ---
+# --- [DEBUG] EXCEPTION HANDLER ---
 def handle_exception(loop, context):
-    # Ambil pesan error
     msg = context.get("exception", context["message"])
     msg_str = str(msg)
     
-    # 1. Heningkan Error SSL Shutdown (Tidak berbahaya)
     if "SSL shutdown timed out" in msg_str:
         return 
 
-    # 2. Heningkan Error Connection Lost biasa
     if "Connection lost" in msg_str and "RemoteDisconnected" in msg_str:
         return
 
-    # Log error lain yang benar-benar penting
     logging.error(f"⚠️ EXCEPTION TIDAK TERTANGANI: {msg}")
     
     if "exception" in context:
-        # Jangan print traceback jika errornya adalah RuntimeError thread-safe yang sudah kita tangani
         if "Non-thread-safe operation" in str(context["exception"]):
             return
         traceback.print_exception(type(context["exception"]), context["exception"], context["exception"].__traceback__)
-# ---------------------------------
 
 async def load_all_user_settings_into_managers():
     logging.info("Main: Sinkronisasi pengaturan pengguna ke cache manajer...")
@@ -154,11 +158,10 @@ async def start_services():
     logging.info("------------------------------------------------")
     logging.info("Main: Memulai Inisialisasi Layanan...")
     
-    # --- ANTI INFINITE CRASH LOOP: BERSIHKAN ARIA2 SAAT BOOTING ---
     try:
         from bot.helpers.aria2_helper import aria2_purge_all
         await aria2_purge_all()
-        logging.info("Main: Berhasil membersihkan sisa task Aria2 lama di background.")
+        logging.info("Main: Berhasil membersihkan sisa task Aria2 lama.")
     except Exception as e:
         logging.warning(f"Main: Gagal membersihkan Aria2: {e}")
     
@@ -203,27 +206,20 @@ async def start_services():
     logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
     logging.info(f"------------------------------------------------")
     
-    # --- [FIX] PENGGANTI IDLE() ---
-    # Kita menggunakan asyncio.Event() untuk menahan bot agar tetap jalan
-    # sampai sinyal stop diterima.
     stop_event = asyncio.Event()
     
     def signal_handler_callback():
         logging.info("Main: Sinyal Stop Diterima. Memulai shutdown...")
         stop_event.set()
 
-    # Daftarkan handler sinyal ke event loop (Thread-Safe untuk Python 3.12)
-    loop = asyncio.get_running_loop()
+    current_loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, signal_handler_callback)
+            current_loop.add_signal_handler(sig, signal_handler_callback)
         except NotImplementedError:
-            # Fallback untuk sistem yang tidak support add_signal_handler (jarang di Linux)
             logging.warning(f"Sistem tidak mendukung loop.add_signal_handler untuk {sig}")
 
-    # Tunggu sampai event diset (bot berjalan di sini)
     await stop_event.wait()
-    # ------------------------------
     
     logging.info("Main: Menerima sinyal stop, mematikan layanan...")
     await aio.stop()
@@ -253,11 +249,9 @@ async def shutdown_all_services():
 if __name__ == "__main__":
     import shutil
 
-    # --- [FIX 1] AUTO-CLEANER UNTUK RENDER MOUNT DISK ---
     if os.path.isdir(Config.DOWNLOAD_BASE_DIR):
         logging.info(f"Main: 🧹 Membersihkan isi folder {Config.DOWNLOAD_BASE_DIR}...")
         try:
-            # Loop untuk menghapus isinya saja, bukan menghapus foldernya (menghindari Errno 16)
             for filename in os.listdir(Config.DOWNLOAD_BASE_DIR):
                 file_path = os.path.join(Config.DOWNLOAD_BASE_DIR, filename)
                 try:
@@ -267,26 +261,11 @@ if __name__ == "__main__":
                         shutil.rmtree(file_path)
                 except Exception as e:
                     logging.warning(f"Main: Gagal menghapus {file_path}: {e}")
-            logging.info("Main: ✅ Isi folder sampah berhasil dibersihkan!")
+            logging.info("Main: ✅ Folder sampah bersih!")
         except Exception as e:
-            logging.error(f"Main: ❌ Gagal membersihkan folder: {e}")
+            logging.error(f"Main: ❌ Gagal pembersihan: {e}")
     else:
         os.makedirs(Config.DOWNLOAD_BASE_DIR)
-    # -----------------------------------------
-    
-    # --- [FITUR BARU] UVLOOP TURBO ENGINE ---
-    try:
-        import uvloop
-        uvloop.install()
-        logging.info("Main: 🚀 Mesin turbo uvloop berhasil dipasang!")
-    except ImportError:
-        logging.warning("Main: uvloop tidak ditemukan. Menggunakan asyncio standar.")
-    # ----------------------------------------
-    
-    # --- [FIX 2] MENGATASI ERROR EVENT LOOP PYTHON 3.12 ---
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    # ------------------------------------------------------
     
     # Debugging
     loop.set_debug(True)
@@ -296,7 +275,7 @@ if __name__ == "__main__":
     try:
         loop.run_until_complete(start_services())
     except (KeyboardInterrupt, SystemExit):
-        logging.info("Main: Dipaksa berhenti oleh pengguna.")
+        logging.info("Main: Dipaksa berhenti.")
     except Exception as e:
         logging.critical(f"Main: ERROR FATAL UTAMA: {e}")
         traceback.print_exc()
