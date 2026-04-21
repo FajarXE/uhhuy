@@ -16,6 +16,32 @@ import base64
 import hashlib
 import weakref
 
+# --- [TAMBAHKAN BLOK INI: SOCKS5 MONKEY PATCH] ---
+import socket
+import socks
+from config import Config # Pastikan mengambil config jika proxy dinamis
+
+# Ganti dengan kredensial SOCKS5 Anda (atau ambil dari Config)
+PROXY_HOST = getattr(Config, "SOCKS5_HOST", "123.45.67.89")
+PROXY_PORT = getattr(Config, "SOCKS5_PORT", 1080)
+PROXY_USER = getattr(Config, "SOCKS5_USER", None)
+PROXY_PASS = getattr(Config, "SOCKS5_PASS", None)
+
+if PROXY_HOST:
+    # rdns=True ekuivalen dengan socks5h (Resolve DNS via proxy)
+    socks.set_default_proxy(
+        socks.SOCKS5, 
+        PROXY_HOST, 
+        int(PROXY_PORT), 
+        rdns=True, 
+        username=PROXY_USER, 
+        password=PROXY_PASS
+    )
+    # Ini adalah eksekusi monkey-patching-nya
+    socket.socket = socks.socksocket
+    logging.getLogger("SpotifyAPI").info(f"🛡️ Socket Monkey-Patch Aktif: Semua trafik TCP/Librespot dialihkan ke {PROXY_HOST}:{PROXY_PORT}")
+# -------------------------------------------------
+
 # --- [WAJIB] Import Dataclass ---
 from config import Config
 from dataclasses import dataclass
