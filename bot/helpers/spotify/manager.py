@@ -20,39 +20,39 @@ class MockOrpheusConfig:
 class SpotifyManager:
     def __init__(self):
         self.session = None
+        # Path absolut sesuai LOG Anda
+        self.conf_path = os.path.join(os.getcwd(), "bot", "config", "spotify")
 
     async def initialize_clients(self):
-        logging.info("Spotify: Inisialisasi sistem...")
-        conf_path = os.path.join(os.getcwd(), "config", "spotify")
-        os.makedirs(conf_path, exist_ok=True)
+        logging.info(f"Spotify: Sinkronisasi file ke {self.conf_path}")
+        os.makedirs(self.conf_path, exist_ok=True)
 
-        # Ambil data dari MongoDB
         saved_creds = await database.get_bot_setting("spotify_creds")
         saved_user = await database.get_bot_setting("spotify_username")
 
         if saved_creds:
-            # Tulis ke file Metadata
-            with open(os.path.join(conf_path, "credentials.json"), "w") as f:
+            # Tulis kedua file ke folder 'bot/config/spotify'
+            with open(os.path.join(self.conf_path, "credentials.json"), "w") as f:
                 f.write(saved_creds)
-            # Tulis ke file Streaming (Librespot) - Menggunakan data yang sama
-            with open(os.path.join(conf_path, "librespot_credentials.json"), "w") as f:
+            with open(os.path.join(self.conf_path, "librespot_credentials.json"), "w") as f:
                 f.write(saved_creds)
-            logging.info("Spotify: Sesi berhasil dimuat ke sistem file.")
+            logging.info("Spotify: File sesi berhasil disalin ke disk.")
 
         settings_data = {
             "username": saved_user or "",
             "client_id": Config.SPOTIFY_CLIENT_ID,
             "client_secret": Config.SPOTIFY_CLIENT_SECRET,
-            "device_name": "Orpheus-Render-Bot"
+            "device_name": "Orpheus-Render"
         }
-        with open(os.path.join(conf_path, "settings.json"), "w") as f:
+        with open(os.path.join(self.conf_path, "settings.json"), "w") as f:
             json.dump(settings_data, f)
 
         try:
+            # Re-inisialisasi session agar membaca file terbaru
             self.session = await asyncio.to_thread(ModuleInterface, MockOrpheusConfig(settings_data))
-            logging.info(f"Spotify: Berhasil aktif (User: {saved_user})")
+            logging.info(f"Spotify: Mesin siap (User: {saved_user})")
         except Exception as e:
-            logging.error(f"Spotify Startup Error: {e}")
+            logging.error(f"Spotify Init Error: {e}")
 
     async def complete_login(self, url):
         try:
@@ -61,39 +61,30 @@ class SpotifyManager:
             code = params.get('code', [None])[0]
             if not code: return False
 
-            # Tukar kode menggunakan Client ID & Secret Anda
             auth_str = f"{Config.SPOTIFY_CLIENT_ID}:{Config.SPOTIFY_CLIENT_SECRET}"
             b64_auth = base64.b64encode(auth_str.encode()).decode()
             
             async with httpx.AsyncClient() as client:
                 resp = await client.post("https://accounts.spotify.com/api/token", data={
-                    "grant_type": "authorization_code", 
-                    "code": code,
+                    "grant_type": "authorization_code", "code": code,
                     "redirect_uri": "http://127.0.0.1:4381/login"
                 }, headers={"Authorization": f"Basic {b64_auth}"})
                 
                 token_data = resp.json()
-                if "access_token" not in token_data: 
-                    logging.error(f"Spotify Token Error: {token_data}")
-                    return False
+                if "access_token" not in token_data: return False
 
-                # Ambil Username
                 me = await client.get("https://api.spotify.com/v1/me", 
                                       headers={"Authorization": f"Bearer {token_data['access_token']}"})
                 username = me.json().get('id')
 
             token_data['expires_at'] = int(time.time()) + token_data.get('expires_in', 3600)
-            content = json.dumps(token_data)
-            
-            # Simpan ke Database
-            await database.set_bot_setting("spotify_creds", content)
+            await database.set_bot_setting("spotify_creds", json.dumps(token_data))
             await database.set_bot_setting("spotify_username", username)
             
-            # Restart mesin dengan token baru
             await self.initialize_clients()
             return True
-        except Exception as e:
-            logging.error(f"Complete Login Error: {e}")
+        exceptException as e:
+            logging.error(f"Login Error: {e}")
             return False
 
 spotify_manager = SpotifyManager()
