@@ -174,6 +174,7 @@ async def user_spotify_cb(client, query):
         return
         
     quality = {
+        "FLAC": "FLAC (Lossless)",
         "VERY_HIGH": "Ogg 320k",
         "HIGH": "Ogg 160k",
         "NORMAL": "Ogg 96k"
