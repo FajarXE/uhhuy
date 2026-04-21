@@ -122,4 +122,23 @@ class MongoDB:
             return {}
     # --------------------------------------
 
+    async def get_bot_setting(self, key: str):
+        """Mengambil pengaturan global bot dari koleksi music."""
+        try:
+            doc = await self.client.music.find_one({"_id": Config.BOT_USERNAME})
+            return doc.get(key) if doc else None
+        except Exception:
+            return None
+
+    async def set_bot_setting(self, key: str, value):
+        """Menyimpan pengaturan global bot ke koleksi music."""
+        try:
+            await self.client.music.update_one(
+                {"_id": Config.BOT_USERNAME},
+                {"$set": {key: value}},
+                upsert=True
+            )
+        except Exception:
+            logging.info(traceback.format_exc())
+
 database = MongoDB()
