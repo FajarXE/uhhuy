@@ -65,20 +65,26 @@ class SpotifyManager:
             auth_str = f"{Config.SPOTIFY_CLIENT_ID}:{Config.SPOTIFY_CLIENT_SECRET}"
             b64_auth = base64.b64encode(auth_str.encode()).decode()
             
-            # PERBAIKAN: Menggunakan 'proxy' bukan 'proxies'
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
-                resp = await client.post("http://accounts.spotify.com/api/token", data={
+            # Tambahkan follow_redirects=True dan pastikan HTTPS
+            async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True) as client:
+                # Menggunakan URL resmi Spotify dengan HTTPS
+                resp = await client.post("https://accounts.spotify.com/api/token", data={
                     "grant_type": "authorization_code", 
                     "code": code,
                     "redirect_uri": "http://127.0.0.1:4381/login"
                 }, headers={"Authorization": f"Basic {b64_auth}"})
                 
-                token_data = resp.json()
-                if "access_token" not in token_data: 
-                    logging.error(f"Token Error: {token_data}")
+                # Cek jika status bukan 200 sebelum mencoba baca JSON
+                if resp.status_code != 200:
+                    logging.error(f"Spotify Error {resp.status_code}: {resp.text}")
                     return False
 
-                me = await client.get("http://api.spotify.com/v1/me", 
+                token_data = resp.json()
+                if "access_token" not in token_data: 
+                    return False
+
+                # Ambil Username via HTTPS
+                me = await client.get("https://api.spotify.com/v1/me", 
                                       headers={"Authorization": f"Bearer {token_data['access_token']}"})
                 username = me.json().get('id')
 
