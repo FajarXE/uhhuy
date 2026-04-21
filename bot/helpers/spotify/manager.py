@@ -21,12 +21,18 @@ class SpotifyManager:
     def __init__(self):
         self.session = None
         self.conf_path = os.path.join(os.getcwd(), "bot", "config", "spotify")
-        # Proxy SOCKS5h Anda
+        # Gunakan huruf kecil untuk protokol proxy agar standar
         self.proxy = "socks5h://hdzire:hdzire@85.17.40.203:1080"
 
     async def initialize_clients(self):
-        logging.info(f"Spotify: Menyiapkan sesi via Proxy {self.proxy.split('@')[-1]}...")
+        logging.info(f"Spotify: Memaksa koneksi via Proxy {self.proxy.split('@')[-1]}...")
         os.makedirs(self.conf_path, exist_ok=True)
+
+        # --- PAKSA PROXY DI LEVEL SISTEM ---
+        os.environ['HTTP_PROXY'] = self.proxy
+        os.environ['HTTPS_PROXY'] = self.proxy
+        os.environ['ALL_PROXY'] = self.proxy
+        # ------------------------------------
 
         saved_creds = await database.get_bot_setting("spotify_creds")
         saved_user = await database.get_bot_setting("spotify_username")
@@ -42,7 +48,7 @@ class SpotifyManager:
             "client_id": Config.SPOTIFY_CLIENT_ID,
             "client_secret": Config.SPOTIFY_CLIENT_SECRET,
             "device_name": "Spotify Desktop",
-            "proxy": self.proxy,
+            "proxy": self.proxy, # Tetap masukkan di sini untuk Orpheus
             "bitrate": 320 
         }
         
@@ -65,25 +71,19 @@ class SpotifyManager:
             auth_str = f"{Config.SPOTIFY_CLIENT_ID}:{Config.SPOTIFY_CLIENT_SECRET}"
             b64_auth = base64.b64encode(auth_str.encode()).decode()
             
-            # Tambahkan follow_redirects=True dan pastikan HTTPS
+            # Gunakan follow_redirects=True dan proxy yang sudah kita set
             async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True) as client:
-                # Menggunakan URL resmi Spotify dengan HTTPS
                 resp = await client.post("https://accounts.spotify.com/api/token", data={
                     "grant_type": "authorization_code", 
                     "code": code,
                     "redirect_uri": "http://127.0.0.1:4381/login"
                 }, headers={"Authorization": f"Basic {b64_auth}"})
                 
-                # Cek jika status bukan 200 sebelum mencoba baca JSON
                 if resp.status_code != 200:
-                    logging.error(f"Spotify Error {resp.status_code}: {resp.text}")
+                    logging.error(f"Login Gagal: {resp.text}")
                     return False
 
                 token_data = resp.json()
-                if "access_token" not in token_data: 
-                    return False
-
-                # Ambil Username via HTTPS
                 me = await client.get("https://api.spotify.com/v1/me", 
                                       headers={"Authorization": f"Bearer {token_data['access_token']}"})
                 username = me.json().get('id')
