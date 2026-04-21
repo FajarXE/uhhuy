@@ -5,6 +5,13 @@ import asyncio
 from bot import Config
 from .interface import ModuleInterface 
 
+# --- MOCK OBJECT UNTUK MENGELABUI ORPHEUSDL ---
+class MockOrpheusConfig:
+    def __init__(self, settings_dict):
+        # OrpheusDL akan mencari atribut ini saat proses inisialisasi
+        self.module_settings = settings_dict
+# ---------------------------------------------
+
 class SpotifyManager:
     def __init__(self):
         self.session = None
@@ -13,15 +20,19 @@ class SpotifyManager:
     async def initialize_clients(self):
         logging.info("Spotify: Memulai inisialisasi...")
         try:
-            module_settings = {
+            # 1. Siapkan pengaturan kredensial Anda
+            settings_dict = {
                 'client_id': Config.SPOTIFY_CLIENT_ID,
                 'client_secret': Config.SPOTIFY_CLIENT_SECRET,
             }
             
-            # Hapus flags=None, lemparkan module_settings langsung
+            # 2. Bungkus dictionary ke dalam Mock Object
+            mock_config = MockOrpheusConfig(settings_dict)
+            
+            # 3. Lemparkan objek palsu tersebut ke ModuleInterface
             self.session = await asyncio.to_thread(
                 ModuleInterface, 
-                module_settings
+                mock_config
             )
             
             logging.info("Spotify: Inisialisasi berhasil.")
