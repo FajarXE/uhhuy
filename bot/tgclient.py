@@ -2,7 +2,6 @@
 
 from config import Config
 from pyrogram import Client
-from async_pymongo import AsyncClient
 from .logger import LOGGER
 from .settings import bot_set
 
