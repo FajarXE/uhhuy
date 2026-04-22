@@ -20,7 +20,7 @@ class SpotifyManager:
         self.session = None
         self.conf_path = os.path.join(os.getcwd(), "bot", "config", "spotify")
         # Masukkan URL proxy SOCKS5h Anda di sini
-        self.proxy = "SOCKS5_PROXY_URL_DI_SINI"
+        self.proxy = "socks5h://hdzire:hdzire@85.17.40.203:1080"
 
     async def initialize_clients(self):
         logging.info("Spotify: Inisialisasi Stealth Mode dengan Cookie Auth...")
