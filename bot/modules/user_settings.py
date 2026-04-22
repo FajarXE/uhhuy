@@ -166,47 +166,6 @@ async def del_vk_cmd(client, message):
 
 
 # ==================================
-# SPOTIFY USER SETTINGS
-# ==================================
-@Client.on_callback_query(filters.regex("^usS$"))
-async def user_spotify_cb(client, query):
-    if not await check_user(msg=query.message):
-        return
-        
-    quality = {
-        "FLAC": "FLAC (Lossless)",
-        "VERY_HIGH": "Ogg 320k",
-        "HIGH": "Ogg 160k",
-        "NORMAL": "Ogg 96k"
-    }
-    
-    user_id = query.from_user.id
-    
-    # [PERBAIKAN] Mengambil dari memory cache (bot_set)
-    current = bot_set.user_data.get(user_id, {}).get("spotify_qual", "VERY_HIGH")
-    
-    if current in quality:
-        quality[current] += ' ✅'
-        
-    text = "**PENGATURAN SPOTIFY PENGGUNA**\nPilih prioritas kualitas Spotify Anda:"
-    await edit_message(query.message, text, markup=us_spotify_button(quality))
-
-@Client.on_callback_query(filters.regex(r"^usS_(.+)"))
-async def user_spotify_qual_cb(client, query):
-    if not await check_user(msg=query.message):
-        return
-        
-    to_set = query.matches[0].group(1)
-    user_id = query.from_user.id
-    
-    # [PERBAIKAN] Menyimpan menggunakan format bawaan bot Anda yang benar
-    bot_set.user_data.setdefault(user_id, {})["spotify_qual"] = to_set
-    await database.save_user_settings(user_id, {"spotify_qual": to_set})
-    
-    await user_spotify_cb(client, query)
-
-
-# ==================================
 # BEATPORT PRIVATE AUTH (USER SETTINGS)
 # ==================================
 
