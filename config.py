@@ -449,19 +449,6 @@ class Config:
 # --- BATAS TAMBAHAN ---
 
 #--------------------
-# SPOTIFY
-#--------------------
-    # Default Client ID ini adalah ID umum, tapi disarankan pakai punya sendiri
-    # Daftar di developer.spotify.com
-    SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", "")
-    SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", "")
-    
-    # Variabel ini akan menyimpan JSON Token Login agar tidak hilang saat Restart di Render
-    SPOTIFY_CREDENTIALS_JSON = getenv("SPOTIFY_CREDENTIALS_JSON", None)
-#--------------------
-# --- BATAS TAMBAHAN ---
-
-#--------------------
 # RENDER MANAGEMENT
 #--------------------
     # API Key dari Dashboard Render -> Account Settings -> API Keys
