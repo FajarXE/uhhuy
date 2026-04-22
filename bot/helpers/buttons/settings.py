@@ -1296,10 +1296,6 @@ def lyrics_button(user_settings: dict, user_id):
 def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     buttons = []
     
-    # --- [TAMBAHAN BARU] SPOTIFY SETTINGS ---
-    buttons.append([InlineKeyboardButton(text="Spotify Quality", callback_data="usS")])
-    # ----------------------------------------
-    
     if tidal_manager:
         buttons.append([InlineKeyboardButton(text=f"Tidal Quality", callback_data=f"uset_tidal")])
         
@@ -1376,41 +1372,5 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster", style=style_poster)])
     
     buttons.append([InlineKeyboardButton(text="Close", callback_data="uset_close", style=ButtonStyle.DANGER)])
-    
-    return InlineKeyboardMarkup(buttons)
-
-
-# ==========================================
-# --- [TAMBAHAN BARU] FUNGSI BUTTON SPOTIFY ---
-# ==========================================
-def us_spotify_button(quality: dict):
-    buttons = []
-    
-    for key_data, display_text in quality.items():
-        # Cek apakah opsi ini sedang terpilih (ada tanda centang)
-        is_selected = "✅" in display_text
-        
-        # Atur warna: Hijau jika terpilih, Default jika tidak
-        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
-        
-        # Bersihkan teks dari emoji agar tampilan tombol rapi
-        clean_text = display_text.replace("✅", "").replace("️", "").strip()
-        
-        buttons.append([
-            InlineKeyboardButton(
-                text=clean_text, 
-                callback_data=f"usS_{key_data}", 
-                style=btn_style
-            )
-        ])
-        
-    # Tambahkan tombol Back dengan warna Biru
-    buttons.append([
-        InlineKeyboardButton(
-            text="🔙 Back", 
-            callback_data="uset_back", 
-            style=ButtonStyle.PRIMARY
-        )
-    ])
     
     return InlineKeyboardMarkup(buttons)
