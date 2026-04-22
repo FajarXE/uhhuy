@@ -259,14 +259,6 @@ except ImportError:
     async def start_khinsider(*args, **kwargs):
         raise NotImplementedError("Modul Khinsider belum diimplementasikan.")
 
-# Spotify
-try:
-    from ..helpers.spotify.handler import start_spotify
-except ImportError as e:
-    LOGGER.error(f"Gagal Import Spotify Handler: {e}")
-    async def start_spotify(*args, **kwargs):
-        raise NotImplementedError("Modul Spotify Rusak.")
-
 
 from ..helpers.message import send_message, check_user, fetch_user_details, edit_message
 
@@ -1023,25 +1015,6 @@ async def start_link(link: str, user: dict) -> None:
             return
         except Exception as e:
             LOGGER.error(f"Khinsider Gagal: {e}")
-            raise e
-
-    # -----------------------------------------
-    # Blok SPOTIFY (Kebal Peluru)
-    # -----------------------------------------
-    elif link.strip().startswith((
-        "http://googleusercontent.com/spotify.com/", 
-        "https://googleusercontent.com/spotify.com/",
-        "https://spotify.link", "spotify.link", 
-        "https://spoti.fi", "spoti.fi",
-        "https://open.spotify.com", "open.spotify.com"
-    )):
-        user['provider'] = 'Spotify'
-        try:
-            await start_spotify(link.strip(), user)
-            LOGGER.info("Spotify: Unduhan berhasil.")
-            return
-        except Exception as e:
-            LOGGER.error(f"Spotify Gagal: {e}")
             raise e
 
     else:
