@@ -87,7 +87,7 @@ except ImportError:
 # --- IMPORT BUTTONS ---
 # Pastikan Anda sudah menambahkan 'beatport_user_auth_buttons' di bot/helpers/buttons/settings.py
 from ..helpers.buttons.settings import (
-    usetting_button, tidal_quality_button, us_spotify_button,
+    usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
     bs_button, sc_button, np_button, id_button,
     bugs_button, lyrics_button, mv_button,
