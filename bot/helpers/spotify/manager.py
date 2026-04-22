@@ -1,5 +1,3 @@
-# [FILE: bot/helpers/spotify/manager.py]
-
 import os, time, json, logging, asyncio, httpx, base64, secrets
 from urllib.parse import urlparse, parse_qs
 from bot import Config
@@ -21,24 +19,26 @@ class SpotifyManager:
     def __init__(self):
         self.session = None
         self.conf_path = os.path.join(os.getcwd(), "bot", "config", "spotify")
-        # Proxy Anda
-        self.proxy = "socks5h://hdzire:hdzire@85.17.40.203:1080"
+        # Masukkan URL proxy SOCKS5h Anda di sini
+        self.proxy = "SOCKS5_PROXY_URL_DI_SINI"
 
     async def initialize_clients(self):
-        logging.info("Spotify: Inisialisasi Stealth Mode via Proxy...")
+        logging.info("Spotify: Inisialisasi Stealth Mode dengan Cookie Auth...")
         os.makedirs(self.conf_path, exist_ok=True)
 
-        # Hapus cache lama agar bersih dari error 403 sebelumnya
-        cache_path = os.path.join(self.conf_path, ".librespot_cache")
-        if os.path.exists(cache_path):
-            import shutil
-            shutil.rmtree(cache_path, ignore_errors=True)
+        # Pembersihan cache sistem untuk menghindari konflik sesi
+        import shutil
+        cache_dirs = [
+            os.path.join(self.conf_path, ".librespot_cache"),
+            os.path.join(os.getcwd(), ".cache")
+        ]
+        for d in cache_dirs:
+            if os.path.exists(d):
+                shutil.rmtree(d, ignore_errors=True)
 
         saved_creds = await database.get_bot_setting("spotify_creds")
         saved_user = await database.get_bot_setting("spotify_username")
-        
-        # ID Perangkat unik agar terlihat seperti HP baru
-        device_id = secrets.token_hex(20)
+        sp_dc = await database.get_bot_setting("spotify_sp_dc")
 
         if saved_creds:
             with open(os.path.join(self.conf_path, "credentials.json"), "w") as f:
@@ -46,13 +46,15 @@ class SpotifyManager:
             with open(os.path.join(self.conf_path, "librespot_credentials.json"), "w") as f:
                 f.write(saved_creds)
 
+        # Menyamar sebagai perangkat mobile untuk meminimalkan deteksi
         settings_data = {
             "username": saved_user or "",
             "client_id": Config.SPOTIFY_CLIENT_ID,
             "client_secret": Config.SPOTIFY_CLIENT_SECRET,
             "device_name": "iPhone 15 Pro",
-            "device_id": device_id,
+            "device_id": secrets.token_hex(20),
             "proxy": self.proxy,
+            "sp_dc": sp_dc if sp_dc else "",
             "bitrate": 320,
             "is_premium": True
         }
@@ -61,7 +63,7 @@ class SpotifyManager:
             json.dump(settings_data, f)
 
         try:
-            # Set environment proxy untuk library pendukung
+            # Paksa library pendukung menggunakan proxy via Environment Variables
             os.environ['HTTP_PROXY'] = self.proxy
             os.environ['HTTPS_PROXY'] = self.proxy
             
@@ -80,9 +82,8 @@ class SpotifyManager:
             auth_str = f"{Config.SPOTIFY_CLIENT_ID}:{Config.SPOTIFY_CLIENT_SECRET}"
             b64_auth = base64.b64encode(auth_str.encode()).decode()
             
-            # MENGGUNAKAN URL RESMI SPOTIFY
             async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True) as client:
-                # 1. Tukar Token
+                # Pertukaran kode otorisasi dengan token akses
                 resp = await client.post("https://accounts.spotify.com/api/token", data={
                     "grant_type": "authorization_code", 
                     "code": code,
@@ -95,14 +96,14 @@ class SpotifyManager:
 
                 token_data = resp.json()
                 
-                # 2. Ambil Info User (Cek Wilayah)
+                # Pengambilan informasi profil pengguna
                 me = await client.get("https://api.spotify.com/v1/me", 
                                       headers={"Authorization": f"Bearer {token_data['access_token']}"})
                 me_json = me.json()
                 username = me_json.get('id')
                 country = me_json.get('country', 'Unknown')
                 
-                logging.info(f"✅ Login Sukses! Region Akun: {country}")
+                logging.info(f"Spotify: Login Sukses! Region Akun: {country}")
 
             token_data['expires_at'] = int(time.time()) + token_data.get('expires_in', 3600)
             await database.set_bot_setting("spotify_creds", json.dumps(token_data))
