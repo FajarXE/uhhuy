@@ -290,13 +290,20 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     from bot.helpers.message import edit_message
                     
                     # --- Broadcast pembaruan ke semua radar DENGAN MEMORI HALAMAN! ---
-                    for cid, m in targets.items():
+                    for cid, m in list(targets.items()):
+                        # [FIX] Jika pesan UI lama ini sedang menampilkan "💤", HAPUS!
+                        # Ini mencegah task baru membajak (hijack) pesan kosong tersebut.
+                        old_txt = getattr(m, "text", "") or getattr(m, "caption", "") or ""
+                        if "💤" in old_txt:
+                            try: await m.delete()
+                            except: pass
+                            if cid in GLOBAL_UI_MSG: GLOBAL_UI_MSG.pop(cid, None)
+                            continue
+
                         current_page = GLOBAL_UI_PAGES.get(cid, 1)
                         global_text, global_markup = get_status_text(page=current_page)
-                        try: 
-                            await edit_message(m, global_text, global_markup, False)
-                        except Exception: 
-                            pass
+                        try: await edit_message(m, global_text, global_markup, False)
+                        except Exception: pass
                     # ------------------------------------------------------------------
                 except Exception: pass
                 last_update_time = now
