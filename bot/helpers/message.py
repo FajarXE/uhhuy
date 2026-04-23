@@ -238,6 +238,18 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 
                 speed_ul = speed
 
+                # --- DIKEMBALIKAN: Variabel penyusun teks agar struktur tidak rusak ---
+                text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
+                text_to_send += f"**Since**: {since_str}\n\n"
+                text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
+                text_to_send += f"**Processed_bytes**: {done_str} of {total_str}\n"
+                text_to_send += f"**Current_Speed**: {speed_str} | **ETA**: {eta_str}\n"
+                text_to_send += f"**Machine_type**: Telegram API\n"
+                text_to_send += f"**Destination_mode**: {dest_mode}\n"
+                text_to_send += f"**Cancel**: /cancel_{cancel_id}\n\n"
+                text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
+                # ----------------------------------------------------------------------
+
                 # --- [FIX MUTLAK] HANCURKAN TASK DARI MEMORI JIKA SUDAH 100% ---
                 if current >= total and total > 0:
                     try:
