@@ -193,11 +193,12 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         except: pass
             # ---------------------------------------------------
                 
-            if not msg:
-                return 
+            # [FIX]: Baris 'if not msg: return' DIHAPUS agar sistem Radar tetap bisa menerima update dari memori
 
             now = time.time()
-            if msg and (now - last_update_time > 3.0 or current == total):
+            
+            # [FIX]: Pengecekan syarat 'msg' ikut DIHAPUS di sini
+            if now - last_update_time > 3.0 or current == total:
                 diff = now - start_time
                 if diff < 1: diff = 1
                 
@@ -238,7 +239,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 
                 speed_ul = speed
 
-                # --- DIKEMBALIKAN: Variabel penyusun teks agar struktur tidak rusak ---
+                # --- Variabel penyusun teks ---
                 text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
                 text_to_send += f"**Since**: {since_str}\n\n"
                 text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
@@ -248,7 +249,6 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 text_to_send += f"**Destination_mode**: {dest_mode}\n"
                 text_to_send += f"**Cancel**: /cancel_{cancel_id}\n\n"
                 text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
-                # ----------------------------------------------------------------------
 
                 # --- [FIX MUTLAK] HANCURKAN TASK DARI MEMORI JIKA SUDAH 100% ---
                 if current >= total and total > 0:
