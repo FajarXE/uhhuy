@@ -40,10 +40,9 @@ async def cancel_task_handler(client: Client, message: Message):
         
     # --- FIX: Jika ID tidak ada di Aria2 maupun di Task Global ---
     else:
-        # Cek apakah bot berada di Private Chat (Japri)
-        if message.chat.type == ChatType.PRIVATE:
+        # Cara absolut mengecek Private Chat (berlaku di semua fork Pyrogram)
+        if message.from_user and message.chat.id == message.from_user.id:
             await message.reply("❌ **Task tidak ditemukan atau sudah selesai.**")
-        # Jika berada di grup, bot akan mengabaikannya (tidak merespon)
 
 # --- TOMBOL PANIK / CLEAR BOARD (TANPA ANTREAN) ---
 @Client.on_message(filters.command(["clear_queue", "force_unlock", "clear_board"]))
