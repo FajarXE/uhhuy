@@ -272,6 +272,18 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 action = update_details.get('action', 'Download').capitalize()
                 task_type = update_details.get('type', 'Task').capitalize()
                 
+                # --- DIKEMBALIKAN: Variabel penyusun teks agar struktur tidak rusak ---
+                text_to_send = f"**{action} {task_type}**: `{title}`\n"
+                text_to_send += f"**Since**: {since_str}\n\n"
+                text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
+                text_to_send += f"**Processed_tasks**: {completed_tasks} of {total_tasks}\n"
+                text_to_send += f"**Current_Speed**: {speed_str}\n"
+                text_to_send += f"**Machine_type**: Aria2c 1.37.0\n"
+                text_to_send += f"**Destination_mode**: {dest_mode}\n"
+                text_to_send += f"**Cancel**: /cancel_{batch_id}\n\n"
+                text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
+                # ----------------------------------------------------------------------
+                
                 # --- [FIX MUTLAK] HANCURKAN BATCH TASK JIKA SUDAH SELESAI ---
                 if completed_tasks >= total_tasks and total_tasks > 0:
                     from bot.helpers.utils import GLOBAL_TASKS
