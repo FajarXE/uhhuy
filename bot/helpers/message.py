@@ -193,12 +193,14 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         except: pass
             # ---------------------------------------------------
                 
-            # [FIX]: Baris 'if not msg: return' DIHAPUS agar sistem Radar tetap bisa menerima update dari memori
-
             now = time.time()
             
-            # [FIX]: Pengecekan syarat 'msg' ikut DIHAPUS di sini
-            if now - last_update_time > 3.0 or current == total:
+            # --- [FIX MUTLAK] MENCEGAH BLIND SPOT 3 DETIK (TASK HILANG DI AWAL UPLOAD) ---
+            from bot.helpers.utils import GLOBAL_TASKS
+            is_new_task = cancel_id not in GLOBAL_TASKS
+            
+            # Jika ini task baru masuk memori ATAU sudah lewat 3 detik ATAU mencapai 100%
+            if is_new_task or (now - last_update_time > 3.0) or current >= total:
                 diff = now - start_time
                 if diff < 1: diff = 1
                 
@@ -253,14 +255,12 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 # --- [FIX MUTLAK] HANCURKAN TASK DARI MEMORI JIKA SUDAH 100% ---
                 if current >= total and total > 0:
                     try:
-                        from bot.helpers.utils import GLOBAL_TASKS
                         if cancel_id in GLOBAL_TASKS:
                             GLOBAL_TASKS.pop(cancel_id, None)
                     except Exception:
                         pass
                 else:
                     try:
-                        from bot.helpers.utils import GLOBAL_TASKS
                         GLOBAL_TASKS[cancel_id] = {
                             'action': action,
                             'type': task_type,
@@ -315,6 +315,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         except Exception: 
                             pass
                 except Exception: pass
+                
+                # Update waktu hanya jika blok update berjalan
                 last_update_time = now
                                 
         try:
