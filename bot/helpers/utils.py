@@ -316,12 +316,19 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                     
                     from bot.helpers.message import edit_message
                     
-                    for cid, m in targets.items():
+                    for cid, m in list(targets.items()):
+                        # [FIX] Cek jika pesan sebelumnya adalah "💤", hapus dan lupakan
+                        old_txt = getattr(m, "text", "") or getattr(m, "caption", "") or ""
+                        if "💤" in old_txt:
+                            try: await m.delete()
+                            except: pass
+                            if cid in GLOBAL_UI_MSG: GLOBAL_UI_MSG.pop(cid, None)
+                            continue
+
                         current_page = GLOBAL_UI_PAGES.get(cid, 1)
                         g_text, g_markup = get_status_text(page=current_page)
                         try: await edit_message(m, g_text, g_markup, False)
                         except: pass
-                except: pass
             
             # ANTI-FLOODWAIT BATCH TASK: Diubah agar update lebih jarang tapi loop tetap responsif terhadap cancel
             for _ in range(100): # Naik jadi ~10.0 detik jeda UI Update
@@ -680,17 +687,19 @@ async def progress_message(done, total, details):
                 
         from bot.helpers.message import edit_message
         
-        for cid, m in targets.items():
+        for cid, m in list(targets.items()):
+            # [FIX] Cek jika pesan sebelumnya adalah "💤", langsung hapus agar tidak nimbrung
+            old_txt = getattr(m, "text", "") or getattr(m, "caption", "") or ""
+            if "💤" in old_txt:
+                try: await m.delete()
+                except: pass
+                if cid in GLOBAL_UI_MSG: GLOBAL_UI_MSG.pop(cid, None)
+                continue
+
             current_page = GLOBAL_UI_PAGES.get(cid, 1) 
             g_text, g_markup = get_status_text(page=current_page)
-            
-            try: 
-                await edit_message(m, g_text, g_markup, False)
-            except: 
-                pass
-    except FloodWait: pass
-    except MessageNotModified: pass
-    except Exception: pass
+            try: await edit_message(m, g_text, g_markup, False)
+            except: pass
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
