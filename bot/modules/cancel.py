@@ -32,9 +32,14 @@ async def cancel_task_handler(client: Client, message: Message):
         else:
             await message.reply("❌ **Gagal membatalkan unduhan Aria2.**")
             
-    else:
+    # --- FIX: Validasi apakah ID ada di daftar task global ---
+    elif gid in GLOBAL_TASKS:
         GLOBAL_CANCEL_DICT.add(gid)
         await message.reply(f"🛑 **Sinyal Batal Dikirim!**\nProses akan segera dihentikan.")
+        
+    # --- FIX: Jika ID tidak ada di Aria2 maupun di Task Global ---
+    else:
+        await message.reply("❌ **Task tidak ditemukan atau sudah selesai.**")
 
 # --- TOMBOL PANIK / CLEAR BOARD (TANPA ANTREAN) ---
 @Client.on_message(filters.command(["clear_queue", "force_unlock", "clear_board"]))
