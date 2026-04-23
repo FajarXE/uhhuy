@@ -3,6 +3,7 @@
 import re
 from pyrogram import Client, filters
 from pyrogram.types import Message
+from pyrogram.enums import ChatType
 from bot.helpers.aria2_helper import aria2_cancel, ACTIVE_DOWNLOADS
 from bot.helpers.utils import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
 from bot.settings import bot_set
@@ -39,7 +40,10 @@ async def cancel_task_handler(client: Client, message: Message):
         
     # --- FIX: Jika ID tidak ada di Aria2 maupun di Task Global ---
     else:
-        await message.reply("❌ **Task tidak ditemukan atau sudah selesai.**")
+        # Cek apakah bot berada di Private Chat (Japri)
+        if message.chat.type == ChatType.PRIVATE:
+            await message.reply("❌ **Task tidak ditemukan atau sudah selesai.**")
+        # Jika berada di grup, bot akan mengabaikannya (tidak merespon)
 
 # --- TOMBOL PANIK / CLEAR BOARD (TANPA ANTREAN) ---
 @Client.on_message(filters.command(["clear_queue", "force_unlock", "clear_board"]))
