@@ -193,14 +193,11 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         except: pass
             # ---------------------------------------------------
                 
+            if not msg:
+                return 
+
             now = time.time()
-            
-            # --- [FIX MUTLAK] MENCEGAH BLIND SPOT 3 DETIK (TASK HILANG DI AWAL UPLOAD) ---
-            from bot.helpers.utils import GLOBAL_TASKS
-            is_new_task = cancel_id not in GLOBAL_TASKS
-            
-            # Jika ini task baru masuk memori ATAU sudah lewat 3 detik ATAU mencapai 100%
-            if is_new_task or (now - last_update_time > 3.0) or current >= total:
+            if msg and (now - last_update_time > 3.0 or current == total):
                 diff = now - start_time
                 if diff < 1: diff = 1
                 
@@ -241,7 +238,6 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 
                 speed_ul = speed
 
-                # --- Variabel penyusun teks ---
                 text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
                 text_to_send += f"**Since**: {since_str}\n\n"
                 text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
@@ -252,37 +248,32 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 text_to_send += f"**Cancel**: /cancel_{cancel_id}\n\n"
                 text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
-                # --- [FIX MUTLAK] HANCURKAN TASK DARI MEMORI JIKA SUDAH 100% ---
-                if current >= total and total > 0:
-                    try:
-                        if cancel_id in GLOBAL_TASKS:
-                            GLOBAL_TASKS.pop(cancel_id, None)
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        GLOBAL_TASKS[cancel_id] = {
-                            'action': action,
-                            'type': task_type,
-                            'title': file_title,
-                            'since': since_str,
-                            'progress_bar': progress_bar,
-                            'percentage': f"{percentage:.2f}%",
-                            'processed_label': "Processed_bytes",
-                            'processed': f"{done_str} of {total_str}",
-                            'speed': speed_str,
-                            'machine': "Telegram API",
-                            'mode': dest_mode,
-                            'cancel_id': cancel_id,
-                            'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-                            'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-                            'speed_dl_raw': speed_dl,
-                            'speed_ul_raw': speed_ul,
-                            'user_id': msg.chat.id if msg else 0,
-                            'timestamp': now
-                        }
-                    except Exception:
-                        pass
+                # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS DI SINI ---
+                try:
+                    from bot.helpers.utils import GLOBAL_TASKS
+                    GLOBAL_TASKS[cancel_id] = {
+                        'action': action,
+                        'type': task_type,
+                        'title': file_title,
+                        'since': since_str,
+                        'progress_bar': progress_bar,
+                        'percentage': f"{percentage:.2f}%",
+                        'processed_label': "Processed_bytes",
+                        'processed': f"{done_str} of {total_str}",
+                        'speed': speed_str,
+                        'machine': "Telegram API",
+                        'mode': dest_mode,
+                        'cancel_id': cancel_id,
+                        'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+                        'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+                        'speed_dl_raw': speed_dl,  # <--- TAMBAHKAN INI
+                        'speed_ul_raw': speed_ul,  # <--- TAMBAHKAN INI
+                        'user_id': msg.chat.id if msg else 0,
+                        'timestamp': now
+                    }
+                    
+                except Exception:
+                    pass
                 # ------------------------------------------------
                 
                 # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
@@ -293,32 +284,23 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     targets = {}
                     if msg: targets[msg.chat.id] = msg
                     if GLOBAL_UI_MSG:
-                        for cid, m in list(GLOBAL_UI_MSG.items()): 
+                        for cid, m in list(GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list()
                             targets[cid] = m
                     
                     from bot.helpers.message import edit_message
                     
-                    for cid, m in list(targets.items()):
+                    # --- Broadcast pembaruan ke semua radar DENGAN MEMORI HALAMAN! ---
+                    for cid, m in targets.items():
                         current_page = GLOBAL_UI_PAGES.get(cid, 1)
                         global_text, global_markup = get_status_text(page=current_page)
-                        
-                        # --- [AUTO-DELETE] JIKA TEKS ADALAH "💤", HAPUS FISIK PESANNYA! ---
-                        if "💤" in global_text:
-                            try: await m.delete()
-                            except: pass
-                            if cid in GLOBAL_UI_MSG: GLOBAL_UI_MSG.pop(cid, None)
-                            continue
-                        # ------------------------------------------------------------------
-
                         try: 
                             await edit_message(m, global_text, global_markup, False)
                         except Exception: 
                             pass
+                    # ------------------------------------------------------------------
                 except Exception: pass
-                
-                # Update waktu hanya jika blok update berjalan
                 last_update_time = now
-                                
+
         try:
             res = None 
             final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
