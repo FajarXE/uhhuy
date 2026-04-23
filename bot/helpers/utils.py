@@ -272,36 +272,34 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 action = update_details.get('action', 'Download').capitalize()
                 task_type = update_details.get('type', 'Task').capitalize()
                 
-                text_to_send = f"**{action} {task_type}**: `{title}`\n"
-                text_to_send += f"**Since**: {since_str}\n\n"
-                text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
-                text_to_send += f"**Processed_tasks**: {completed_tasks} of {total_tasks}\n"
-                text_to_send += f"**Current_Speed**: {speed_str}\n"
-                text_to_send += f"**Machine_type**: Aria2c 1.37.0\n"
-                text_to_send += f"**Destination_mode**: {dest_mode}\n"
-                text_to_send += f"**Cancel**: /cancel_{batch_id}\n\n"
-                text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
-
-                GLOBAL_TASKS[batch_id] = {
-                    'action': action,
-                    'type': task_type,
-                    'title': title,
-                    'since': since_str,
-                    'progress_bar': progress_bar,
-                    'percentage': f"{percentage:.2f}%",
-                    'processed_label': "Processed_tasks",
-                    'processed': f"{completed_tasks} of {total_tasks}",
-                    'speed': speed_str,
-                    'machine': "Aria2c 1.37.0",
-                    'mode': dest_mode,
-                    'cancel_id': batch_id,
-                    'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-                    'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-                    'speed_dl_raw': speed_dl, 
-                    'speed_ul_raw': speed_ul, 
-                    'user_id': update_details['msg'].chat.id if update_details and update_details.get('msg') else 0,
-                    'timestamp': time.time()
-                }
+                # --- [FIX MUTLAK] HANCURKAN BATCH TASK JIKA SUDAH SELESAI ---
+                if completed_tasks >= total_tasks and total_tasks > 0:
+                    from bot.helpers.utils import GLOBAL_TASKS
+                    if batch_id in GLOBAL_TASKS:
+                        GLOBAL_TASKS.pop(batch_id, None)
+                else:
+                    from bot.helpers.utils import GLOBAL_TASKS
+                    GLOBAL_TASKS[batch_id] = {
+                        'action': action,
+                        'type': task_type,
+                        'title': title,
+                        'since': since_str,
+                        'progress_bar': progress_bar,
+                        'percentage': f"{percentage:.2f}%",
+                        'processed_label': "Processed_tasks",
+                        'processed': f"{completed_tasks} of {total_tasks}",
+                        'speed': speed_str,
+                        'machine': "Aria2c 1.37.0",
+                        'mode': dest_mode,
+                        'cancel_id': batch_id,
+                        'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+                        'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+                        'speed_dl_raw': speed_dl, 
+                        'speed_ul_raw': speed_ul, 
+                        'user_id': update_details['msg'].chat.id if update_details and update_details.get('msg') else 0,
+                        'timestamp': time.time()
+                    }
+                # ------------------------------------------------------------
                 
                 try: 
                     from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
@@ -317,20 +315,21 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                     from bot.helpers.message import edit_message
                     
                     for cid, m in list(targets.items()):
-                        # [FIX] Cek jika pesan sebelumnya adalah "💤", hapus dan lupakan
-                        old_txt = getattr(m, "text", "") or getattr(m, "caption", "") or ""
-                        if "💤" in old_txt:
+                        current_page = GLOBAL_UI_PAGES.get(cid, 1)
+                        g_text, g_markup = get_status_text(page=current_page)
+                        
+                        # --- [AUTO-DELETE] JIKA TEKS ADALAH "💤", HAPUS FISIK PESANNYA! ---
+                        if "💤" in g_text:
                             try: await m.delete()
                             except: pass
                             if cid in GLOBAL_UI_MSG: GLOBAL_UI_MSG.pop(cid, None)
                             continue
+                        # ------------------------------------------------------------------
 
-                        current_page = GLOBAL_UI_PAGES.get(cid, 1)
-                        g_text, g_markup = get_status_text(page=current_page)
                         try: await edit_message(m, g_text, g_markup, False)
                         except: pass
                 except: pass
-            
+
             # ANTI-FLOODWAIT BATCH TASK: Diubah agar update lebih jarang tapi loop tetap responsif terhadap cancel
             for _ in range(100): # Naik jadi ~10.0 detik jeda UI Update
                 if not is_running or batch_id in GLOBAL_CANCEL_DICT:
@@ -655,27 +654,34 @@ async def progress_message(done, total, details):
         speed_dl += speed
 
     from bot.helpers.utils import GLOBAL_TASKS
-    GLOBAL_TASKS[task_id] = {
-        'action': action,
-        'type': task_type,
-        'title': title,
-        'since': since_str,
-        'progress_bar': progress_bar,
-        'percentage': f"{percentage:.2f}%",
-        'processed_label': progress_label,
-        'processed': f"{done_str} of {total_str}",
-        'speed': speed_str,
-        'machine': machine,
-        'mode': dest_mode,
-        'cancel_id': task_id,
-        'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-        'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-        'speed_dl_raw': speed_dl,
-        'speed_ul_raw': speed_ul,
-        'user_id': details['msg'].chat.id if details and details.get('msg') else 0,
-        'timestamp': now
-    }
     
+    # --- [FIX MUTLAK] HANCURKAN TASK JIKA SUDAH 100% SELESAI ---
+    if done >= total and total > 0:
+        if task_id in GLOBAL_TASKS:
+            GLOBAL_TASKS.pop(task_id, None)
+    else:
+        GLOBAL_TASKS[task_id] = {
+            'action': action,
+            'type': task_type,
+            'title': title,
+            'since': since_str,
+            'progress_bar': progress_bar,
+            'percentage': f"{percentage:.2f}%",
+            'processed_label': progress_label,
+            'processed': f"{done_str} of {total_str}",
+            'speed': speed_str,
+            'machine': machine,
+            'mode': dest_mode,
+            'cancel_id': task_id,
+            'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+            'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+            'speed_dl_raw': speed_dl,
+            'speed_ul_raw': speed_ul,
+            'user_id': details['msg'].chat.id if details and details.get('msg') else 0,
+            'timestamp': now
+        }
+    # -----------------------------------------------------------
+
     from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
     try: 
         targets = {}
@@ -689,17 +695,20 @@ async def progress_message(done, total, details):
         from bot.helpers.message import edit_message
         
         for cid, m in list(targets.items()):
-            # [FIX] Cek jika pesan sebelumnya adalah "💤", langsung hapus agar tidak nimbrung
-            old_txt = getattr(m, "text", "") or getattr(m, "caption", "") or ""
-            if "💤" in old_txt:
-                try: await m.delete()
-                except: pass
-                if cid in GLOBAL_UI_MSG: GLOBAL_UI_MSG.pop(cid, None)
-                continue
-
             current_page = GLOBAL_UI_PAGES.get(cid, 1) 
             g_text, g_markup = get_status_text(page=current_page)
             
+            # --- [AUTO-DELETE] JIKA TEKS ADALAH "💤", HAPUS FISIK PESANNYA! ---
+            if "💤" in g_text:
+                try: 
+                    await m.delete()
+                except: 
+                    pass
+                if cid in GLOBAL_UI_MSG: 
+                    GLOBAL_UI_MSG.pop(cid, None)
+                continue
+            # ------------------------------------------------------------------
+                
             try: 
                 await edit_message(m, g_text, g_markup, False)
             except: 
