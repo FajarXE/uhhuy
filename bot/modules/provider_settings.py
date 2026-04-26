@@ -49,11 +49,6 @@ except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor soundcloud_manager.")
     soundcloud_manager = None
 try:
-    from ..helpers.napster.manager import napster_manager
-except ImportError:
-    LOGGER.warning("ProviderSettings: Gagal mengimpor napster_manager.")
-    napster_manager = None
-try:
     from ..helpers.idagio.manager import idagio_manager
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor idagio_manager.")
@@ -533,55 +528,6 @@ async def kkbox_quality_cb(c, cb:CallbackQuery):
 
 
 #----------------
-# NAPSTER
-#----------------
-@Client.on_callback_query(filters.regex(pattern=r"^npP")) 
-async def napster_cb(c, cb:CallbackQuery):
-    if await check_user(cb.from_user.id, restricted=True):
-        quality = {
-            "FLAC": "FLAC (HiRes/Lossless)",
-            "MP3_320": "AAC 320k",
-            "MP3_192": "AAC 192k",
-            "MP3_128": "AAC 128k",
-            "MP3_64": "HE-AAC 64k"
-        }
-        if not napster_manager or not napster_manager.clients:
-            return await edit_message(cb.message, "Layanan Napster tidak aktif (tidak ada klien yang login).")
-        
-        current = napster_manager.quality 
-        if current in quality:
-            quality[current] = quality[current] + '✅'
-        
-        await edit_message(
-            cb.message,
-            "Pilih kualitas default untuk Napster:\n(Kualitas akhir tergantung langganan akun bot)",
-            markup=np_button(quality)
-        )
-
-@Client.on_callback_query(filters.regex(pattern=r"^npQ")) 
-async def napster_quality_cb(c, cb:CallbackQuery):
-    if await check_user(cb.from_user.id, restricted=True):
-        qual_map_display = {
-            "FLAC (HiRes/Lossless)": "FLAC",
-            "AAC 320k": "MP3_320",
-            "AAC 192k": "MP3_192",
-            "AAC 128k": "MP3_128",
-            "HE-AAC 64k": "MP3_64"
-        }
-        to_set_display = cb.data.split('_')[1]
-        to_set = qual_map_display.get(to_set_display)
-        if not to_set:
-            return await c.answer_callback_query(cb.id, "Kualitas tidak valid.", True)
-        if not napster_manager or not napster_manager.clients:
-            return await edit_message(cb.message, "Layanan Napster tidak aktif.")
-        
-        napster_manager.quality = to_set
-        await database.set_variable('NAPSTER_QUALITY', to_set)
-        
-        await napster_cb(c, cb)
-
-
-#----------------
 # IDAGIO
 #----------------
 @Client.on_callback_query(filters.regex(pattern=r"^idP")) 
@@ -746,7 +692,7 @@ async def livephish_qual_cb(c, cb:CallbackQuery):
 
 
 #----------------
-# KHINSIDER (TAMBAHAN BARU)
+# KHINSIDER
 #----------------
 @Client.on_callback_query(filters.regex(pattern=r"^khiP")) 
 async def khinsider_cb(c, cb:CallbackQuery):
