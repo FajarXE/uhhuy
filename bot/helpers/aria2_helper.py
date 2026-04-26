@@ -5,7 +5,7 @@ import asyncio
 import aiohttp
 from bot.logger import LOGGER
 
-ARIA2_RPC_URL = "http://localhost:6800/jsonrpc"
+ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc"
 
 # Dictionary untuk menyimpan ID unduhan yang sedang berjalan
 ACTIVE_DOWNLOADS = {}
@@ -14,7 +14,8 @@ async def aria2_download(url, filepath, details=None):
     # Import di dalam fungsi untuk menghindari circular import
     from bot.helpers.utils import progress_message 
 
-    dir_path = os.path.dirname(filepath)
+    # --- FIX: Ubah path menjadi Absolut agar daemon Aria2 tidak nyasar ---
+    dir_path = os.path.abspath(os.path.dirname(filepath))
     file_name = os.path.basename(filepath)
     
     # --- [FIX ARIA2] KEMAMPUAN MEMAKAI TOPENG (HEADERS) ---
@@ -155,20 +156,20 @@ async def get_aria2_global_stat():
         "params": []
     }
     
-    # URL harus sama dengan yang ada di bagian atas file aria2_helper.py
-    ARIA2_RPC_URL = "http://localhost:6800/jsonrpc" 
+    # Pastikan URL di dalam fungsi juga menggunakan IP statis
+    ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc" 
     
     try:
-        # Gunakan aiohttp untuk melakukan request ke daemon Aria2
         import aiohttp
         async with aiohttp.ClientSession() as session:
             async with session.post(ARIA2_RPC_URL, json=payload) as resp:
                 res = await resp.json()
                 if "error" not in res:
                     return res["result"]
-    except Exception as e:
-        from bot.logger import LOGGER
-        LOGGER.error(f"Gagal mengambil Global Stat Aria2: {e}")
+    except Exception:
+        # [FIX] Hapus/Bungkam LOGGER.error di sini agar tidak membanjiri log 
+        # saat Aria2 sedang dimuat ulang atau gagal berjalan.
+        pass
         
     return None
 
