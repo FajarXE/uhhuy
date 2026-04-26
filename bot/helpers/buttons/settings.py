@@ -67,12 +67,6 @@ try:
 except ImportError:
     soundcloud_manager = _DummyManager()
 
-# Impor Manajer Napster
-try:
-    from bot.helpers.napster.manager import napster_manager
-except ImportError:
-    napster_manager = _DummyManager()
-
 # Impor Manajer Idagio
 try:
     from bot.helpers.idagio.manager import idagio_manager
@@ -210,16 +204,6 @@ def providers_button():
                 InlineKeyboardButton(
                     text="KKBOX", 
                     callback_data='kkbP'
-                )
-            ]
-        )
-    
-    if napster_manager and napster_manager.clients:
-        inline_keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text="NAPSTER", 
-                    callback_data='npP'
                 )
             ]
         )
@@ -944,57 +928,6 @@ def kk_button(quality: dict, user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
-def np_button(quality: dict, user_id: int = None):
-    buttons = []
-    usetting = user_id is not None
-    prefix = "npQ" if not usetting else f"unps"
-    row = []
-    
-    display_text_map = {
-        "FLAC": "FLAC (HiRes/Lossless)",
-        "MP3_320": "AAC 320k",
-        "MP3_192": "AAC 192k",
-        "MP3_128": "AAC 128k",
-        "MP3_64": "HE-AAC 64k"
-    }
-    
-    for i, (key, value) in enumerate(quality.items()):
-        # Ambil teks bersih dari map
-        clean_text = display_text_map.get(key)
-        
-        # 1. Cek Warna: Gunakan value asli (yang mungkin ada emoji ✅)
-        is_selected = "✅" in value
-        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
-
-        if clean_text:
-            # 2. Buat Tombol: 
-            # text=clean_text -> Agar tampilan tombol bersih (Tanpa Emoji)
-            row.append(InlineKeyboardButton(
-                text=clean_text, 
-                callback_data=f"{prefix}_{clean_text}", 
-                style=btn_style
-            ))
-            
-        # Logika baris (max 2 tombol per baris)
-        if (i + 1) % 2 == 0 or i == len(quality) - 1:
-            buttons.append(row)
-            row = []
-            
-    if usetting:
-        # Jika Anda ingin menambahkan tombol Auth Napster (Opsional, sesuaikan kebutuhan)
-        # buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_nap_auth", style=ButtonStyle.PRIMARY)])
-        
-        buttons.append(
-            [
-                InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
-            ]
-        )
-        return InlineKeyboardMarkup(buttons)
-        
-    main_button, close_button = fetch_base_buttons()
-    buttons += main_button + close_button
-    return InlineKeyboardMarkup(buttons)
-
 def id_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
@@ -1331,9 +1264,6 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     
     if kkbox_manager and kkbox_manager.clients:
         buttons.append([InlineKeyboardButton(text=f"KKBox Quality", callback_data=f"uset_kkbox")])
-    
-    if napster_manager and napster_manager.clients:
-        buttons.append([InlineKeyboardButton(text=f"Napster Quality", callback_data=f"uset_napster")])
     
     if idagio_manager and idagio_manager.clients:
         buttons.append([InlineKeyboardButton(text=f"Idagio Quality", callback_data=f"uset_idagio")])
