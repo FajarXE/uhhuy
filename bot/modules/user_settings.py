@@ -44,11 +44,6 @@ except ImportError:
     logging.warning("UserSettings: Gagal mengimpor soundcloud_manager.")
     soundcloud_manager = None
 try:
-    from ..helpers.napster.manager import napster_manager
-except ImportError:
-    logging.warning("UserSettings: Gagal mengimpor napster_manager.")
-    napster_manager = None
-try:
     from ..helpers.idagio.manager import idagio_manager
 except ImportError:
     logging.warning("UserSettings: Gagal mengimpor idagio_manager.")
@@ -89,8 +84,7 @@ except ImportError:
 from ..helpers.buttons.settings import (
     usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
-    bs_button, sc_button, np_button, id_button,
-    bugs_button, lyrics_button, mv_button,
+    bs_button, sc_button, id_button, bugs_button, lyrics_button, mv_button,
     lp_button, khi_button, beatport_user_auth_buttons, beatsource_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons
 )
 from ..helpers.database.mongo_async import database
@@ -1241,27 +1235,6 @@ async def uset_cb(client, query, datatype=""):
             quality[current] = quality[current] + '✅'
         return await edit_message(query.message, text, markup=kk_button(quality, user_id))
 
-    # --- NAPSTER MENU ---
-    if data[1] == "napster" or datatype == "napster":
-        text = f"Choose Napster Audio Quality bellow:"
-        quality = {
-            "FLAC": "FLAC (HiRes/Lossless)",
-            "MP3_320": "AAC 320k",
-            "MP3_192": "AAC 192k",
-            "MP3_128": "AAC 128k",
-            "MP3_64": "HE-AAC 64k"
-        }
-        if not napster_manager or not napster_manager.clients:
-            return await edit_message(query.message, "Layanan Napster tidak aktif (tidak ada klien yang login).")
-        
-        main_user_dict = bot_set.user_data.get(user_id, {})
-        current = main_user_dict.get("napster_qual", napster_manager.quality) 
-        await napster_manager.setup_quality(user_id, current)
-        
-        if current in quality:
-            quality[current] = quality[current] + '✅'
-        return await edit_message(query.message, text + "\n(Kualitas akhir tergantung langganan akun bot)", markup=np_button(quality, user_id))
-
     # --- IDAGIO MENU ---
     if data[1] == "idagio" or datatype == "idagio":
         text = f"Choose Idagio Audio Quality bellow:"
@@ -1738,35 +1711,6 @@ async def uset_kkbox(client, query):
     await uset_cb(client, query, "kkbox")
 
 
-# --- HANDLER NAPSTER SPECIFIC ---
-@Client.on_callback_query(filters.regex("^unps"))
-async def uset_napster(client, query):
-    m = query.message
-    if not await check_user(msg=m):
-        return
-    qual_map_display = {
-        "FLAC (HiRes/Lossless)": "FLAC",
-        "AAC 320k": "MP3_320",
-        "AAC 192k": "MP3_192",
-        "AAC 128k": "MP3_128",
-        "HE-AAC 64k": "MP3_64"
-    }
-    to_set_display = query.data.split('_')[1]
-    to_set = qual_map_display.get(to_set_display)
-    if not to_set:
-        return await query.answer("Kualitas tidak valid.", True)
-    if not napster_manager or not napster_manager.clients:
-        await query.answer("Layanan Napster tidak aktif!", show_alert=True)
-        return
-    user_id = query.from_user.id
-    
-    await napster_manager.setup_quality(user_id, to_set) 
-    bot_set.user_data.setdefault(user_id, {})['napster_qual'] = to_set 
-    await database.save_user_settings(user_id, {'napster_qual': to_set})
-
-    await uset_cb(client, query, "napster")
-
-
 # --- HANDLER IDAGIO SPECIFIC ---
 @Client.on_callback_query(filters.regex("^uids"))
 async def uset_idagio(client, query):
@@ -2084,15 +2028,6 @@ async def debug(c, m):
         dt_kk += f"Cache User (Global): {len([u for u in bot_set.user_data if 'kkbox_qual' in bot_set.user_data[u]])} pengguna"
     else:
         dt_kk += "Tidak ada klien KKBox yang aktif."
-
-    # NAPSTER DEBUG
-    dt_np = "\n\nNAPSTER:\n"
-    if napster_manager and napster_manager.clients:
-        dt_np += f"{len(napster_manager.clients)} klien Napster aktif.\n"
-        dt_np += f"Kualitas Default: {napster_manager.quality}\n"
-        dt_np += f"Cache User (Global): {len([u for u in bot_set.user_data if 'napster_qual' in bot_set.user_data[u]])} pengguna"
-    else:
-        dt_np += "Tidak ada klien Napster yang aktif."
     
     # IDAGIO DEBUG
     dt_id = "\n\nIDAGIO:\n"
@@ -2153,7 +2088,7 @@ async def debug(c, m):
     zips = f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
     
     # Combine all debug texts
-    final_debug_text = dt_qb + dt_bp + dt_bs + dt_sc + dt_dz + dt_td + dt_kk + dt_np + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + zips
+    final_debug_text = dt_qb + dt_bp + dt_bs + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + zips
     
     # Reply safely
     await m.reply(final_debug_text, True)
