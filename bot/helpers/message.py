@@ -197,7 +197,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 return 
 
             now = time.time()
-            if msg and (now - last_update_time > 3.0 or current == total):
+            if msg and (now - last_update_time > 10.0 or current == total):
                 diff = now - start_time
                 if diff < 1: diff = 1
                 
@@ -290,7 +290,15 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     from bot.helpers.message import edit_message
                     
                     # --- Broadcast pembaruan ke semua radar DENGAN MEMORI HALAMAN! ---
+                    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES, GLOBAL_UI_LAST_UPDATE
+                    
                     for cid, m in targets.items():
+                        msg_id = m.id
+                        # Pasang rem yang sama saat proses upload
+                        if msg_id in GLOBAL_UI_LAST_UPDATE and (now - GLOBAL_UI_LAST_UPDATE[msg_id] < 10.0) and current < total:
+                            continue
+                            
+                        GLOBAL_UI_LAST_UPDATE[msg_id] = now
                         current_page = GLOBAL_UI_PAGES.get(cid, 1)
                         global_text, global_markup = get_status_text(page=current_page)
                         try: 
