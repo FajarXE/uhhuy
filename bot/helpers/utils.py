@@ -34,6 +34,7 @@ GLOBAL_CANCEL_DICT = set()
 GLOBAL_TASKS = {}
 GLOBAL_UI_MSG = {}
 GLOBAL_UI_PAGES = {}
+GLOBAL_UI_LAST_UPDATE = {}
 
 # PENGHAPUSAN: GLOBAL_TASK_LOCK dan GLOBAL_QUEUE_COUNT telah dihapus.
 
@@ -681,6 +682,12 @@ async def progress_message(done, total, details):
         from bot.helpers.message import edit_message
         
         for cid, m in targets.items():
+            msg_id = m.id
+            # Rem Per-Pesan: Blokir update jika pesan baru diedit < 10 detik yang lalu
+            if msg_id in GLOBAL_UI_LAST_UPDATE and (now - GLOBAL_UI_LAST_UPDATE[msg_id] < 10.0) and done < total:
+                continue
+                
+            GLOBAL_UI_LAST_UPDATE[msg_id] = now
             current_page = GLOBAL_UI_PAGES.get(cid, 1) 
             g_text, g_markup = get_status_text(page=current_page)
             
