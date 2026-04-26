@@ -73,27 +73,19 @@ try:
 except ImportError:
     moov_manager = None
 
-# 8. Napster
-try:
-    from bot.helpers.napster.manager import napster_manager
-    from bot.helpers.napster.manager import NapsterError
-except ImportError:
-    napster_manager = None
-    class NapsterError(Exception): pass
-
-# 9. Idagio
+# 8. Idagio
 try:
     from bot.helpers.idagio.manager import idagio_manager
 except ImportError:
     idagio_manager = None
 
-# 10. Nugs.net
+# 9. Nugs.net
 try:
     from bot.helpers.nugs.manager import nugs_manager
 except ImportError:
     nugs_manager = None
 
-# 11. Bugs
+# 10. Bugs
 try:
     from bot.helpers.bugs.manager import bugs_manager
     from bot.helpers.bugs.manager import BugsError
@@ -101,44 +93,44 @@ except ImportError:
     bugs_manager = None
     class BugsError(Exception): pass
 
-# 12. HIGHRESAUDIO
+# 11. HIGHRESAUDIO
 try:
     from bot.helpers.highresaudio.manager import highresaudio_manager, HighResAudioError
 except ImportError:
     highresaudio_manager = None
     class HighResAudioError(Exception): pass
 
-# 13. JioSaavn
+# 12. JioSaavn
 try:
     from bot.helpers.jiosaavn.manager import jiosaavn_manager
 except ImportError:
     jiosaavn_manager = None
 
-# 14. Gaana
+# 13. Gaana
 try:
     from bot.helpers.gaana.manager import gaana_manager
 except ImportError:
     gaana_manager = None
 
-# 15. Bandcamp
+# 14. Bandcamp
 try:
     from bot.helpers.bandcamp.manager import bandcamp_manager
 except ImportError:
     bandcamp_manager = None
 
-# 16. LivePhish
+# 15. LivePhish
 try:
     from bot.helpers.livephish.manager import livephish_manager
 except ImportError:
     livephish_manager = None
 
-# 17. BeatStars (BARU)
+# 16. BeatStars
 try:
     from bot.helpers.beatstars.manager import beatstars_manager
 except ImportError:
     beatstars_manager = None
 
-# 18. Khinsider (TAMBAHAN BARU)
+# 17. Khinsider
 try:
     from bot.helpers.khinsider.manager import khinsider_manager
 except ImportError:
@@ -170,13 +162,6 @@ try:
 except ImportError:
     async def start_moov(*args, **kwargs):
         raise NotImplementedError("Modul Moov belum diimplementasikan.")
-
-# Napster
-try:
-    from ..helpers.napster.handler import start_napster
-except ImportError:
-    async def start_napster(*args, **kwargs):
-        raise NotImplementedError("Modul Napster belum diimplementasikan.")
 
 # Idagio
 try:
@@ -415,8 +400,7 @@ async def run_download_task(link: str, user: dict):
                "404" in error_str or \
                "HighResAudioError" in error_str or \
                "DeezerError" in error_str or \
-               "BugsError" in error_str or \
-               "NapsterError" in error_str: 
+               "BugsError" in error_str: 
                 is_handled_error = True
             
             error_message = f"Tugas Gagal: {e}" if is_handled_error else f"Tugas Gagal: Terjadi error.\n`{e}`"
@@ -515,12 +499,6 @@ async def start_link(link: str, user: dict) -> None:
     kkbox = ["https://play.kkbox.com", "https://www.kkbox.com", "kkbox.com"]
     
     moov = ["https://moov.hk", "https://app.moov.hk", "moov.hk", "app.moov.hk"]
-
-    napster = [
-        "https://app.napster.com", "napster.com", "http://app.napster.com", 
-        "https://play.napster.com", "play.napster.com", 
-        "https://web.napster.com", "web.napster.com"
-    ]
     
     idagio = ["https://www.idagio.com", "idagio.com", "https://app.idagio.com"]
     
@@ -531,10 +509,11 @@ async def start_link(link: str, user: dict) -> None:
     highresaudio = ["https://www.highresaudio.com", "highresaudio.com"]
 
     jiosaavn = ["https://www.jiosaavn.com", "jiosaavn.com"]
+
     gaana = ["https://gaana.com", "gaana.com"]
 
     livephish = ["https://plus.livephish.com", "https://www.livephish.com", "https://streamapi.livephish.com"]
-    
+
     beatstars = ["https://www.beatstars.com", "beatstars.com", "https://main.v2.beatstars.com", "https://bsta.rs", "bsta.rs"]
 
     khinsider = ["https://downloads.khinsider.com", "downloads.khinsider.com", "http://downloads.khinsider.com"]
@@ -809,31 +788,6 @@ async def start_link(link: str, user: dict) -> None:
         except Exception as e:
             LOGGER.error(f"Moov: Tugas gagal (Fatal): {e}")
             raise e
-
-    # Blok NAPSTER
-    elif link.startswith(tuple(napster)):
-        user['provider'] = 'Napster'
-        
-        if not napster_manager or not napster_manager.clients:
-            raise Exception("Maaf, tidak ada akun Napster bot yang aktif saat ini.")
-
-        client = napster_manager.get_client()
-        if not client:
-             raise Exception("Tidak ada klien Napster yang tersedia (semua gagal login?).")
-
-        try:
-            user['napster_api'] = client
-            await start_napster(link, user)
-            LOGGER.info(f"Napster: Unduhan berhasil menggunakan akun.")
-            return
-        except Exception as e:
-            error_str = str(e).lower()
-            if isinstance(e, NapsterError) or "tidak ditemukan" in error_str or "tidak tersedia" in error_str:
-                LOGGER.error(f"Napster: Tugas gagal (Dapat Ditangani): {e}")
-                raise e
-            else:
-                LOGGER.error(f"Napster: Tugas gagal (Fatal): {e}")
-                raise e
 
     # Blok IDAGIO
     elif link.startswith(tuple(idagio)):
