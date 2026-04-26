@@ -21,7 +21,6 @@ bs4
 pycryptodome
 yt-dlp
 urllib3
-git+https://github.com/kokarare1212/librespot-python
 speedtest-cli
 aioaria2
 uvloop
