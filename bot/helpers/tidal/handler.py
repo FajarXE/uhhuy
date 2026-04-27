@@ -127,13 +127,24 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
             track_meta['sample_rate'] = 48
         else:
             track_meta['sample_rate'] = 44.1
+            
+        # --- LOGIKA FOLDER VOLUME UNTUK MULTI-VOLUME ALBUM ---
+        try:
+            total_vol = int(track_meta.get('totalvolume', 1))
+            # Jika total volume lebih dari 1, buat sub-folder "Volume X"
+            if total_vol > 1:
+                vol_num = track_meta.get('volume', '1')
+                filepath = f"{filepath}/Volume {vol_num}"
+        except Exception:
+            pass
+        # -----------------------------------------------------
         
         track_meta['folderpath'] = filepath
         
         filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
         filepath += f"/{filename}"
         filepath = sanitize_filepath(filepath)
-        track_meta['filepath'] = filepath 
+        track_meta['filepath'] = filepath  
 
         # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
         details = None
