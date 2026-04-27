@@ -210,7 +210,21 @@ async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=Tru
     try:
         track_meta['extension'], track_meta['quality'] = await get_quality(raw_data, user)
         raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
-        full_path = f"{filepath}/{sanitize_filepath(raw_filename)}.{track_meta['extension']}"
+        
+        # --- LOGIKA FOLDER DISC UNTUK MULTI-DISC ALBUM ---
+        target_dir = filepath
+        try:
+            total_vol = int(track_meta.get('totalvolume', 1))
+            # Jika total volume lebih dari 1, buat sub-folder "Disc X"
+            if total_vol > 1:
+                vol_num = track_meta.get('volume', '1')
+                target_dir = f"{filepath}/Disc {vol_num}"
+        except Exception:
+            pass
+        
+        full_path = f"{target_dir}/{sanitize_filepath(raw_filename)}.{track_meta['extension']}"
+        # -------------------------------------------------
+        
         track_meta['filepath'] = full_path
 
         # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
