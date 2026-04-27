@@ -90,96 +90,54 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             'type': track_meta.get('type', 'Track').capitalize()
         }
 
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    
-    cookie_str = "; ".join([f"{k}={v}" for k, v in client.s.cookies.items()])
-    headers_dict = {
-        "Referer": f"https://stream-app.highresaudio.com/album/{album_id_referer}",
-        "Cookie": cookie_str
-    }
-    
-    if details is not None:
-        details['headers'] = headers_dict
+    try:
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        # --- MESIN PENGUNDUH HYBRID (ARIA2 -> AIOHTTP TURBO) ---
+        cookie_str = "; ".join([f"{k}={v}" for k, v in client.s.cookies.items()])
+        headers_dict = {
+            "Referer": f"https://stream-app.highresaudio.com/album/{album_id_referer}",
+            "Cookie": cookie_str
+        }
+        
+        # [PERBAIKAN FATAL] Hanya tambahkan headers jika details benar-benar ada (Mode Single Track).
+        # Jika Mode Album (details = None), biarkan tetap None agar aria2_helper tidak crash (KeyError: 'msg').
+        if details is not None:
+            details['headers'] = headers_dict
 
-    # --- PERBAIKAN: SISTEM RETRY OTOMATIS (ANTI-TOKEN KEDALUWARSA) ---
-    MAX_RETRIES = 2
-    download_success = False
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            # Langkah 1: Coba kekuatan penuh Aria2
-            err = await download_file(download_url, track_meta['filepath'], retries=1, details=details)
+        # Langkah 1: Coba kekuatan penuh Aria2 (retries=1 agar cepat beralih jika ditolak server)
+        err = await download_file(download_url, track_meta['filepath'], retries=1, details=details)
+        
+        if err:
+            LOGGER.warning(f"HighResAudio: Aria2 gagal/ditolak server. Mengaktifkan AIOHTTP Turbo Fallback...")
             
-            if err:
-                LOGGER.warning(f"HighResAudio: Aria2 gagal. Mengaktifkan AIOHTTP Turbo Fallback...")
-                
-                # Langkah 2: AIOHTTP Turbo Fallback
-                async with aiohttp.ClientSession(headers=headers_dict) as session:
-                    async with session.get(download_url) as r:
-                        r.raise_for_status() # Akan melempar error jika 403/504
-                        total_size = int(r.headers.get('content-length', 0))
-                        downloaded = 0
-                        start_time = time.time()
-                        last_update = start_time
-                        
-                        async with aiofiles.open(track_meta['filepath'], 'wb') as f:
-                            async for chunk in r.content.iter_chunked(256 * 1024):
-                                if chunk:
-                                    await f.write(chunk)
-                                    downloaded += len(chunk)
-                                    
-                                    # Update Radar UI
-                                    if details and 'msg' in details:
-                                        now = time.time()
-                                        if now - last_update > 2.0 or downloaded == total_size:
-                                            last_update = now
-                                            from bot.helpers.utils import progress_message
-                                            await progress_message(downloaded, total_size, details)
-            
-            # Jika berhasil melewati Aria2 atau AIOHTTP tanpa error
-            download_success = True
-            break
-
-        except Exception as e:
-            err_str = str(e)
-            # Deteksi apakah kegagalan disebabkan oleh Token Kedaluwarsa (403 / 504)
-            if attempt < MAX_RETRIES - 1 and ("403" in err_str or "504" in err_str or "Forbidden" in err_str):
-                LOGGER.info(f"HighResAudio: Token kedaluwarsa terdeteksi untuk '{track_meta.get('title')}'. Meminta URL baru...")
-                try:
-                    # Memanggil ulang API Album untuk mendapatkan token baru
-                    api_data = await asyncio.to_thread(client.get_album_metadata, album_id_referer)
-                    track_list = api_data.get('data', {}).get('results', {}).get('tracks', [])
+            # Langkah 2: AIOHTTP Turbo Fallback (Menjamin Cookie Tembus 100%)
+            async with aiohttp.ClientSession(headers=headers_dict) as session:
+                async with session.get(download_url) as r:
+                    r.raise_for_status()
+                    total_size = int(r.headers.get('content-length', 0))
+                    downloaded = 0
+                    start_time = time.time()
+                    last_update = start_time
                     
-                    track_id = track_meta.get('itemid')
-                    fresh_url = None
-                    
-                    for t in track_list:
-                        if str(t.get('id')) == str(track_id):
-                            raw_url = t.get('url')
-                            if raw_url:
-                                fresh_url = raw_url.replace('cdn.highresaudio.com', 'streaming.highresaudio.com').replace('highresaudio.com//', 'highresaudio.com/')
-                            break
-                            
-                    if fresh_url:
-                        download_url = fresh_url # Timpa URL lama dengan URL segar
-                        LOGGER.info(f"HighResAudio: Berhasil mendapatkan URL segar. Mencoba unduh ulang...")
-                        continue # Ulangi loop pengunduhan
-                    else:
-                        LOGGER.error("HighResAudio: Gagal menemukan URL track di metadata yang baru disegarkan.")
-                        break
-                        
-                except Exception as ref_err:
-                    LOGGER.error(f"HighResAudio: Gagal me-refresh metadata API: {ref_err}")
-                    break
-            else:
-                LOGGER.error(f"HighResAudio dl_track gagal total: {e}")
-                break
-
-    if not download_success:
-        try: os.remove(track_meta['filepath'])
-        except: pass
+                    async with aiofiles.open(track_meta['filepath'], 'wb') as f:
+                        async for chunk in r.content.iter_chunked(256 * 1024):
+                            if chunk:
+                                await f.write(chunk)
+                                downloaded += len(chunk)
+                                
+                                # Update Radar UI (Hanya jika Single Track)
+                                if details and 'msg' in details:
+                                    now = time.time()
+                                    if now - last_update > 2.0 or downloaded == total_size:
+                                        last_update = now
+                                        from bot.helpers.utils import progress_message
+                                        await progress_message(downloaded, total_size, details)
+        # --------------------------------------------------------
+        
+    except Exception as e:
+        LOGGER.error(f"HighResAudio dl_track gagal: {e}")
         return False
-    # ----------------------------------------------------------------
 
     try:
         await set_metadata(track_meta, user['user_id'])
