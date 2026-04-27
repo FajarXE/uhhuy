@@ -82,7 +82,7 @@ def get_status_text(page=1, limit=5):
         text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
-            text += "\n➖➖➖➖➖➖➖➖➖➖➖➖\n\n"
+            text += "\n\n"
 
     total_dl_raw = 0
     total_ul_raw = 0
