@@ -124,12 +124,6 @@ async def process_album_metadata(album_url: str, r_id: str, user: dict):
             track_meta['discnumber'] = str(track.get('discNumber', 1))
             track_meta['totalvolumes'] = metadata['totalvolumes']
 
-            # --- AMBIL JUDUL FOLDER / GROUPING DARI METADATA HRA ---
-            folder_title = track.get('groupName') or track.get('group') or track.get('work') or track.get('discTitle')
-            if folder_title:
-                track_meta['folder_title'] = str(folder_title)
-            # -------------------------------------------------------
-            
             track_meta['quality'] = f"{track.get('format')} kHz FLAC"
             track_meta['extension'] = 'flac'
             
