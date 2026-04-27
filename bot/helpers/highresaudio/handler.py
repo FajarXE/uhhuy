@@ -67,22 +67,6 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
         filepath = sanitize_filepath(filepath)
 
-    # --- LOGIKA FOLDER GROUPING / NAMA JUDUL ---
-    try:
-        folder_title = track_meta.get('folder_title')
-        total_vol = int(track_meta.get('totalvolumes', 1))
-        
-        if folder_title:
-            # Jika HRA memberikan nama judul/karya (seperti nama Symphony)
-            filepath = f"{filepath}/{sanitize_filepath(folder_title)}"
-        elif total_vol > 1:
-            # Fallback jika tidak ada judul tapi CD lebih dari 1
-            disc_num = track_meta.get('discnumber', '1')
-            filepath = f"{filepath}/Volume {disc_num}"
-    except Exception:
-        pass
-    # -------------------------------------------
-    
     download_url = track_meta.get('download_url')
     album_id_referer = track_meta.get('album_id_referer') 
     
