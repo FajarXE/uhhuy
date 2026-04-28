@@ -273,7 +273,7 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
         label_name = album_data.get("labels")[0].get("label_nm")
         metadata['label'] = label_name
         metadata['publisher'] = label_name
-        metadata['copyright'] = f'© {metadata["year"] if "year" in metadata else ""} {label_name}'
+        metadata['copyright'] = f'© {metadata.get("year", "")} {label_name}'
 
     release_date_str = album_data.get('release_ymd')
     if release_date_str:
@@ -287,20 +287,6 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
             metadata['year'] = None
     
     metadata['totaltracks'] = str(album_data.get('track_count'))
-    
-    # --- PERBAIKAN: DETEKSI MULTI-DISC BUGS SECARA MANUAL ---
-    max_vol = 1
-    if tracks_list:
-        for t in tracks_list:
-            try:
-                v = int(t.get('disc_no', 1))
-                if v > max_vol: 
-                    max_vol = v
-            except: 
-                pass
-    metadata['totalvolume'] = str(max_vol)
-    # --------------------------------------------------------
-    
     metadata['provider'] = 'Bugs'
     metadata['type'] = 'album'
     metadata['explicit'] = False
@@ -311,21 +297,27 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
         metadata['thumbnail'] = await _process_thumbnail(metadata, cover_path)
 
     metadata['tracks'] = []
+    
+    # --- PERBAIKAN: HITUNG JUMLAH CD DARI DATA LAGU YANG LENGKAP ---
+    max_vol = 1
+    
     for song_data in tracks_list:
         try:
             track_id = song_data.get('track_id')
-            # Kita kirim song_data sebagai pre_data, tapi PERHATIKAN:
-            # song_data dari 'get_album_tracks' biasanya TIDAK punya ISRC atau Credits lengkap.
-            # Jadi process_track_metadata akan melakukan fetch ulang via get_track untuk mengisi ISRC/Credits.
+            # Fungsi ini akan memanggil 'get_track' yang memiliki data discnumber lengkap
             track_meta = await process_track_metadata(
                 track_id, r_id, user, 
                 pre_data=song_data, 
                 alb_info_pre=album_data
             )
             
-            # --- SUNTIKAN TOTAL VOLUME YANG BENAR KE TRACK ---
-            track_meta['totalvolume'] = str(max_vol)
-            # -------------------------------------------------
+            # Mendeteksi disc number dari track_meta yang sudah lengkap
+            try:
+                v = int(track_meta.get('discnumber', 1))
+                if v > max_vol:
+                    max_vol = v
+            except:
+                pass
             
             track_meta['cover'] = metadata['cover'] 
             track_meta['thumbnail'] = metadata['thumbnail']
@@ -336,6 +328,12 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
 
     if not metadata['tracks']:
         raise Exception(f"Tidak ada lagu yang valid ditemukan untuk album {metadata['title']}")
+    
+    # --- SUNTIKKAN JUMLAH CD YANG BENAR KE ALBUM & SELURUH LAGU ---
+    metadata['totalvolume'] = str(max_vol)
+    for t in metadata['tracks']:
+        t['totalvolume'] = str(max_vol)
+    # --------------------------------------------------------------
     
     metadata['quality'] = metadata['tracks'][0]['quality']
     return metadata
