@@ -149,7 +149,16 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
     
     if upload: album_meta['poster_msg'] = await post_art_poster(user, album_meta)
 
-    album_folder = basefolder + f"/{album_meta['title']}" if basefolder else f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{album_meta['artist']}/{album_meta['title']}"
+    # --- [FIX] GANTI KARAKTER / MENJADI | PADA NAMA ALBUM ---
+    safe_album_title = album_meta['title'].replace('/', '|')
+    safe_artist_name = album_meta['artist'].replace('/', '|')
+    
+    if basefolder:
+        album_folder = basefolder + f"/{safe_album_title}"
+    else:
+        album_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{safe_artist_name}/{safe_album_title}"
+    # --------------------------------------------------------
+
     album_folder = sanitize_filepath(album_folder)
     album_meta['folderpath'] = album_folder
     
@@ -210,7 +219,11 @@ async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=Tru
     try:
         track_meta['extension'], track_meta['quality'] = await get_quality(raw_data, user)
         raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
-        
+            
+        # --- [FIX] GANTI KARAKTER / MENJADI | PADA NAMA TRACK ---
+        raw_filename = raw_filename.replace('/', '|')
+        # --------------------------------------------------------
+            
         # --- LOGIKA FOLDER DISC UNTUK MULTI-DISC ALBUM ---
         target_dir = filepath
         try:
