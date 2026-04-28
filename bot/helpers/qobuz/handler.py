@@ -5,7 +5,7 @@ import os
 import traceback
 from .utils import *
 from config import Config
-from pathvalidate import sanitize_filepath
+from pathvalidate import sanitize_filepath, sanitize_filename
 
 from ..utils import *
 from ..metadata import set_metadata
@@ -222,7 +222,7 @@ async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=Tru
         except Exception:
             pass
         
-        full_path = f"{target_dir}/{sanitize_filepath(raw_filename)}.{track_meta['extension']}"
+        full_path = f"{target_dir}/{sanitize_filename(raw_filename)}.{track_meta['extension']}"
         # -------------------------------------------------
         
         track_meta['filepath'] = full_path
