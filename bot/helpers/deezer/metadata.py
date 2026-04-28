@@ -440,7 +440,19 @@ async def process_album_metadata(album_id:int, a_meta:dict, t_meta:list, r_id, u
 
     metadata['totaltracks'] = a_meta.get('NUMBER_TRACK', '0')
     metadata['duration'] = a_meta.get('DURATION', 0)
-    metadata['totalvolume'] = str(a_meta.get('DISK_COUNT', '1'))
+    
+    # --- PERBAIKAN: DETEKSI MULTI-DISC DEEZER SECARA MANUAL ---
+    max_vol = 1
+    if t_meta and 'data' in t_meta:
+        for t in t_meta['data']:
+            try:
+                v = int(t.get('DISK_NUMBER', 1))
+                if v > max_vol: 
+                    max_vol = v
+            except: 
+                pass
+    metadata['totalvolume'] = str(max_vol)
+    # ----------------------------------------------------------
 
     # --- Fetch External Info ---
     itunes_info = {'found': False}
