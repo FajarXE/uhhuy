@@ -72,19 +72,31 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
         filepath = sanitize_filepath(filepath)
 
-    download_id = track_meta.get('download_id')
-    download_quality = track_meta.get('download_quality_key')
-    if not download_id or not download_quality:
-        LOGGER.error(f"Metadata tidak lengkap untuk unduhan Bugs track {item_id}")
-        return False
+        download_id = track_meta.get('download_id')
+        download_quality = track_meta.get('download_quality_key')
+        if not download_id or not download_quality:
+            LOGGER.error(f"Metadata tidak lengkap untuk unduhan Bugs track {item_id}")
+            return False
 
-    track_meta['folderpath'] = filepath
-    
-    raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
-    safe_filename = sanitize_filepath(raw_filename)
+        # --- LOGIKA FOLDER CD UNTUK MULTI-DISC ALBUM BUGS ---
+        try:
+            total_vol = int(track_meta.get('totalvolume', 1))
+            # Jika total CD/Volume lebih dari 1, buat sub-folder "CD X"
+            if total_vol > 1:
+                # Bugs menggunakan 'discnumber' di metadata.py
+                vol_num = track_meta.get('discnumber', '1')
+                filepath = f"{filepath}/CD {vol_num}"
+        except Exception:
+            pass
+        # ----------------------------------------------------
 
-    filepath += f"/{safe_filename}.{track_meta['extension']}"
-    track_meta['filepath'] = filepath
+        track_meta['folderpath'] = filepath
+        
+        raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
+        safe_filename = sanitize_filepath(raw_filename)
+
+        filepath += f"/{safe_filename}.{track_meta['extension']}"
+        track_meta['filepath'] = filepath
 
     # --- LOGIKA UNDUH BUGS ---
     try:
