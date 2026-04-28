@@ -67,6 +67,17 @@ async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=
         LOGGER.warning(f"Gagal mendapatkan URL Deezer: {e}")
         return False
 
+    # --- LOGIKA FOLDER CD UNTUK MULTI-DISC ALBUM ---
+    try:
+        total_vol = int(track_meta.get('totalvolume', 1))
+        # Jika total CD/Volume lebih dari 1, buat sub-folder "CD X"
+        if total_vol > 1:
+            vol_num = track_meta.get('volume', '1')
+            filepath = f"{filepath}/CD {vol_num}"
+    except Exception:
+        pass
+    # -----------------------------------------------
+
     track_meta['folderpath'] = filepath
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
     safe_filename = sanitize_filepath(raw_filename)
