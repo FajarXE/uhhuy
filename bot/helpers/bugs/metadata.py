@@ -111,14 +111,18 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
     metadata['artist'] = ", ".join([a.get('artist_nm') for a in track_data.get('artists')])
     metadata['albumartist'] = album_data.get('artists')[0].get('artist_nm')
     
-    # --- PERUBAHAN DI SINI ---
-    # Menggunakan .zfill(2) agar nomor track menjadi 01, 02, dst.
-    metadata['tracknumber'] = str(track_data.get('track_no')).zfill(2)
+    metadata['tracknumber'] = str(track_data.get('track_no', 0)).zfill(2)
     # -------------------------
     
-    metadata['totaltracks'] = str(album_data.get('track_count'))
-    metadata['discnumber'] = str(track_data.get('disc_no'))
-    metadata['totalvolume'] = str(album_data.get('disc_count') or 1)
+    metadata['totaltracks'] = str(album_data.get('track_count', 0))
+    
+    # --- PERBAIKAN: PARSING DISC AMAN ---
+    d_no = track_data.get('disc_id') or track_data.get('disc_no')
+    metadata['discnumber'] = str(d_no) if d_no else '1'
+    
+    t_vol = album_data.get('disc_count')
+    metadata['totalvolume'] = str(t_vol) if t_vol else '1'
+    # ------------------------------------
     
     # Date Handling
     release_date_str = album_data.get('release_ymd')
@@ -263,12 +267,10 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
     metadata['artist'] = album_data.get('artists')[0].get('artist_nm')
     metadata['albumartist'] = album_data.get('artists')[0].get('artist_nm')
     
-    # UPC / Barcode
     if album_data.get('upc'):
         metadata['upc'] = album_data.get('upc')
         metadata['barcode'] = album_data.get('upc')
     
-    # Label
     if album_data.get("labels"):
         label_name = album_data.get("labels")[0].get("label_nm")
         metadata['label'] = label_name
@@ -298,26 +300,41 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
 
     metadata['tracks'] = []
     
-    # --- PERBAIKAN: HITUNG JUMLAH CD DARI DATA LAGU YANG LENGKAP ---
+    # --- PERBAIKAN PAMUNGKAS: SMART DISC DETECTOR ---
     max_vol = 1
+    current_cd = 1
+    last_track_no = 0
     
     for song_data in tracks_list:
         try:
             track_id = song_data.get('track_id')
-            # Fungsi ini akan memanggil 'get_track' yang memiliki data discnumber lengkap
+            
+            # Deteksi otomatis: Jika nomor lagu mereset (kembali kecil), itu adalah CD baru!
+            t_no = int(song_data.get('track_no', 0))
+            if t_no > 0:
+                if t_no <= last_track_no and last_track_no != 0:
+                    current_cd += 1
+                last_track_no = t_no
+            
+            # Fallback membaca ID API jika tersedia
+            api_disc = song_data.get('disc_id') or song_data.get('disc_no')
+            if api_disc:
+                try:
+                    if int(api_disc) > current_cd:
+                        current_cd = int(api_disc)
+                except: pass
+                
+            if current_cd > max_vol:
+                max_vol = current_cd
+            
             track_meta = await process_track_metadata(
                 track_id, r_id, user, 
                 pre_data=song_data, 
                 alb_info_pre=album_data
             )
             
-            # Mendeteksi disc number dari track_meta yang sudah lengkap
-            try:
-                v = int(track_meta.get('discnumber', 1))
-                if v > max_vol:
-                    max_vol = v
-            except:
-                pass
+            # Paksa masukkan discnumber yang sudah dikalkulasi cerdas
+            track_meta['discnumber'] = str(current_cd)
             
             track_meta['cover'] = metadata['cover'] 
             track_meta['thumbnail'] = metadata['thumbnail']
@@ -329,11 +346,11 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
     if not metadata['tracks']:
         raise Exception(f"Tidak ada lagu yang valid ditemukan untuk album {metadata['title']}")
     
-    # --- SUNTIKKAN JUMLAH CD YANG BENAR KE ALBUM & SELURUH LAGU ---
+    # --- SUNTIKKAN TOTAL CD YANG BENAR KE ALBUM & SELURUH LAGU ---
     metadata['totalvolume'] = str(max_vol)
     for t in metadata['tracks']:
         t['totalvolume'] = str(max_vol)
-    # --------------------------------------------------------------
+    # -------------------------------------------------------------
     
     metadata['quality'] = metadata['tracks'][0]['quality']
     return metadata
