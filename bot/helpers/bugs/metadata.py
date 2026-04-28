@@ -287,7 +287,20 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
             metadata['year'] = None
     
     metadata['totaltracks'] = str(album_data.get('track_count'))
-    metadata['totalvolume'] = str(album_data.get('disc_count') or 1)
+    
+    # --- PERBAIKAN: DETEKSI MULTI-DISC BUGS SECARA MANUAL ---
+    max_vol = 1
+    if tracks_list:
+        for t in tracks_list:
+            try:
+                v = int(t.get('disc_no', 1))
+                if v > max_vol: 
+                    max_vol = v
+            except: 
+                pass
+    metadata['totalvolume'] = str(max_vol)
+    # --------------------------------------------------------
+    
     metadata['provider'] = 'Bugs'
     metadata['type'] = 'album'
     metadata['explicit'] = False
@@ -309,6 +322,11 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
                 pre_data=song_data, 
                 alb_info_pre=album_data
             )
+            
+            # --- SUNTIKAN TOTAL VOLUME YANG BENAR KE TRACK ---
+            track_meta['totalvolume'] = str(max_vol)
+            # -------------------------------------------------
+            
             track_meta['cover'] = metadata['cover'] 
             track_meta['thumbnail'] = metadata['thumbnail']
             metadata['tracks'].append(track_meta)
