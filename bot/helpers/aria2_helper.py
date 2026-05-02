@@ -29,7 +29,7 @@ async def aria2_download(url, filepath, details=None):
         "max-tries": "10",
         "retry-wait": "3",
         "timeout": "40",
-        "lowest-speed-limit": "10K"
+        "lowest-speed-limit": "100K"
     }
     
     # Jika ada headers dari layanan musik, pasangkan ke opsi Aria2!
