@@ -421,11 +421,11 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 if msg: await edit_message(msg, f"❌ **Gagal Mengunggah:** {e}", None, False)
             return None
 
-
 # --- FUNGSI EDIT MESSAGE (VERSI ANTI-CRASH) ---
 async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
     """
-    Mengedit pesan dengan penanganan khusus untuk error SSL Shutdown.
+    Mengedit pesan dengan penanganan khusus untuk error SSL Shutdown 
+    dan pembersihan memori hantu (Anti I/O Bottleneck).
     """
     if not msg:
         return None
@@ -453,6 +453,7 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
         pass # Pesan sama, abaikan
     except FloodWait as e:
         if antiflood:
+            import asyncio
             await asyncio.sleep(e.value)
             return await edit_message(msg, text, markup, antiflood)
     except MessageIdInvalid:
@@ -460,6 +461,26 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
     except RPCError as e:
         # Error umum Telegram
         LOGGER.warning(f"RPCError Edit: {e}")
+        
+        # --- FIX: Pembersihan "Memori Hantu" untuk mencegah I/O Bottleneck ---
+        err_str = str(e)
+        if any(err in err_str for err in ["INPUT_USER_DEACTIVATED", "USER_IS_BLOCKED", "PEER_ID_INVALID", "CHAT_WRITE_FORBIDDEN"]):
+            try:
+                from bot.helpers.utils import GLOBAL_UI_MSG, GLOBAL_UI_PAGES, GLOBAL_UI_LAST_UPDATE
+                chat_id = msg.chat.id
+                
+                # Hapus dari semua radar Global Status
+                if chat_id in GLOBAL_UI_MSG:
+                    del GLOBAL_UI_MSG[chat_id]
+                if chat_id in GLOBAL_UI_PAGES:
+                    del GLOBAL_UI_PAGES[chat_id]
+                if msg.id in GLOBAL_UI_LAST_UPDATE:
+                    del GLOBAL_UI_LAST_UPDATE[msg.id]
+                    
+                LOGGER.info(f"🧹 Membersihkan User {chat_id} dari radar UI karena akun tidak aktif/diblokir.")
+            except Exception as cleanup_err:
+                LOGGER.debug(f"Gagal membersihkan radar: {cleanup_err}")
+                
     except (aiohttp.ClientConnectionError, aiohttp.ServerTimeoutError, TimeoutError) as e:
         # [DEBUG] Tangkap Error SSL di sini agar tidak jadi 'Future exception'
         if "SSL shutdown" in str(e):
