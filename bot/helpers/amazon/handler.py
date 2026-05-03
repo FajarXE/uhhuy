@@ -68,8 +68,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     device_type_id = client.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
     music_territory = client.region.upper() 
     
-    # --- FIX: HAPUS client.api_location AGAR SESUAI DENGAN API AMAZON ASLI ---
-    lookup_url = f"{client.base_url}api/muse/legacy/lookup"
+    lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
     
     lookup_payload = {
         "asins": [album_asin],
