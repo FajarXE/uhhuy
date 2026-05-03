@@ -27,3 +27,4 @@ uvloop
 cryptography
 inquirer
 ecpy
+construct
