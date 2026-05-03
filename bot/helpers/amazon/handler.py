@@ -3,6 +3,7 @@
 import asyncio
 import os
 import base64
+import shutil
 from pathvalidate import sanitize_filepath
 from bot.logger import LOGGER
 from config import Config
@@ -11,7 +12,6 @@ from bot.helpers.aria2_helper import aria2_download
 from bot.helpers.tidal.utils import ffmpeg_convert_and_tag
 from bot.helpers.uploder import telegram_upload
 
-# Fungsi ini dieksekusi di thread agar tidak memblokir bot
 def generate_challenge(kid, prd_path):
     from bot.helpers.amazon.drm.pypr import PlayReadyHeaderBuilder, PSSH, Device, Cdm
     kid_clean = kid.replace("-", "")
@@ -29,7 +29,6 @@ def generate_challenge(kid, prd_path):
     
     return cdm, session_id, challenge_b64
 
-# Fungsi ini mengekstrak lisensi dari server Amazon
 def parse_license_and_get_keys(cdm, session_id, license_b64):
     decoded_data = base64.b64decode(license_b64).decode("utf-8")
     cdm.parse_license(session_id, decoded_data)
@@ -52,10 +51,8 @@ async def start_track(asin: str, user: dict, url: str):
 
     LOGGER.info(f"Amazon: Mengambil info untuk {asin}")
     
-    # 1. Parsing Manifest & Ekstrak Data
     manifest_data = await client.get_playback_info(asin)
     
-    # Setup Metadata
     track_meta = {
         'title': manifest_data.get('title', asin),
         'artist': manifest_data.get('artist', 'Unknown Artist'),
@@ -72,47 +69,42 @@ async def start_track(asin: str, user: dict, url: str):
     audio_url = manifest_data.get('url') 
     kid = manifest_data.get('kid') 
     
-    if not audio_url or not kid:
-        raise Exception("Gagal mengekstrak Audio URL atau KID dari Amazon MPD.")
+    if not audio_url:
+        raise Exception("Gagal menemukan Audio URL dari file Amazon MPD. Lagu mungkin tidak tersedia di region Anda.")
         
     enc_path = f"{folder_path}/{track_meta['title']}.enc.mp4"
     dec_path = f"{folder_path}/{track_meta['title']}.dec.mp4"
     final_path = f"{folder_path}/{track_meta['title']}.flac"
 
-    # 2. Download dengan Aria2
     details = None
     if 'bot_msg' in user:
         details = {'msg': user['bot_msg'], 'title': track_meta['title'], 'type': 'Track'}
         
     await aria2_download(audio_url, enc_path, details=details)
 
-    # 3. Proses DRM PlayReady
-    prd_path = "bot/helpers/amazon/drm/hisense_smarttv_hu32e5600fhwv_sl3000.prd"
-    
-    # a. Generate Challenge di Thread
-    cdm, session_id, challenge_b64 = await asyncio.to_thread(generate_challenge, kid, prd_path)
-    
-    # b. Fetch License dari Amazon API
-    license_b64 = await client.get_license(challenge_b64, asin)
-    
-    # c. Ekstrak Key
-    keys = await asyncio.to_thread(parse_license_and_get_keys, cdm, session_id, license_b64)
+    # --- FIX: IZINKAN TREK TANPA DRM (JIKA KID KOSONG) ---
+    if kid:
+        LOGGER.info(f"Amazon: Memulai proses DRM untuk KID {kid}")
+        prd_path = "bot/helpers/amazon/drm/hisense_smarttv_hu32e5600fhwv_sl3000.prd"
+        cdm, session_id, challenge_b64 = await asyncio.to_thread(generate_challenge, kid, prd_path)
+        license_b64 = await client.get_license(challenge_b64, asin)
+        keys = await asyncio.to_thread(parse_license_and_get_keys, cdm, session_id, license_b64)
 
-    # 4. Dekripsi Video
-    LOGGER.info(f"Amazon: Mendekripsi dengan keys {keys}")
-    from bot.helpers.amazon.drm import pydecrypt
-    await asyncio.to_thread(pydecrypt.decrypt_file, enc_path, dec_path, keys)
+        LOGGER.info(f"Amazon: Mendekripsi file dengan keys {keys}")
+        from bot.helpers.amazon.drm import pydecrypt
+        await asyncio.to_thread(pydecrypt.decrypt_file, enc_path, dec_path, keys)
+    else:
+        LOGGER.info("Amazon: Trek ini bersifat Free/Unencrypted (Tanpa DRM), melewati dekripsi.")
+        shutil.copy(enc_path, dec_path)
+    # ----------------------------------------------------
 
-    # 5. Konversi & Tagging
     track_meta['filepath'] = final_path
     await ffmpeg_convert_and_tag(dec_path, track_meta)
 
-    # Bersihkan file
     try:
         os.remove(enc_path)
         os.remove(dec_path)
     except:
         pass
 
-    # 6. Upload
     await telegram_upload(track_meta, user)
