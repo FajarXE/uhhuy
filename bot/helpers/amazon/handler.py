@@ -87,20 +87,36 @@ async def start_album(album_asin: str, user: dict, url: str):
         if resp.status == 200:
             data = await resp.json()
             
-            # --- FIX: Buka kotak "albumList" terlebih dahulu ---
-            albums = data.get("albumList", [])
-            if albums:
-                tracks = albums[0].get("trackList", [])
-                track_asins = [t.get("asin") for t in tracks if t.get("asin")]
-            
-            # Fallback jika ternyata Amazon mengirimkannya langsung ke trackList
+            # 1. Pencarian Standar
+            for album in data.get("albumList", []):
+                for track in album.get("trackList", []):
+                    if track.get("asin"):
+                        track_asins.append(track["asin"])
+                        
+            # 2. Jika kosong, gunakan Pencarian Paksa (Brute-Force) ke seluruh kedalaman JSON
             if not track_asins:
-                tracks = data.get("trackList", [])
-                track_asins = [t.get("asin") for t in tracks if t.get("asin")]
+                def extract_track_asins(obj):
+                    found = []
+                    if isinstance(obj, dict):
+                        # Ambil ASIN hanya jika objek ini adalah lagu (punya nomor urut atau durasi)
+                        if 'asin' in obj and ('trackNumber' in obj or 'durationSeconds' in obj):
+                            found.append(obj['asin'])
+                        for v in obj.values():
+                            found.extend(extract_track_asins(v))
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            found.extend(extract_track_asins(item))
+                    return found
                 
-    if not track_asins:
-        raise Exception("Gagal mengambil daftar lagu. Pastikan link Album valid.")
-        
+                track_asins = list(dict.fromkeys(extract_track_asins(data))) # Ekstrak dan hapus duplikat
+                
+            # 3. Jika masih saja kosong, berikan pesan error yang berisi respons mentah dari Amazon
+            if not track_asins:
+                err_dump = str(data)[:500] # Ambil 500 karakter pertama agar tidak terlalu panjang
+                raise Exception(f"Amazon tidak mengembalikan daftar lagu. Respons server: {err_dump}")
+        else:
+            raise Exception(f"HTTP Error {resp.status} saat mencari album.")
+            
     LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album.")
     if 'bot_msg' in user:
         await user['bot_msg'].edit_text(f"💿 **Album Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
