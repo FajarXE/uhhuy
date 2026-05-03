@@ -13,7 +13,7 @@ class AmazonApi:
         self.session = aiohttp.ClientSession()
         self.tokens = {}
         
-        # Konfigurasi Region & Endpoint dari main_tv.py
+        # Konfigurasi Region & Endpoint
         self.base_urls = {
             "mx": "https://music.amazon.com.mx/",
             "br": "https://music.amazon.com.br/",
@@ -33,19 +33,27 @@ class AmazonApi:
         api_location = next((loc for loc, regs in api_locations.items() if self.region in regs), "NA")
         self.api_url = api_urls.get(api_location)
 
+        # --- FIX: KEMBALIKAN HEADERS LENGKAP AGAR TIDAK KENA ERROR 500 ---
         self.default_headers = {
             "origin": "https://music.amazon.com",
             "referer": "https://music.amazon.com/",
             "user-agent": "Harley/3.12.11.183 A1I3OANZGDNGEE/24.10.1",
+            "x-amzn-device-type-id": "A1KAXIG6VXSG8Y",
+            "x-amzn-hardware-device-type-id": "A1KAXIG6VXSG8Y",
             "x-amzn-device-family": "AndroidTV",
             "x-amzn-device-manufacturer": "NVIDIA",
+            "x-amzn-device-model": "A1KAXIG6VXSG8Y",
             "x-amzn-device-language": "en_US",
+            "x-amzn-device-height": "3840",
+            "x-amzn-device-width": "2160",
             "x-amzn-os-version": "11",
+            "x-amzn-application-version": "3.12.11.183",
+            "x-amzn-device-time-zone": "America/Detroit",
+            "x-amzn-user-agent": "Dalvik/2.1.0 (Linux; U; Android 9; Smart TV Build/PPR1.180610.011)",
         }
         self.session.headers.update(self.default_headers)
 
     async def get_tv_device_code(self):
-        """Meminta kode otentikasi TV ke Amazon (Langkah 1)"""
         self.tokens["device_id"] = os.urandom(8).hex()
         
         headers = {
@@ -54,13 +62,16 @@ class AmazonApi:
             "x-amzn-device-id": self.tokens["device_id"],
         }
         
-        # Request Code Pair
         async with self.session.post(
             f"https://{self.api_url}/api/showHome",
             json={"userHash": ""},
             headers=headers
         ) as resp:
-            resp.raise_for_status()
+            # Tambahkan pembacaan error text agar kalau gagal, log-nya lebih jelas
+            if resp.status != 200:
+                err_text = await resp.text()
+                raise Exception(f"HTTP {resp.status}: {err_text}")
+                
             codepair_json = await resp.json()
             
             code_pair = codepair_json["methods"][0]["template"]
@@ -73,7 +84,6 @@ class AmazonApi:
             return public_code, register_code, activation_url
 
     async def poll_tv_auth(self, register_code):
-        """Mengecek apakah user sudah memasukkan kode di web (Langkah 2)"""
         headers = {
             "x-amzn-request-id": str(uuid.uuid4()),
             "x-amzn-timestamp": str(int(time.time() * 1000)),
@@ -81,7 +91,6 @@ class AmazonApi:
         }
         payload = json.dumps({"code": register_code}, separators=(",", ":"))
 
-        # Dalam implementasi asli, ini harus di-loop atau dipanggil oleh handler
         async with self.session.post(
             f"https://{self.api_url}/api/showHome",
             headers=headers,
@@ -108,4 +117,5 @@ class AmazonApi:
         return False
 
     async def close(self):
-        await self.session.close()
+        if not self.session.closed:
+            await self.session.close()
