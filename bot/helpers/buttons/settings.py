@@ -103,6 +103,12 @@ try:
 except ImportError:
     khinsider_manager = None
 
+# Impor Manajer Amazon Music
+try:
+    from bot.helpers.amazon.manager import amazon_manager
+except ImportError:
+    amazon_manager = _DummyManager()
+
 
 def fetch_base_buttons():
     # Style: PRIMARY (Biru) untuk Main Menu
@@ -264,6 +270,16 @@ def providers_button():
                 InlineKeyboardButton(
                     text="KHINSIDER", 
                     callback_data='khiP'
+                )
+            ]
+        )
+
+    if amazon_manager and (getattr(amazon_manager, 'global_clients', []) or getattr(amazon_manager, 'clients', [])):
+        inline_keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="AMAZON MUSIC", 
+                    callback_data='amzP'
                 )
             ]
         )
@@ -1126,6 +1142,63 @@ def hra_button(user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
+# ==========================================
+# AMAZON MUSIC BUTTONS (PRIVATE ACCOUNT)
+# ==========================================
+
+def amazon_user_auth_buttons(is_logged_in: bool):
+    buttons = []
+    
+    if is_logged_in:
+        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uamz_logout", style=ButtonStyle.DANGER)])
+    else:
+        # Menggunakan alur TV Code
+        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT (TV CODE)", callback_data="uamz_instr", style=ButtonStyle.SUCCESS)])
+        
+    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_amazon", style=ButtonStyle.PRIMARY)])
+    return InlineKeyboardMarkup(buttons)
+
+def amz_button(quality: dict, user_id: int = None):
+    buttons = []
+    usetting = user_id is not None
+    prefix = "amzQ" if not usetting else "uamzs"
+    row = []
+    
+    display_text_map = {
+        "UHD": "UHD (Hi-Res)",
+        "HD": "HD (Lossless/FLAC)",
+        "SD": "SD (Standard MP3/AAC)"
+    }
+    
+    for i, (key, value) in enumerate(quality.items()):
+        clean_text = display_text_map.get(key, key)
+        is_selected = "✅" in value
+        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
+
+        if clean_text:
+            row.append(InlineKeyboardButton(
+                text=clean_text, 
+                callback_data=f"{prefix}_{key}", 
+                style=btn_style
+            ))
+            
+        if (i + 1) % 2 == 0 or i == len(quality) - 1:
+            buttons.append(row)
+            row = []
+            
+    if usetting:
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)])
+        buttons.append(
+            [
+                InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
+            ]
+        )
+        return InlineKeyboardMarkup(buttons)
+        
+    main_button, close_button = fetch_base_buttons()
+    buttons += main_button + close_button
+    return InlineKeyboardMarkup(buttons)
+
 def khi_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
@@ -1282,6 +1355,10 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     
     if khinsider_manager:
         buttons.append([InlineKeyboardButton(text=f"Khinsider Quality", callback_data=f"uset_khinsider")])
+
+    if amazon_manager:
+        if getattr(amazon_manager, 'global_clients', []) or amazon_manager.has_private_session(user_id):
+            buttons.append([InlineKeyboardButton(text=f"Amazon Quality", callback_data=f"uset_amazon")])
 
     buttons.append([InlineKeyboardButton(text="🔁 Switch Upload Mode", callback_data="uset_upload_mode")])
 
