@@ -24,3 +24,5 @@ urllib3
 speedtest-cli
 aioaria2
 uvloop
+cryptography
+inquirer
