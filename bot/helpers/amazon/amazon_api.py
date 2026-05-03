@@ -8,6 +8,7 @@ import asyncio
 import aiohttp
 import re
 import html
+import base64
 from urllib.parse import unquote
 from bot.logger import LOGGER
 
@@ -17,7 +18,6 @@ class AmazonApi:
         self.session = aiohttp.ClientSession()
         self.tokens = {}
         
-        # Konfigurasi Region & Endpoint
         self.base_urls = {
             "mx": "https://music.amazon.com.mx/",
             "br": "https://music.amazon.com.br/",
@@ -83,27 +83,48 @@ class AmazonApi:
             if resp.status != 200:
                 return False
             register_json = await resp.json()
+            
             service_token = None
+            video_player_token = None
+            
             for item in register_json.get("methods", []):
                 if item.get("interface") == "PlaybackAuthenticationInterface.v1_0.SetAuthenticationMethod" and item.get("authentication"):
                     service_token = item["authentication"]
-                    break
+                if item.get("interface") == "VideoPlayerAuthenticationInterface.v1_0.SetVideoPlayerTokenMethod" and item.get("header"):
+                    video_player_token = item["header"]
+                    
             if service_token:
                 token_data = json.loads(service_token)
                 self.tokens["service_token"] = service_token
                 self.tokens["x-amz-access-token"] = token_data["accessToken"]
                 self.tokens["marketplaceId"] = token_data.get("marketplaceId", "US")
+                
+                # --- FIX: Ekstrak Customer ID dari JWT untuk mencegah error Null ---
+                customer_id = ""
+                if video_player_token and video_player_token.count(".") >= 2:
+                    try:
+                        jwt_payload = video_player_token.split(".")[1]
+                        jwt_payload += "=" * (-len(jwt_payload) % 4)
+                        decoded_payload = base64.urlsafe_b64decode(jwt_payload.encode()).decode("latin-1", errors="ignore")
+                        match_customer = re.search(r'"customerId"\s*:\s*"([^"]+)"', decoded_payload)
+                        if match_customer:
+                            customer_id = match_customer.group(1)
+                    except Exception as e:
+                        LOGGER.error(f"Gagal parsing JWT customerId: {e}")
+                        
+                self.tokens["customerId"] = customer_id
+                # ------------------------------------------------------------------
+                
                 LOGGER.info("Amazon API: Sesi TV berhasil didapatkan!")
                 return self.tokens
         return False
 
     async def get_playback_info(self, asin: str):
-        """Mendapatkan metadata lagu, mengekstrak MPD Manifest, dan parsing PSSH/KID"""
         device_id = self.tokens.get('device_id')
         access_token = self.tokens.get('x-amz-access-token')
         marketplace_id = self.tokens.get('marketplaceId', 'US')
+        customer_id = self.tokens.get('customerId', '')
         
-        # 1. Lookup Metadata
         lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
         lookup_payload = {
             "asins": [asin],
@@ -129,7 +150,6 @@ class AmazonApi:
                     artist = track.get('artist', {}).get('name', 'Unknown Artist')
                     album = track.get('album', {}).get('title', 'Unknown Album')
         
-        # 2. Ambil MPD Manifest
         dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
         dmls_payload = {
             "deviceToken": {"deviceTypeId": "A1KAXIG6VXSG8Y", "deviceId": device_id},
@@ -137,7 +157,11 @@ class AmazonApi:
             "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
             "musicDashVersionList": ["SIREN_KATANA"],
             "contentProtectionList": ["TRACK_PSSH"],
-            "customerInfo": {"marketplaceId": marketplace_id, "territoryId": marketplace_id},
+            "customerInfo": {
+                "customerId": customer_id,  # <-- FIX ERROR 400 VALIDATION
+                "marketplaceId": marketplace_id, 
+                "territoryId": marketplace_id
+            },
             "try3dAsinSubstitution": True,
             "tryAsinSubstitution": True
         }
@@ -154,7 +178,6 @@ class AmazonApi:
             dmls_data = await resp.json()
             mpd_text = dmls_data["contentResponseList"][0]["manifest"]
             
-        # 3. Parsing MPD (Cari Kualitas Audio Terbaik dan kunci DRM)
         representations = re.findall(r"<Representation\b[\s\S]*?</Representation>", mpd_text)
         best_bw = 0
         best_url = ""
@@ -174,7 +197,6 @@ class AmazonApi:
         return {'title': title, 'artist': artist, 'album': album, 'url': best_url, 'kid': kid}
 
     async def get_license(self, challenge_b64, track_asin):
-        """Meminta lisensi dekripsi ke Amazon menggunakan Challenge PlayReady"""
         url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
         payload = {
             "deviceToken": {
