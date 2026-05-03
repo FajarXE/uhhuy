@@ -412,6 +412,35 @@ class Config:
 #--------------------
 # --- BATAS TAMBAHAN ---
 
+#--------------------    
+# AMAZON MUSIC
+#--------------------
+    AMAZON_ACCOUNTS = []
+    i = 1
+    while True:
+        # Untuk akun global, kita biasanya menggunakan refresh_token dari hasil login TV
+        refresh_token = getenv(f"AMAZON_REFRESH_TOKEN_{i}")
+        region = getenv(f"AMAZON_REGION_{i}", "us") # Default ke 'us' jika tidak diisi
+        
+        if refresh_token:
+            logging.info(f"Ditemukan Amazon Music Akun #{i} (Region: {region.upper()})")
+            account_data = {
+                "refresh_token": refresh_token, 
+                "region": region.lower(), 
+                "id": i
+            }
+            AMAZON_ACCOUNTS.append(account_data)
+            i += 1
+        else:
+            if i > 1:
+                 logging.info(f"Selesai memuat {i-1} akun Amazon Music.")
+            break
+    
+    if not AMAZON_ACCOUNTS:
+        logging.warning("Tidak ada kredensial Amazon Music (AMAZON_REFRESH_TOKEN_1, dll) di .env")
+#--------------------
+# --- BATAS TAMBAHAN ---
+    
 #--------------------
 # RENDER MANAGEMENT
 #--------------------
