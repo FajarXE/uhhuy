@@ -136,6 +136,12 @@ try:
 except ImportError:
     khinsider_manager = None
 
+# 18. Amazon
+try:
+    from bot.helpers.amazon.manager import amazon_manager
+except ImportError:
+    amazon_manager = None
+
 
 # --- IMPOR HANDLER LAYANAN ---
 
@@ -243,6 +249,13 @@ try:
 except ImportError:
     async def start_khinsider(*args, **kwargs):
         raise NotImplementedError("Modul Khinsider belum diimplementasikan.")
+
+# Amazon
+try:
+    from bot.helpers.amazon.handler import start_amazon
+except ImportError:
+    async def start_amazon(*args, **kwargs):
+        raise NotImplementedError("Modul Amazon Music belum diimplementasikan.")
 
 
 from ..helpers.message import send_message, check_user, fetch_user_details, edit_message
@@ -518,6 +531,7 @@ async def start_link(link: str, user: dict) -> None:
 
     khinsider = ["https://downloads.khinsider.com", "downloads.khinsider.com", "http://downloads.khinsider.com"]
 
+    amazon = ["https://music.amazon.com", "https://music.amazon.co.jp", "https://music.amazon.co.uk", "https://music.amazon.fr", "music.amazon"]
     
     # Blok TIDAL
     if link.startswith(tuple(tidal)):
@@ -969,6 +983,22 @@ async def start_link(link: str, user: dict) -> None:
             return
         except Exception as e:
             LOGGER.error(f"Khinsider Gagal: {e}")
+            raise e
+
+    # Blok AMAZON MUSIC
+    elif any(d in link for d in amazon):
+        user['provider'] = 'Amazon Music'
+        if not amazon_manager or not amazon_manager.clients:
+            raise Exception("Maaf, tidak ada akun Amazon Music bot yang aktif saat ini.")
+            
+        try:
+            await start_amazon(link, user)
+            from bot.logger import LOGGER
+            LOGGER.info("Amazon Music: Unduhan berhasil.")
+            return
+        except Exception as e:
+            from bot.logger import LOGGER
+            LOGGER.error(f"Amazon Music Gagal: {e}")
             raise e
 
     else:
