@@ -930,7 +930,7 @@ async def uset_amz_login_cmd(client, message):
 async def amz_tv_auth_cmd(client, message):
     user_id = message.from_user.id
 
-    # --- BATAS MAKSIMAL 5 ANTREAN LOGIN ---
+    # 1. Batasi jumlah antrean login agar tidak membebani server
     if len(PENDING_AMAZON_AUTH) >= 5 and user_id not in PENDING_AMAZON_AUTH:
         return await message.reply_text(
             "❌ **Antrean Login Penuh!**\n"
@@ -947,12 +947,15 @@ async def amz_tv_auth_cmd(client, message):
         
     msg = await message.reply_text("🔄 **Meminta kode TV dari Amazon...**")
     
+    # Inisialisasi API Amazon
+    from bot.helpers.amazon.amazon_api import AmazonApi
+    amz_api = AmazonApi(region=region)
+    
     try:
-        from bot.helpers.amazon.amazon_api import AmazonApi
-        
-        amz_api = AmazonApi(region=region)
+        # 2. Ambil kode aktivasi dari server Amazon
         public_code, register_code, activation_url = await amz_api.get_tv_device_code()
         
+        # Simpan objek API ke memori untuk proses polling nanti
         PENDING_AMAZON_AUTH[user_id] = {
             "api": amz_api,
             "register_code": register_code,
@@ -973,14 +976,19 @@ async def amz_tv_auth_cmd(client, message):
         await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
         
     except Exception as e:
-        await msg.edit_text(f"❌ **Gagal mendapatkan kode TV:** {e}")
+        # [FIX] Pastikan sesi ditutup jika GAGAL mendapatkan kode awal
+        await amz_api.close()
+        
+        # [FIX] Potong pesan error agar tidak menyebabkan error "MessageTooLong" di Telegram
+        error_msg = str(e)[:400]
+        await msg.edit_text(f"❌ **Gagal mendapatkan kode TV:**\n`{error_msg}`")
+
 
 # --- HANDLER VERIFIKASI LOGIN ---
 @Client.on_callback_query(filters.regex("^amz_auth_verify"))
 async def amz_auth_verify_cb(client, query):
     user_id = query.from_user.id
     
-    # Pastikan PENDING_AMAZON_AUTH sudah didefinisikan di level global file ini
     if user_id not in PENDING_AMAZON_AUTH:
         return await query.answer("Sesi login tidak ditemukan atau sudah kadaluarsa. Silakan ulangi /amazon_auth.", show_alert=True)
         
@@ -992,16 +1000,16 @@ async def amz_auth_verify_cb(client, query):
     region = auth_data["region"]
     
     try:
-        # 1. Panggil fungsi polling ke Amazon
+        # 1. Lakukan Polling untuk mengecek apakah user sudah tekan 'Allow'
         tokens = await amz_api.poll_tv_auth(register_code)
         
-        # [FIX] Tutup sesi API segera setelah polling selesai untuk mencegah "Unclosed client session"
+        if not tokens:
+            # User mungkin belum menekan Allow, jangan tutup sesi dulu agar mereka bisa mencoba lagi
+            return await query.message.reply_text("❌ **Verifikasi gagal.** Anda belum memasukkan kode atau menekan Allow di web Amazon.")
+
+        # 2. Jika sukses, segera tutup sesi HTTP untuk mencegah kebocoran koneksi
         await amz_api.close() 
 
-        if not tokens:
-            return await query.message.reply_text("❌ **Verifikasi gagal.** Anda belum memasukkan kode atau menekan Allow di web Amazon.")
-            
-        # 2. Jika berhasil, simpan ke database dan manager
         from bot.helpers.database.mongo_async import database
         from bot.helpers.amazon.manager import amazon_manager
         
@@ -1010,10 +1018,9 @@ async def amz_auth_verify_cb(client, query):
             "tokens": tokens
         }
         
-        # Simpan secara permanen ke MongoDB
+        # 3. Simpan permanen ke database dan aktifkan di memori bot
         await database.save_user_settings(user_id, {'amazon_account': account_data})
         
-        # Daftarkan ke dalam Manager agar bisa langsung digunakan untuk mengunduh
         if amazon_manager and hasattr(amazon_manager, 'add_user_account'):
             await amazon_manager.add_user_account(user_id, account_data)
             
@@ -1023,15 +1030,18 @@ async def amz_auth_verify_cb(client, query):
             f"Bot sekarang akan menggunakan akun Anda untuk mengunduh lagu."
         )
         
-        # 3. Bersihkan memori sementara setelah sukses
+        # Bersihkan antrean memori
         del PENDING_AMAZON_AUTH[user_id]
         
     except Exception as e:
-        # Pastikan sesi ditutup jika terjadi error di tengah proses simpan database
-        if 'amz_api' in locals() and hasattr(amz_api, 'session') and not amz_api.session.closed:
+        # [FIX] Tutup sesi jika terjadi error tak terduga (misal: koneksi terputus/DB error)
+        if 'amz_api' in locals() and not amz_api.session.closed:
             await amz_api.close()
             
-        await query.message.reply_text(f"❌ **Terjadi kesalahan saat menyimpan sesi:** {e}")
+        if user_id in PENDING_AMAZON_AUTH:
+            del PENDING_AMAZON_AUTH[user_id]
+            
+        await query.message.reply_text(f"❌ **Terjadi kesalahan saat menyimpan sesi:** {str(e)[:400]}")
 
 # 2. CALLBACK MENU AUTH
 @Client.on_callback_query(filters.regex("^uamz_auth"))
