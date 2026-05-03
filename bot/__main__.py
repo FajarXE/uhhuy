@@ -63,6 +63,7 @@ bandcamp_manager = safe_import('bot.helpers.bandcamp.manager', 'bandcamp_manager
 livephish_manager = safe_import('bot.helpers.livephish.manager', 'livephish_manager')
 beatstars_manager = safe_import('bot.helpers.beatstars.manager', 'beatstars_manager')
 khinsider_manager = safe_import('bot.helpers.khinsider.manager', 'khinsider_manager')
+amazon_manager = safe_import('bot.helpers.amazon.manager', 'amazon_manager')
 
 
 # --- [DEBUG] EXCEPTION HANDLER ---
@@ -173,7 +174,7 @@ async def start_services():
         (highresaudio_manager, "HIGHRESAUDIO"), (moov_manager, "Moov"),
         (jiosaavn_manager, "JioSaavn"), (gaana_manager, "Gaana"), 
         (bandcamp_manager, "Bandcamp"), (livephish_manager, "LivePhish"), 
-        (beatstars_manager, "BeatStars"), (khinsider_manager, "Khinsider")
+        (beatstars_manager, "BeatStars"), (khinsider_manager, "Khinsider"), (amazon_manager, "Amazon Music")
     ]
 
     for mgr, name in managers:
@@ -231,7 +232,7 @@ async def shutdown_all_services():
     managers_list = [
         deezer_manager, beatport_manager, tidal_manager, kkbox_manager,
         beatsource_manager, soundcloud_manager, idagio_manager, nugs_manager, bugs_manager, highresaudio_manager, moov_manager,
-        jiosaavn_manager, gaana_manager, bandcamp_manager, livephish_manager, beatstars_manager, khinsider_manager
+        jiosaavn_manager, gaana_manager, bandcamp_manager, livephish_manager, beatstars_manager, khinsider_manager, amazon_manager
     ]
     for mgr in managers_list:
         if mgr and hasattr(mgr, 'shutdown'):
