@@ -20,10 +20,9 @@ RUN curl -O https://downloads.rclone.org/v1.70.2/rclone-v1.70.2-linux-amd64.zip 
     install -m 755 rclone-v1.70.2-linux-amd64/rclone /usr/bin/rclone && \
     rm -rf rclone-v1.70.2-linux-amd64*
 
-# [TAMBAHAN] Download & Install Bento4 untuk mp4decrypt
 RUN wget https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-640.x86_64-unknown-linux.zip && \
     unzip Bento4-SDK-1-6-0-640.x86_64-unknown-linux.zip -d bento4 && \
-    install -m 755 bento4/bin/mp4decrypt /usr/bin/mp4decrypt && \
+    install -m 755 bento4/Bento4-SDK-1-6-0-640.x86_64-unknown-linux/bin/mp4decrypt /usr/bin/mp4decrypt && \
     rm -rf Bento4* bento4
 
 FROM --platform=linux/amd64 base AS final
