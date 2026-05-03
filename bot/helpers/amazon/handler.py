@@ -65,15 +65,17 @@ async def start_album(album_asin: str, user: dict, url: str):
 
     device_id = client.tokens.get('device_id')
     access_token = client.tokens.get('x-amz-access-token')
-    marketplace_id = client.tokens.get('marketplaceId', 'US')
     device_type_id = client.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
+    
+    # --- FIX: PASTIKAN TERRITORY ADALAH KODE NEGARA (MX) ---
+    music_territory = client.region.upper() 
     
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
     lookup_payload = {
         "asins": [album_asin],
         "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
         "requestedContent": "MUSIC_SUBSCRIPTION",
-        "musicTerritory": marketplace_id,
+        "musicTerritory": music_territory, # Harus "MX"
         "deviceId": device_id,
         "deviceType": device_type_id
     }
@@ -87,18 +89,15 @@ async def start_album(album_asin: str, user: dict, url: str):
         if resp.status == 200:
             data = await resp.json()
             
-            # 1. Pencarian Standar
             for album in data.get("albumList", []):
                 for track in album.get("trackList", []):
                     if track.get("asin"):
                         track_asins.append(track["asin"])
                         
-            # 2. Jika kosong, gunakan Pencarian Paksa (Brute-Force) ke seluruh kedalaman JSON
             if not track_asins:
                 def extract_track_asins(obj):
                     found = []
                     if isinstance(obj, dict):
-                        # Ambil ASIN hanya jika objek ini adalah lagu (punya nomor urut atau durasi)
                         if 'asin' in obj and ('trackNumber' in obj or 'durationSeconds' in obj):
                             found.append(obj['asin'])
                         for v in obj.values():
@@ -107,15 +106,14 @@ async def start_album(album_asin: str, user: dict, url: str):
                         for item in obj:
                             found.extend(extract_track_asins(item))
                     return found
+                track_asins = list(dict.fromkeys(extract_track_asins(data))) 
                 
-                track_asins = list(dict.fromkeys(extract_track_asins(data))) # Ekstrak dan hapus duplikat
-                
-            # 3. Jika masih saja kosong, berikan pesan error yang berisi respons mentah dari Amazon
             if not track_asins:
-                err_dump = str(data)[:500] # Ambil 500 karakter pertama agar tidak terlalu panjang
+                err_dump = str(data)[:500] 
                 raise Exception(f"Amazon tidak mengembalikan daftar lagu. Respons server: {err_dump}")
         else:
-            raise Exception(f"HTTP Error {resp.status} saat mencari album.")
+            err_txt = await resp.text()
+            raise Exception(f"HTTP Error {resp.status} saat mencari album: {err_txt}")
             
     LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album.")
     if 'bot_msg' in user:
