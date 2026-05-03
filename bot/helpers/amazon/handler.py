@@ -7,24 +7,24 @@ from bot.logger import LOGGER
 from config import Config
 from .manager import amazon_manager
 from bot.helpers.aria2_helper import aria2_download
-from bot.helpers.utils import ffmpeg_convert_and_tag
-from bot.helpers.uploder import track_upload
+
+# --- FIX IMPORT: Menyesuaikan dengan struktur asli bot Anda ---
+from bot.helpers.tidal.utils import ffmpeg_convert_and_tag
+from bot.helpers.uploder import telegram_upload
+# --------------------------------------------------------------
 
 try:
     from .drm import pypr, pydecrypt
-except ImportError:
-    pass
+except ImportError as e:
+    LOGGER.warning(f"Amazon DRM module missing: {e}")
 
 async def start_amazon(url: str, user: dict):
-    # Parsing URL untuk menentukan ID dan Tipe (track/album/playlist)
     asin = url.split('/')[-1]
     await start_track(asin, user, url)
 
 async def start_track(asin: str, user: dict, url: str):
-    # --- FIX: Sertakan user_id agar manager memberikan akun Private Anda ---
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
-    # ----------------------------------------------------------------------
     
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
@@ -75,6 +75,7 @@ async def start_track(asin: str, user: dict, url: str):
 
     # 5. Konversi & Tagging
     track_meta['filepath'] = final_path
+    # Jika fungsi FFmpeg Anda membutuhkan 3 parameter, tambahkan final_path di akhir
     await ffmpeg_convert_and_tag(dec_path, track_meta)
 
     # Bersihkan file sementara
@@ -84,5 +85,5 @@ async def start_track(asin: str, user: dict, url: str):
     except:
         pass
 
-    # 6. Upload
-    await track_upload(track_meta, user, disable_link=False)
+    # 6. Upload (Menggunakan telegram_upload)
+    await telegram_upload(track_meta, user)
