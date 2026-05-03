@@ -988,8 +988,15 @@ async def start_link(link: str, user: dict) -> None:
     # Blok AMAZON MUSIC
     elif any(d in link for d in amazon):
         user['provider'] = 'Amazon Music'
-        if not amazon_manager or not amazon_manager.clients:
-            raise Exception("Maaf, tidak ada akun Amazon Music bot yang aktif saat ini.")
+        user_id = user.get('user_id')
+        
+        # Cek apakah ada akun Global atau akun Private milik user yang aktif
+        has_global = len(getattr(amazon_manager, 'clients', [])) > 0 if amazon_manager else False
+        has_private = amazon_manager.has_private_session(user_id) if amazon_manager else False
+
+        # Jika keduanya tidak ada, baru tolak unduhan
+        if not amazon_manager or (not has_global and not has_private):
+            raise Exception("Maaf, tidak ada akun Amazon Music bot (Global maupun Private) yang aktif untuk Anda saat ini.")
             
         try:
             await start_amazon(link, user)
