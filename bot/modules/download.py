@@ -253,9 +253,11 @@ except ImportError:
 # Amazon
 try:
     from bot.helpers.amazon.handler import start_amazon
-except ImportError:
+except Exception as e:
+    from bot.logger import LOGGER
+    LOGGER.error(f"Gagal memuat modul Amazon Handler: {e}")
     async def start_amazon(*args, **kwargs):
-        raise NotImplementedError("Modul Amazon Music belum diimplementasikan.")
+        raise NotImplementedError(f"Modul Amazon Music gagal dimuat karena: {e}")
 
 
 from ..helpers.message import send_message, check_user, fetch_user_details, edit_message
