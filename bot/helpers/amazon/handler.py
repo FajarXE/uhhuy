@@ -43,16 +43,13 @@ async def start_amazon(url: str, user: dict):
     parsed = urlparse.urlparse(url)
     qs = urlparse.parse_qs(parsed.query)
     
-    # 1. Jika URL adalah track spesifik dari dalam album (mengandung trackAsin)
     if 'trackAsin' in qs:
         asin = qs['trackAsin'][0]
         await start_track(asin, user, url)
         return
     
-    # Ambil ASIN utama dari URL
     asin = parsed.path.strip('/').split('/')[-1]
     
-    # 2. Pisahkan penanganan antara Link Album dan Link Track biasa
     if '/albums/' in parsed.path or '/album/' in parsed.path:
         await start_album(asin, user, url)
     else:
@@ -66,7 +63,6 @@ async def start_album(album_asin: str, user: dict, url: str):
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
 
-    # --- REQUEST DATA ALBUM UNTUK MENDAPATKAN SEMUA ID LAGU ---
     device_id = client.tokens.get('device_id')
     access_token = client.tokens.get('x-amz-access-token')
     marketplace_id = client.tokens.get('marketplaceId', 'US')
@@ -75,7 +71,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
     lookup_payload = {
         "asins": [album_asin],
-        "features": ["expandTracklist"],
+        "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
         "requestedContent": "MUSIC_SUBSCRIPTION",
         "musicTerritory": marketplace_id,
         "deviceId": device_id,
@@ -90,10 +86,18 @@ async def start_album(album_asin: str, user: dict, url: str):
     async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
         if resp.status == 200:
             data = await resp.json()
-            tracks = data.get("trackList", [])
-            # Kumpulkan semua ASIN lagu (bukan ASIN Album)
-            track_asins = [t.get("asin") for t in tracks if t.get("asin")]
             
+            # --- FIX: Buka kotak "albumList" terlebih dahulu ---
+            albums = data.get("albumList", [])
+            if albums:
+                tracks = albums[0].get("trackList", [])
+                track_asins = [t.get("asin") for t in tracks if t.get("asin")]
+            
+            # Fallback jika ternyata Amazon mengirimkannya langsung ke trackList
+            if not track_asins:
+                tracks = data.get("trackList", [])
+                track_asins = [t.get("asin") for t in tracks if t.get("asin")]
+                
     if not track_asins:
         raise Exception("Gagal mengambil daftar lagu. Pastikan link Album valid.")
         
@@ -101,7 +105,6 @@ async def start_album(album_asin: str, user: dict, url: str):
     if 'bot_msg' in user:
         await user['bot_msg'].edit_text(f"💿 **Album Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
 
-    # Unduh lagu satu per satu secara berurutan
     for t_asin in track_asins:
         try:
             await start_track(t_asin, user, url)
