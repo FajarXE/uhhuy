@@ -1,6 +1,4 @@
-# [FILE: Dockerfile]
-
-# --- FIX 1: Tambahkan --platform=linux/amd64 untuk memaksa 64-bit ---
+# [GANTI FILE: Dockerfile]
 FROM --platform=linux/amd64 python:3.12-slim AS base
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -8,27 +6,30 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /usr/src/app
 
-# Install curl dan dependencies sistem (DITAMBAHKAN: aria2)
 RUN apt-get update -qq && \
     apt-get install -qq -y ffmpeg gcc libffi-dev curl zip cargo pkg-config git aria2 && \
     rm -rf /var/lib/apt/lists/*
 
-# Builder Stage
 FROM --platform=linux/amd64 base AS builder
 RUN apt-get update -qq && \
     apt-get install -qq -y git wget unzip && \
     rm -rf /var/lib/apt/lists/*
 
-# Download Rclone (Hardcode amd64 karena kita sudah paksa platform di atas)
 RUN curl -O https://downloads.rclone.org/v1.70.2/rclone-v1.70.2-linux-amd64.zip && \
     unzip rclone-v1.70.2-linux-amd64.zip && \
     install -m 755 rclone-v1.70.2-linux-amd64/rclone /usr/bin/rclone && \
     rm -rf rclone-v1.70.2-linux-amd64*
 
-# Final Stage
+# [TAMBAHAN] Download & Install Bento4 untuk mp4decrypt
+RUN wget https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-640.x86_64-unknown-linux.zip && \
+    unzip Bento4-SDK-1-6-0-640.x86_64-unknown-linux.zip -d bento4 && \
+    install -m 755 bento4/bin/mp4decrypt /usr/bin/mp4decrypt && \
+    rm -rf Bento4* bento4
+
 FROM --platform=linux/amd64 base AS final
 
 COPY --from=builder /usr/bin/rclone /usr/bin/rclone
+COPY --from=builder /usr/bin/mp4decrypt /usr/bin/mp4decrypt
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
