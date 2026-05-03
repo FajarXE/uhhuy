@@ -970,7 +970,7 @@ async def amz_tv_auth_cmd(client, message):
         from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         buttons = [[InlineKeyboardButton("✅ Saya Sudah Login", callback_data="amz_auth_verify")]]
         
-        await msg.edit_text(text, markup=InlineKeyboardMarkup(buttons))
+        await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
         
     except Exception as e:
         await msg.edit_text(f"❌ **Gagal mendapatkan kode TV:** {e}")
