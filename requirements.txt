@@ -26,3 +26,4 @@ aioaria2
 uvloop
 cryptography
 inquirer
+ecpy
