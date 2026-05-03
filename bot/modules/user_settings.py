@@ -980,6 +980,7 @@ async def amz_tv_auth_cmd(client, message):
 async def amz_auth_verify_cb(client, query):
     user_id = query.from_user.id
     
+    # Pastikan PENDING_AMAZON_AUTH sudah didefinisikan di level global file ini
     if user_id not in PENDING_AMAZON_AUTH:
         return await query.answer("Sesi login tidak ditemukan atau sudah kadaluarsa. Silakan ulangi /amazon_auth.", show_alert=True)
         
@@ -990,14 +991,17 @@ async def amz_auth_verify_cb(client, query):
     register_code = auth_data["register_code"]
     region = auth_data["region"]
     
-    # Panggil fungsi polling ke Amazon
-    tokens = await amz_api.poll_tv_auth(register_code)
-    
-    if not tokens:
-        return await query.message.reply_text("❌ **Verifikasi gagal.** Anda belum memasukkan kode atau menekan Allow di web Amazon.")
-        
-    # Jika berhasil, simpan ke database dan manager
     try:
+        # 1. Panggil fungsi polling ke Amazon
+        tokens = await amz_api.poll_tv_auth(register_code)
+        
+        # [FIX] Tutup sesi API segera setelah polling selesai untuk mencegah "Unclosed client session"
+        await amz_api.close() 
+
+        if not tokens:
+            return await query.message.reply_text("❌ **Verifikasi gagal.** Anda belum memasukkan kode atau menekan Allow di web Amazon.")
+            
+        # 2. Jika berhasil, simpan ke database dan manager
         from bot.helpers.database.mongo_async import database
         from bot.helpers.amazon.manager import amazon_manager
         
@@ -1006,19 +1010,27 @@ async def amz_auth_verify_cb(client, query):
             "tokens": tokens
         }
         
-        # Simpan permanen ke MongoDB
+        # Simpan secara permanen ke MongoDB
         await database.save_user_settings(user_id, {'amazon_account': account_data})
         
-        # Masukkan ke dalam Manager
-        if hasattr(amazon_manager, 'add_user_account'):
+        # Daftarkan ke dalam Manager agar bisa langsung digunakan untuk mengunduh
+        if amazon_manager and hasattr(amazon_manager, 'add_user_account'):
             await amazon_manager.add_user_account(user_id, account_data)
             
-        await query.message.edit_text(f"✅ **Login Berhasil!**\nSesi Private Amazon Music (Region: {region.upper()}) Anda telah disimpan. Bot sekarang akan menggunakan akun Anda untuk mengunduh lagu.")
+        await query.message.edit_text(
+            f"✅ **Login Berhasil!**\n"
+            f"Sesi Private Amazon Music (Region: {region.upper()}) Anda telah disimpan. "
+            f"Bot sekarang akan menggunakan akun Anda untuk mengunduh lagu."
+        )
         
-        # Bersihkan memori sementara
+        # 3. Bersihkan memori sementara setelah sukses
         del PENDING_AMAZON_AUTH[user_id]
         
     except Exception as e:
+        # Pastikan sesi ditutup jika terjadi error di tengah proses simpan database
+        if 'amz_api' in locals() and hasattr(amz_api, 'session') and not amz_api.session.closed:
+            await amz_api.close()
+            
         await query.message.reply_text(f"❌ **Terjadi kesalahan saat menyimpan sesi:** {e}")
 
 # 2. CALLBACK MENU AUTH
