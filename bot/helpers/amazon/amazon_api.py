@@ -134,12 +134,15 @@ class AmazonApi:
         customer_id = self.tokens.get('customerId')
         device_type_id = self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
         
+        # --- FIX: PISAHKAN MUSIC TERRITORY DENGAN MARKETPLACE ID ---
+        music_territory = self.region.upper()
+        
         lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
         lookup_payload = {
             "asins": [asin],
             "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
             "requestedContent": "MUSIC_SUBSCRIPTION",
-            "musicTerritory": marketplace_id,
+            "musicTerritory": music_territory, # Harus "MX"
             "deviceId": device_id,
             "deviceType": device_type_id
         }
@@ -162,7 +165,7 @@ class AmazonApi:
         dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
         customer_info = {
             "marketplaceId": marketplace_id,
-            "territoryId": marketplace_id
+            "territoryId": music_territory # Harus "MX"
         }
         if customer_id:
             customer_info["customerId"] = customer_id
@@ -187,13 +190,23 @@ class AmazonApi:
         async with self.session.post(dmls_url, json=dmls_payload, headers=dmls_headers) as resp:
             if resp.status != 200:
                 raise Exception(f"Gagal memuat MPD Amazon ({resp.status}): {await resp.text()}")
-            dmls_data = await resp.json()
-            mpd_text = dmls_data["contentResponseList"][0]["manifest"]
             
-        # --- FIX: EKSTRAKSI LEBIH TANGGUH & MENGIZINKAN TANPA DRM ---
+            dmls_data = await resp.json()
+            
+            # --- TANGKAP ERROR PENOLAKAN AMAZON (PREMIUM/REGION BLOCK) ---
+            if not dmls_data.get("contentResponseList"):
+                raise Exception(f"Amazon menolak memberikan file. Respons: {json.dumps(dmls_data)}")
+                
+            item_resp = dmls_data["contentResponseList"][0]
+            if item_resp.get("status") != "SUCCESS" or "error" in item_resp:
+                err_code = item_resp.get("error", {}).get("code", "UNKNOWN")
+                err_msg = item_resp.get("error", {}).get("message", "Akses ditolak.")
+                raise Exception(f"Ditolak Amazon: [{err_code}] {err_msg}")
+                
+            mpd_text = item_resp.get("manifest", "")
+            
         best_bw = 0
         best_url = ""
-        
         kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
         kid = kid_match.group(1).strip() if kid_match else ""
         
@@ -208,13 +221,11 @@ class AmazonApi:
                     best_bw = bw
                     best_url = html.unescape(url_match.group(1).strip())
                     
-        # Fallback jika BaseURL ada di luar Representation
         if not best_url:
             url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", mpd_text, re.IGNORECASE)
             if url_match:
                 best_url = html.unescape(url_match.group(1).strip())
                 
-        # Debugging log jika formatnya benar-benar tidak dikenali
         if not best_url:
             LOGGER.error(f"Amazon MPD Parse Failed! Isi MPD: {mpd_text[:1000]}")
             
