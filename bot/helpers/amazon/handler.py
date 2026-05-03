@@ -1,4 +1,4 @@
-# [BUAT FILE BARU: bot/helpers/amazon/handler.py]
+# [FILE: bot/helpers/amazon/handler.py]
 
 import asyncio
 import os
@@ -10,27 +10,28 @@ from bot.helpers.aria2_helper import aria2_download
 from bot.helpers.utils import ffmpeg_convert_and_tag
 from bot.helpers.uploder import track_upload
 
-# Import script external DRM
 try:
     from .drm import pypr, pydecrypt
-    from .drm.amazonmusic_manifest import AmazonManifest
 except ImportError:
     pass
 
 async def start_amazon(url: str, user: dict):
     # Parsing URL untuk menentukan ID dan Tipe (track/album/playlist)
-    # Untuk POC, diasumsikan link tunggal track/album
     asin = url.split('/')[-1]
     await start_track(asin, user, url)
 
 async def start_track(asin: str, user: dict, url: str):
-    client = user.get('amazon_api') or amazon_manager.get_client()
+    # --- FIX: Sertakan user_id agar manager memberikan akun Private Anda ---
+    user_id = user.get('user_id')
+    client = user.get('amazon_api') or amazon_manager.get_client(user_id)
+    # ----------------------------------------------------------------------
+    
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
 
     LOGGER.info(f"Amazon: Mengambil info untuk {asin}")
     
-    # 1. Parsing Manifest & Ekstrak Data (Adaptasi dari amazonmusic_manifest.py)
+    # 1. Parsing Manifest & Ekstrak Data
     manifest_data = await client.get_playback_info(asin)
     
     # Setup Metadata
@@ -48,8 +49,7 @@ async def start_track(asin: str, user: dict, url: str):
     os.makedirs(folder_path, exist_ok=True)
     track_meta['folderpath'] = folder_path
 
-    # Extract Audio URL & PSSH
-    audio_url = manifest_data.get('url') # Sesuaikan dengan struktur MPD parser Anda
+    audio_url = manifest_data.get('url') 
     pssh_b64 = manifest_data.get('pssh') 
     
     enc_path = f"{folder_path}/{track_meta['title']}.enc.mp4"
@@ -67,10 +67,9 @@ async def start_track(asin: str, user: dict, url: str):
     license_data = await client.get_license(pssh_b64)
     prd_path = "bot/helpers/amazon/drm/hisense_smarttv_hu32e5600fhwv_sl3000.prd"
     
-    # Eksekusi pypr.py di thread terpisah agar tidak memblokir loop
     keys = await asyncio.to_thread(pypr.extract_keys, license_data, prd_path)
 
-    # 4. Dekripsi (Gunakan pydecrypt / mp4decrypt)
+    # 4. Dekripsi
     LOGGER.info(f"Amazon: Mendekripsi dengan keys {keys}")
     await asyncio.to_thread(pydecrypt.decrypt_file, enc_path, dec_path, keys)
 
