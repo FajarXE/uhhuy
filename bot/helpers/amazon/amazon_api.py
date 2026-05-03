@@ -28,7 +28,6 @@ class AmazonApi:
             "de": "https://music.amazon.de/",
         }
         
-        # --- FIX: HARDCODE MARKETPLACE ID AGAR TIDAK KONFLIK ---
         self.marketplaces = {
             "mx": "ART4WZ8MWBX2Y",
             "br": "A2Q3Y263D00KWC",
@@ -142,8 +141,7 @@ class AmazonApi:
         marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
         music_territory = self.region.upper()
         
-        # --- FIX: HAPUS self.api_location DARI URL AGAR TIDAK ERROR 404/400 ---
-        lookup_url = f"{self.base_url}api/muse/legacy/lookup"
+        lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
         
         lookup_payload = {
             "asins": [asin],
@@ -169,8 +167,7 @@ class AmazonApi:
                     artist = track.get('artist', {}).get('name', 'Unknown Artist')
                     album = track.get('album', {}).get('title', 'Unknown Album')
         
-        # --- FIX: HAPUS self.api_location DARI URL ---
-        dmls_url = f"{self.base_url}api/dmls/"
+        dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
         
         customer_info = {
             "marketplaceId": marketplace_id,
@@ -240,8 +237,7 @@ class AmazonApi:
         return {'title': title, 'artist': artist, 'album': album, 'url': best_url, 'kid': kid}
 
     async def get_license(self, challenge_b64, track_asin):
-        # --- FIX: HAPUS self.api_location DARI URL ---
-        url = f"{self.base_url}api/dmls/getLicenseForPlaybackV2"
+        url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
         
         payload = {
             "deviceToken": {
