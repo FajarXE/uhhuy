@@ -78,6 +78,11 @@ try:
 except ImportError:
     logging.warning("UserSettings: Gagal mengimpor qobuz_manager.")
     qobuz_manager = None
+try:
+    from ..helpers.amazon.manager import amazon_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor amazon_manager.")
+    amazon_manager = None
 
 # --- IMPORT BUTTONS ---
 # Pastikan Anda sudah menambahkan 'beatport_user_auth_buttons' di bot/helpers/buttons/settings.py
@@ -85,7 +90,7 @@ from ..helpers.buttons.settings import (
     usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
     bs_button, sc_button, id_button, bugs_button, lyrics_button, mv_button,
-    lp_button, khi_button, beatport_user_auth_buttons, beatsource_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons
+    lp_button, khi_button, beatport_user_auth_buttons, beatsource_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons
 )
 from ..helpers.database.mongo_async import database
 from ..helpers.utils import fetch_zip_settings
@@ -899,6 +904,80 @@ async def uset_tidal_remove_specific(client, query):
 
 
 # ==================================
+# AMAZON MUSIC PRIVATE AUTH
+# ==================================
+
+# 1. COMMAND LOGIN (Instruksi TV Code)
+@Client.on_message(filters.command("amazon_login"))
+async def uset_amz_login_cmd(client, message):
+    if not await check_user(msg=message):
+        return
+
+    text = (
+        "🔐 **AMAZON MUSIC TV LOGIN**\n\n"
+        "Otentikasi Amazon Music menggunakan alur Smart TV.\n"
+        "Gunakan perintah ini dengan format region Anda (Contoh: `jp` atau `us`):\n\n"
+        "<code>/amazon_auth jp</code>\n\n"
+        "*(Fitur ini akan menghasilkan kode yang harus Anda masukkan di amazon.com/us/code atau amazon.co.jp/a/code)*"
+    )
+    await message.reply_text(text)
+
+# 2. CALLBACK MENU AUTH
+@Client.on_callback_query(filters.regex("^uamz_auth"))
+async def uset_amz_auth_handler(client, query):
+    if not await check_user(msg=query.message):
+        return
+    
+    user_id = query.from_user.id
+    has_session = amazon_manager.has_private_session(user_id)
+    
+    text = "🔐 **AMAZON MUSIC PRIVATE SESSION**\n\n"
+    
+    if has_session:
+        text += f"✅ **Status: LOGGED IN**\n"
+        text += "Bot menggunakan akun Amazon pribadi Anda untuk melewati restriksi Region.\n"
+    else:
+        text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot menggunakan akun Global (Shared) untuk Anda jika tersedia.\n"
+
+    await edit_message(query.message, text, markup=amazon_user_auth_buttons(has_session))
+
+# 3. CALLBACK LOGOUT
+@Client.on_callback_query(filters.regex("^uamz_logout"))
+async def uset_amz_logout_handler(client, query):
+    if not await check_user(msg=query.message):
+        return
+        
+    user_id = query.from_user.id
+    if amazon_manager.has_private_session(user_id):
+        # Asumsikan manager memiliki fungsi remove_user_account
+        try:
+            await amazon_manager.remove_user_account(user_id)
+        except:
+            pass
+        await query.answer("✅ Sesi Amazon Music dihapus. Kembali ke mode Global.", True)
+    else:
+        await query.answer("Anda belum login.", True)
+    
+    await uset_amz_auth_handler(client, query)
+
+# 4. CALLBACK INSTRUKSI
+@Client.on_callback_query(filters.regex("^uamz_instr"))
+async def uset_amz_instr_handler(client, query):
+    if not await check_user(msg=query.message):
+        return
+    
+    text = (
+        "📝 **CARA LOGIN AMAZON MUSIC**\n\n"
+        "Kirim perintah ini di chat untuk mendapatkan TV Code:\n"
+        "<code>/amazon_auth jp</code> (Untuk Region Jepang)\n"
+        "<code>/amazon_auth us</code> (Untuk Region Global/US)"
+    )
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)]]
+    await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
+
+
+# ==================================
 # MENU PENGATURAN UTAMA
 # ==================================
 
@@ -1010,7 +1089,7 @@ async def uset_upload_mode_handler(client, query):
 
 
 # --- HANDLER UTAMA TOMBOL MENU (PROVIDER SETTINGS) ---
-@Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider)"))
+@Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider|amazon)"))
 async def uset_cb(client, query, datatype=""):
     if not await check_user(msg=query.message):
         return
@@ -1343,6 +1422,32 @@ async def uset_cb(client, query, datatype=""):
             quality[current] += '✅'
         
         return await edit_message(query.message, text, markup=khi_button(quality, user_id))
+
+    # --- AMAZON MUSIC MENU ---
+    if data[1] == "amazon" or datatype == "amazon":
+        text = f"Choose Amazon Music Audio Quality bellow:\n(Tergantung pada tier langganan akun)"
+        quality = {
+            "UHD": "UHD (Hi-Res)",
+            "HD": "HD (Lossless/FLAC)",
+            "SD": "SD (Standard MP3)"
+        }
+        
+        has_client = False
+        if amazon_manager:
+            if getattr(amazon_manager, 'global_clients', []) or getattr(amazon_manager, 'clients', []) or amazon_manager.has_private_session(user_id):
+                has_client = True
+
+        if not has_client:
+            return await edit_message(query.message, "Layanan Amazon Music tidak aktif (tidak ada klien yang login).")
+
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("amazon_qual", getattr(amazon_manager, 'quality', 'HD')) 
+        await amazon_manager.setup_quality(user_id, current) 
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+            
+        return await edit_message(query.message, text, markup=amz_button(quality, user_id))
 
 
 # --- HANDLER SETTING TIDAL SPECIFIC ---
@@ -1839,6 +1944,34 @@ async def uset_khinsider_handler(client, query):
     await uset_cb(client, query, "khinsider")
 
 
+# --- HANDLER AMAZON SPECIFIC ---
+@Client.on_callback_query(filters.regex("^uamzs_"))
+async def uset_amazon(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # query.data formatnya: uamzs_UHD, uamzs_HD, uamzs_SD
+    to_set = query.data.split('_')[1]
+    user_id = query.from_user.id
+    
+    has_client = False
+    if amazon_manager:
+        if getattr(amazon_manager, 'global_clients', []) or getattr(amazon_manager, 'clients', []) or amazon_manager.has_private_session(user_id):
+            has_client = True
+
+    if not has_client:
+        await query.answer("Layanan Amazon Music tidak aktif!", show_alert=True)
+        return
+    
+    # Simpan pengaturan ke Manager dan Database
+    await amazon_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['amazon_qual'] = to_set 
+    await database.save_user_settings(user_id, {'amazon_qual': to_set})
+    
+    await uset_cb(client, query, "amazon")
+
+
 # --- HANDLER CALLBACK BARU UNTUK LIRIK ---
 @Client.on_callback_query(filters.regex("^uset_ly"))
 async def uset_lyrics_handler(client, query):
@@ -2084,11 +2217,27 @@ async def debug(c, m):
     else:
         dt_khi += "Tidak ada klien Khinsider yang aktif."
 
+    # =========================================
+    # TAMBAHKAN AMAZON MUSIC DEBUG DI SINI
+    # =========================================
+    dt_amz = "\n\nAMAZON MUSIC:\n"
+    if amazon_manager and (getattr(amazon_manager, 'clients', []) or getattr(amazon_manager, 'user_clients', {})):
+        gl_count = len(getattr(amazon_manager, 'clients', []))
+        pv_count = len(getattr(amazon_manager, 'user_clients', {}))
+        
+        dt_amz += f"{gl_count} klien Global Amazon aktif.\n"
+        dt_amz += f"Private User Clients: {pv_count}\n"
+        dt_amz += f"Kualitas Default: {getattr(amazon_manager, 'quality', 'HD')}\n"
+        dt_amz += f"Cache User (Global): {len([u for u in bot_set.user_data if 'amazon_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_amz += "Tidak ada klien Amazon Music yang aktif."
+    # =========================================
+
     # ZIP SETTINGS DEBUG
     zips = f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
     
-    # Combine all debug texts
-    final_debug_text = dt_qb + dt_bp + dt_bs + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + zips
+    # Combine all debug texts (Pastikan dt_amz ditambahkan ke dalam final_debug_text)
+    final_debug_text = dt_qb + dt_bp + dt_bs + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + zips
     
     # Reply safely
     await m.reply(final_debug_text, True)
