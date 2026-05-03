@@ -98,22 +98,31 @@ class AmazonApi:
                 self.tokens["service_token"] = service_token
                 self.tokens["x-amz-access-token"] = token_data["accessToken"]
                 self.tokens["marketplaceId"] = token_data.get("marketplaceId", "US")
+                self.tokens["deviceTypeId"] = "A1KAXIG6VXSG8Y"
                 
-                # --- FIX: Ekstrak Customer ID dari JWT untuk mencegah error Null ---
-                customer_id = ""
-                if video_player_token and video_player_token.count(".") >= 2:
+                # --- FIX JWT PARSING & DATA EXTRACTION ---
+                if video_player_token:
                     try:
-                        jwt_payload = video_player_token.split(".")[1]
-                        jwt_payload += "=" * (-len(jwt_payload) % 4)
-                        decoded_payload = base64.urlsafe_b64decode(jwt_payload.encode()).decode("latin-1", errors="ignore")
-                        match_customer = re.search(r'"customerId"\s*:\s*"([^"]+)"', decoded_payload)
-                        if match_customer:
-                            customer_id = match_customer.group(1)
-                    except Exception as e:
-                        LOGGER.error(f"Gagal parsing JWT customerId: {e}")
+                        v_obj = json.loads(video_player_token)
+                        v_tok = v_obj.get("token", video_player_token)
+                    except:
+                        v_tok = video_player_token
                         
-                self.tokens["customerId"] = customer_id
-                # ------------------------------------------------------------------
+                    if v_tok and v_tok.count(".") >= 2:
+                        try:
+                            jwt_payload = v_tok.split(".")[1]
+                            jwt_payload += "=" * (-len(jwt_payload) % 4)
+                            decoded = base64.urlsafe_b64decode(jwt_payload.encode()).decode("latin-1", errors="ignore")
+                            
+                            c_id = re.search(r'"customerId"\s*:\s*"([^"]+)"', decoded)
+                            d_id = re.search(r'"deviceId"\s*:\s*"([^"]+)"', decoded)
+                            dt_id = re.search(r'"deviceTypeId"\s*:\s*"([^"]+)"', decoded)
+                            
+                            if c_id: self.tokens["customerId"] = c_id.group(1)
+                            if d_id: self.tokens["device_id"] = d_id.group(1)
+                            if dt_id: self.tokens["deviceTypeId"] = dt_id.group(1)
+                        except Exception as e:
+                            LOGGER.error(f"Gagal parsing JWT VideoPlayer: {e}")
                 
                 LOGGER.info("Amazon API: Sesi TV berhasil didapatkan!")
                 return self.tokens
@@ -123,7 +132,8 @@ class AmazonApi:
         device_id = self.tokens.get('device_id')
         access_token = self.tokens.get('x-amz-access-token')
         marketplace_id = self.tokens.get('marketplaceId', 'US')
-        customer_id = self.tokens.get('customerId', '')
+        customer_id = self.tokens.get('customerId')
+        device_type_id = self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
         
         lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
         lookup_payload = {
@@ -132,7 +142,7 @@ class AmazonApi:
             "requestedContent": "MUSIC_SUBSCRIPTION",
             "musicTerritory": marketplace_id,
             "deviceId": device_id,
-            "deviceType": "A1KAXIG6VXSG8Y"
+            "deviceType": device_type_id
         }
         lookup_headers = {
             "x-amzn-requestid": str(uuid.uuid4()),
@@ -151,17 +161,22 @@ class AmazonApi:
                     album = track.get('album', {}).get('title', 'Unknown Album')
         
         dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
+        
+        # --- FIX: JANGAN KIRIM CUSTOMER_ID JIKA KOSONG (MENCEGAH 400 VALIDATION) ---
+        customer_info = {
+            "marketplaceId": marketplace_id,
+            "territoryId": marketplace_id
+        }
+        if customer_id:
+            customer_info["customerId"] = customer_id
+            
         dmls_payload = {
-            "deviceToken": {"deviceTypeId": "A1KAXIG6VXSG8Y", "deviceId": device_id},
+            "deviceToken": {"deviceTypeId": device_type_id, "deviceId": device_id},
             "appInfo": {"musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {asin})"},
             "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
             "musicDashVersionList": ["SIREN_KATANA"],
             "contentProtectionList": ["TRACK_PSSH"],
-            "customerInfo": {
-                "customerId": customer_id,  # <-- FIX ERROR 400 VALIDATION
-                "marketplaceId": marketplace_id, 
-                "territoryId": marketplace_id
-            },
+            "customerInfo": customer_info,
             "try3dAsinSubstitution": True,
             "tryAsinSubstitution": True
         }
@@ -200,7 +215,7 @@ class AmazonApi:
         url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
         payload = {
             "deviceToken": {
-                "deviceTypeId": "A1KAXIG6VXSG8Y",
+                "deviceTypeId": self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y"),
                 "deviceId": self.tokens.get('device_id')
             },
             "appInfo": {
