@@ -533,7 +533,7 @@ async def start_link(link: str, user: dict) -> None:
 
     khinsider = ["https://downloads.khinsider.com", "downloads.khinsider.com", "http://downloads.khinsider.com"]
 
-    amazon = ["https://music.amazon.com", "https://music.amazon.co.jp", "https://music.amazon.co.uk", "https://music.amazon.fr", "music.amazon"]
+    amazon = ["https://music.amazon.com", "https://music.amazon.co.jp", "https://music.amazon.co.uk", "https://music.amazon.fr", "https://music.amazon.com.mx", "music.amazon"]
     
     # Blok TIDAL
     if link.startswith(tuple(tidal)):
