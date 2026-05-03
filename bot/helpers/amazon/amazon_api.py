@@ -107,8 +107,8 @@ class AmazonApi:
                 token_data = json.loads(service_token)
                 self.tokens["service_token"] = service_token
                 self.tokens["x-amz-access-token"] = token_data["accessToken"]
-                self.tokens["deviceTypeId"] = "A1KAXIG6VXSG8Y"
                 
+                # --- FIX: EKSTRAKSI IDENTITAS LEBIH TANGGUH ---
                 if video_player_token:
                     try:
                         v_obj = json.loads(video_player_token)
@@ -123,8 +123,13 @@ class AmazonApi:
                             decoded = base64.urlsafe_b64decode(jwt_payload.encode()).decode("latin-1", errors="ignore")
                             c_id = re.search(r'"customerId"\s*:\s*"([^"]+)"', decoded)
                             d_id = re.search(r'"deviceId"\s*:\s*"([^"]+)"', decoded)
+                            
+                            # Cek variasi nama key untuk deviceType di JWT
+                            dt_id = re.search(r'"deviceType(?:Id)?"\s*:\s*"([^"]+)"', decoded)
+                            
                             if c_id: self.tokens["customerId"] = c_id.group(1)
                             if d_id: self.tokens["device_id"] = d_id.group(1)
+                            if dt_id: self.tokens["deviceTypeId"] = dt_id.group(1)
                         except Exception as e:
                             LOGGER.error(f"Gagal parsing JWT VideoPlayer: {e}")
                 
@@ -136,7 +141,9 @@ class AmazonApi:
         device_id = self.tokens.get('device_id')
         access_token = self.tokens.get('x-amz-access-token')
         customer_id = self.tokens.get('customerId')
-        device_type_id = self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
+        
+        # --- FIX: AMBIL DEVICE TYPE DARI TOKEN (JIKA ADA), DAN TIMPA HEADERS ---
+        device_type_id = self.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
         
         marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
         music_territory = self.region.upper()
@@ -151,10 +158,14 @@ class AmazonApi:
             "deviceId": device_id,
             "deviceType": device_type_id
         }
+        
+        # SUNTIKKAN HEADER SECARA EKSPLISIT AGAR MATCH DENGAN TOKEN
         lookup_headers = {
             "x-amzn-requestid": str(uuid.uuid4()),
             "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
-            "x-amz-access-token": access_token
+            "x-amz-access-token": access_token,
+            "x-amzn-device-type-id": device_type_id,
+            "x-amzn-hardware-device-type-id": device_type_id
         }
         
         title, artist, album = asin, "Unknown Artist", "Unknown Album"
@@ -186,11 +197,15 @@ class AmazonApi:
             "try3dAsinSubstitution": True,
             "tryAsinSubstitution": True
         }
+        
+        # SUNTIKKAN HEADER DI SINI JUGA
         dmls_headers = {
             "X-Amz-RequestId": str(uuid.uuid4()),
             "X-Amz-Target": "com.amazon.digitalmusiclocator.DigitalMusicLocatorServiceExternal.getDashManifestsV2",
             "x-amz-access-token": access_token,
-            "Content-Encoding": "amz-1.0"
+            "Content-Encoding": "amz-1.0",
+            "x-amzn-device-type-id": device_type_id,
+            "x-amzn-hardware-device-type-id": device_type_id
         }
         
         async with self.session.post(dmls_url, json=dmls_payload, headers=dmls_headers) as resp:
@@ -238,10 +253,11 @@ class AmazonApi:
 
     async def get_license(self, challenge_b64, track_asin):
         url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
+        device_type_id = self.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
         
         payload = {
             "deviceToken": {
-                "deviceTypeId": self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y"),
+                "deviceTypeId": device_type_id,
                 "deviceId": self.tokens.get('device_id')
             },
             "appInfo": {
@@ -250,12 +266,17 @@ class AmazonApi:
             "DrmType": "PLAYREADY",
             "licenseChallenge": challenge_b64
         }
+        
+        # PASTIKAN HEADER LISENSI JUGA MATCH
         headers = {
             "x-amzn-requestid": str(uuid.uuid4()),
             "X-Amz-Target": "com.amazon.digitalmusiclocator.DigitalMusicLocatorServiceExternal.getLicenseForPlaybackV2",
             "x-amz-access-token": self.tokens.get('x-amz-access-token'),
-            "Content-Encoding": "amz-1.0"
+            "Content-Encoding": "amz-1.0",
+            "x-amzn-device-type-id": device_type_id,
+            "x-amzn-hardware-device-type-id": device_type_id
         }
+        
         async with self.session.post(url, json=payload, headers=headers) as resp:
             if resp.status != 200:
                 raise Exception(f"License API failed: {resp.status}")
