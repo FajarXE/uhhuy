@@ -907,6 +907,9 @@ async def uset_tidal_remove_specific(client, query):
 # AMAZON MUSIC PRIVATE AUTH
 # ==================================
 
+# 0. DICTIONARY PENAHAN SESI (HARUS ADA DI LUAR FUNGSI)
+PENDING_AMAZON_AUTH = {}
+
 # 1. COMMAND LOGIN (Instruksi TV Code)
 @Client.on_message(filters.command("amazon_login"))
 async def uset_amz_login_cmd(client, message):
