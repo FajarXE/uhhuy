@@ -28,6 +28,17 @@ class AmazonApi:
             "de": "https://music.amazon.de/",
         }
         
+        # --- FIX: HARDCODE MARKETPLACE ID AGAR TIDAK KONFLIK ---
+        self.marketplaces = {
+            "mx": "ART4WZ8MWBX2Y",
+            "br": "A2Q3Y263D00KWC",
+            "fr": "A13V1IB3VIYZZH",
+            "us": "ATVPDKIKX0DER",
+            "jp": "A1VC38T7YXB528",
+            "uk": "A1F83G8C2ARO7P",
+            "de": "A1PA6795UKMFR9"
+        }
+        
         api_locations = {"NA": ["br", "mx", "us"], "EU": ["fr", "de", "uk"], "FE": ["jp"]}
         api_urls = {"NA": "na.tvmesk.skill.music.a2z.com", "EU": "eu.tvmesk.skill.music.a2z.com", "FE": "fe.tvmesk.skill.music.a2z.com"}
         
@@ -97,7 +108,6 @@ class AmazonApi:
                 token_data = json.loads(service_token)
                 self.tokens["service_token"] = service_token
                 self.tokens["x-amz-access-token"] = token_data["accessToken"]
-                self.tokens["marketplaceId"] = token_data.get("marketplaceId", "US")
                 self.tokens["deviceTypeId"] = "A1KAXIG6VXSG8Y"
                 
                 if video_player_token:
@@ -112,14 +122,10 @@ class AmazonApi:
                             jwt_payload = v_tok.split(".")[1]
                             jwt_payload += "=" * (-len(jwt_payload) % 4)
                             decoded = base64.urlsafe_b64decode(jwt_payload.encode()).decode("latin-1", errors="ignore")
-                            
                             c_id = re.search(r'"customerId"\s*:\s*"([^"]+)"', decoded)
                             d_id = re.search(r'"deviceId"\s*:\s*"([^"]+)"', decoded)
-                            dt_id = re.search(r'"deviceTypeId"\s*:\s*"([^"]+)"', decoded)
-                            
                             if c_id: self.tokens["customerId"] = c_id.group(1)
                             if d_id: self.tokens["device_id"] = d_id.group(1)
-                            if dt_id: self.tokens["deviceTypeId"] = dt_id.group(1)
                         except Exception as e:
                             LOGGER.error(f"Gagal parsing JWT VideoPlayer: {e}")
                 
@@ -130,19 +136,20 @@ class AmazonApi:
     async def get_playback_info(self, asin: str):
         device_id = self.tokens.get('device_id')
         access_token = self.tokens.get('x-amz-access-token')
-        marketplace_id = self.tokens.get('marketplaceId', 'US')
         customer_id = self.tokens.get('customerId')
         device_type_id = self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
         
-        # --- FIX: PISAHKAN MUSIC TERRITORY DENGAN MARKETPLACE ID ---
+        marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
         music_territory = self.region.upper()
         
-        lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
+        # --- FIX: HAPUS self.api_location DARI URL AGAR TIDAK ERROR 404/400 ---
+        lookup_url = f"{self.base_url}api/muse/legacy/lookup"
+        
         lookup_payload = {
             "asins": [asin],
             "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
             "requestedContent": "MUSIC_SUBSCRIPTION",
-            "musicTerritory": music_territory, # Harus "MX"
+            "musicTerritory": music_territory, 
             "deviceId": device_id,
             "deviceType": device_type_id
         }
@@ -162,10 +169,12 @@ class AmazonApi:
                     artist = track.get('artist', {}).get('name', 'Unknown Artist')
                     album = track.get('album', {}).get('title', 'Unknown Album')
         
-        dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
+        # --- FIX: HAPUS self.api_location DARI URL ---
+        dmls_url = f"{self.base_url}api/dmls/"
+        
         customer_info = {
             "marketplaceId": marketplace_id,
-            "territoryId": music_territory # Harus "MX"
+            "territoryId": music_territory
         }
         if customer_id:
             customer_info["customerId"] = customer_id
@@ -193,7 +202,6 @@ class AmazonApi:
             
             dmls_data = await resp.json()
             
-            # --- TANGKAP ERROR PENOLAKAN AMAZON (PREMIUM/REGION BLOCK) ---
             if not dmls_data.get("contentResponseList"):
                 raise Exception(f"Amazon menolak memberikan file. Respons: {json.dumps(dmls_data)}")
                 
@@ -232,7 +240,9 @@ class AmazonApi:
         return {'title': title, 'artist': artist, 'album': album, 'url': best_url, 'kid': kid}
 
     async def get_license(self, challenge_b64, track_asin):
-        url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
+        # --- FIX: HAPUS self.api_location DARI URL ---
+        url = f"{self.base_url}api/dmls/getLicenseForPlaybackV2"
+        
         payload = {
             "deviceToken": {
                 "deviceTypeId": self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y"),
