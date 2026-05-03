@@ -65,7 +65,9 @@ async def start_album(album_asin: str, user: dict, url: str):
 
     device_id = client.tokens.get('device_id')
     access_token = client.tokens.get('x-amz-access-token')
-    device_type_id = client.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
+    
+    # --- FIX: AMBIL DEVICE TYPE DARI TOKEN ---
+    device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     music_territory = client.region.upper() 
     
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
@@ -78,9 +80,13 @@ async def start_album(album_asin: str, user: dict, url: str):
         "deviceId": device_id,
         "deviceType": device_type_id
     }
+    
+    # --- FIX: SUNTIKKAN HEADER SECARA EKSPLISIT ---
     lookup_headers = {
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
-        "x-amz-access-token": access_token
+        "x-amz-access-token": access_token,
+        "x-amzn-device-type-id": device_type_id,
+        "x-amzn-hardware-device-type-id": device_type_id
     }
     
     track_asins = []
