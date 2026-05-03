@@ -1,14 +1,6 @@
 # [FILE: bot/helpers/amazon/amazon_api.py]
 
-import os
-import json
-import uuid
-import time
-import asyncio
-import aiohttp
-import re
-import html
-import base64
+import os, json, uuid, time, asyncio, aiohttp, re, html, base64
 from urllib.parse import unquote
 from bot.logger import LOGGER
 
@@ -17,193 +9,112 @@ class AmazonApi:
         self.region = region.lower()
         self.session = aiohttp.ClientSession()
         self.tokens = {}
-        
         self.base_urls = {
-            "mx": "https://music.amazon.com.mx/",
-            "br": "https://music.amazon.com.br/",
-            "fr": "https://music.amazon.fr/",
-            "us": "https://music.amazon.com/",
-            "jp": "https://music.amazon.co.jp/",
-            "uk": "https://music.amazon.co.uk/",
-            "de": "https://music.amazon.de/",
+            "mx": "https://music.amazon.com.mx/", "br": "https://music.amazon.com.br/",
+            "fr": "https://music.amazon.fr/", "us": "https://music.amazon.com/",
+            "jp": "https://music.amazon.co.jp/", "uk": "https://music.amazon.co.uk/", "de": "https://music.amazon.de/"
         }
-        
         self.marketplaces = {
             "mx": "ART4WZ8MWBX2Y", "br": "A2Q3Y263D00KWC", "fr": "A13V1IB3VIYZZH",
             "us": "ATVPDKIKX0DER", "jp": "A1VC38T7YXB528", "uk": "A1F83G8C2ARO7P", "de": "A1PA6795UKMFR9"
         }
-        
         api_locations = {"NA": ["br", "mx", "us"], "EU": ["fr", "de", "uk"], "FE": ["jp"]}
-        api_urls = {"NA": "na.tvmesk.skill.music.a2z.com", "EU": "eu.tvmesk.skill.music.a2z.com", "FE": "fe.tvmesk.skill.music.a2z.com"}
-        
-        self.base_url = self.base_urls.get(self.region, self.base_urls["us"])
         self.api_location = next((loc for loc, regs in api_locations.items() if self.region in regs), "NA")
-        self.api_url = api_urls.get(self.api_location)
+        self.base_url = self.base_urls.get(self.region, self.base_urls["us"])
+        self.api_url = f"{self.api_location}.tvmesk.skill.music.a2z.com"
 
-        # --- FIX: HEADERS LENGKAP UNTUK MENCEGAH NumberFormatException (HTTP 500) ---
-        self.default_headers = {
-            "origin": "https://music.amazon.com",
-            "referer": "https://music.amazon.com/",
+        self.session.headers.update({
+            "origin": "https://music.amazon.com", "referer": "https://music.amazon.com/",
             "user-agent": "Harley/3.12.11.183 A1I3OANZGDNGEE/24.10.1",
-            "x-amzn-device-type-id": "A1KAXIG6VXSG8Y",
-            "x-amzn-hardware-device-type-id": "A1KAXIG6VXSG8Y",
-            "x-amzn-device-family": "AndroidTV",
-            "x-amzn-device-manufacturer": "NVIDIA",
-            "x-amzn-device-model": "A1KAXIG6VXSG8Y",
-            "x-amzn-device-language": "en_US",
-            "x-amzn-device-height": "2160",
-            "x-amzn-device-width": "3840",
-            "x-amzn-os-version": "11",
-            "x-amzn-application-version": "3.12.11.183",
-            "x-amzn-device-time-zone": "America/Detroit",
-            "x-amzn-user-agent": "Dalvik/2.1.0 (Linux; U; Android 9; Smart TV Build/PPR1.180610.011)",
-        }
-        self.session.headers.update(self.default_headers)
+            "x-amzn-device-family": "AndroidTV", "x-amzn-os-version": "11"
+        })
 
     async def get_tv_device_code(self):
         self.tokens["device_id"] = os.urandom(8).hex()
-        headers = {
-            "x-amzn-request-id": str(uuid.uuid4()),
-            "x-amzn-timestamp": str(int(time.time() * 1000)),
-            "x-amzn-device-id": self.tokens["device_id"],
-        }
+        headers = {"x-amzn-request-id": str(uuid.uuid4()), "x-amzn-timestamp": str(int(time.time()*1000)), "x-amzn-device-id": self.tokens["device_id"]}
         async with self.session.post(f"https://{self.api_url}/api/showHome", json={"userHash": ""}, headers=headers) as resp:
-            if resp.status != 200:
-                # Ambil hanya sedikit teks error agar tidak membuat Telegram crash
-                err_text = (await resp.text())[:200]
-                raise Exception(f"HTTP {resp.status}: {err_text}")
-                
-            codepair_json = await resp.json()
-            code_pair = codepair_json["methods"][0]["template"]
-            public_code = code_pair.get("code", "")
-            poll_url = code_pair["onPollingIntervalElapsed"][0]["url"]
-            register_code = unquote(poll_url.rsplit("code=", 1)[-1])
-            activation_url = self.base_url.replace("music.", "") + "code"
-            return public_code, register_code, activation_url
+            if resp.status != 200: raise Exception(f"HTTP {resp.status}: {(await resp.text())[:100]}")
+            data = await resp.json()
+            pair = data["methods"][0]["template"]
+            return pair.get("code"), unquote(pair["onPollingIntervalElapsed"][0]["url"].rsplit("code=", 1)[-1]), self.base_url.replace("music.", "") + "code"
 
     async def poll_tv_auth(self, register_code):
-        headers = {
-            "x-amzn-request-id": str(uuid.uuid4()),
-            "x-amzn-timestamp": str(int(time.time() * 1000)),
-            "x-amzn-device-id": self.tokens["device_id"],
-        }
-        payload = json.dumps({"code": register_code}, separators=(",", ":"))
-        async with self.session.post(f"https://{self.api_url}/api/showHome", headers=headers, data=payload) as resp:
+        headers = {"x-amzn-request-id": str(uuid.uuid4()), "x-amzn-timestamp": str(int(time.time()*1000)), "x-amzn-device-id": self.tokens["device_id"]}
+        async with self.session.post(f"https://{self.api_url}/api/showHome", headers=headers, json={"code": register_code}) as resp:
             if resp.status != 200: return False
-            register_json = await resp.json()
-            
-            service_token = None
-            video_player_token = None
-            for item in register_json.get("methods", []):
+            data = await resp.json()
+            for item in data.get("methods", []):
                 if item.get("interface") == "PlaybackAuthenticationInterface.v1_0.SetAuthenticationMethod":
-                    service_token = item.get("authentication")
+                    auth = json.loads(item["authentication"])
+                    self.tokens.update({"x-amz-access-token": auth["accessToken"], "marketplaceId": auth.get("marketplaceId", "US")})
                 if item.get("interface") == "VideoPlayerAuthenticationInterface.v1_0.SetVideoPlayerTokenMethod":
-                    video_player_token = item.get("header")
-                    
-            if service_token:
-                token_data = json.loads(service_token)
-                self.tokens.update({
-                    "service_token": service_token,
-                    "x-amz-access-token": token_data["accessToken"],
-                    "marketplaceId": token_data.get("marketplaceId", "US"),
-                    "deviceTypeId": "A1KAXIG6VXSG8Y"
-                })
-                
-                if video_player_token:
                     try:
-                        v_tok = json.loads(video_player_token).get("token", video_player_token) if "{" in video_player_token else video_player_token
-                        if v_tok.count(".") >= 2:
-                            jwt_payload = v_tok.split(".")[1]
-                            jwt_payload += "=" * (-len(jwt_payload) % 4)
-                            decoded = base64.urlsafe_b64decode(jwt_payload.encode()).decode("latin-1", errors="ignore")
-                            cid = re.search(r'"customerId"\s*:\s*"([^"]+)"', decoded)
-                            did = re.search(r'"deviceId"\s*:\s*"([^"]+)"', decoded)
-                            dtid = re.search(r'"deviceType(?:Id)?"\s*:\s*"([^"]+)"', decoded)
-                            if cid: self.tokens["customerId"] = cid.group(1)
-                            if did: self.tokens["device_id"] = did.group(1)
-                            if dtid: self.tokens["deviceTypeId"] = dtid.group(1)
-                    except Exception as e:
-                        LOGGER.error(f"Gagal membedah token: {e}")
-                
-                return self.tokens
-        return False
+                        jwt = item["header"].split(".")[1]
+                        decoded = base64.urlsafe_b64decode(jwt + "=" * (-len(jwt)%4)).decode("latin-1")
+                        self.tokens["customerId"] = re.search(r'"customerId"\s*:\s*"([^"]+)"', decoded).group(1)
+                        self.tokens["device_id"] = re.search(r'"deviceId"\s*:\s*"([^"]+)"', decoded).group(1)
+                        self.tokens["deviceTypeId"] = re.search(r'"deviceType(?:Id)?"\s*:\s*"([^"]+)"', decoded).group(1)
+                    except: pass
+            return self.tokens if "x-amz-access-token" in self.tokens else False
 
     async def get_playback_info(self, asin: str):
-        customer_id = self.tokens.get('customerId')
-        if not customer_id:
-            raise Exception("Sesi tidak memiliki Customer ID. Mohon login ulang.")
-
-        device_id = self.tokens.get('device_id')
-        access_token = self.tokens.get('x-amz-access-token')
-        device_type_id = self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
-        marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
-        music_territory = self.region.upper()
+        cid = self.tokens.get('customerId')
+        if not cid: raise Exception("CustomerID Kosong. Silakan login ulang.")
         
-        sync_headers = {
-            "x-amz-access-token": access_token,
-            "x-amzn-device-type-id": device_type_id,
-            "x-amzn-hardware-device-type-id": device_type_id,
-            "x-amzn-device-id": device_id
-        }
-        self.session.headers.update(sync_headers)
-        
-        lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
-        lookup_payload = {
-            "asins": [asin],
-            "features": ["popularity", "expandTracklist"],
-            "requestedContent": "MUSIC_SUBSCRIPTION",
-            "musicTerritory": music_territory, 
-            "deviceId": device_id,
-            "deviceType": device_type_id
-        }
-        
-        async with self.session.post(lookup_url, json=lookup_payload, headers={"X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup"}) as resp:
-            if resp.status == 200:
-                lookup_data = await resp.json()
-                if 'trackList' in lookup_data and lookup_data['trackList']:
-                    track = lookup_data['trackList'][0]
-                    self.meta = {'title': track.get('title'), 'artist': track.get('artist', {}).get('name'), 'album': track.get('album', {}).get('title')}
-        
-        dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
-        dmls_payload = {
-            "deviceToken": {"deviceTypeId": device_type_id, "deviceId": device_id},
-            "appInfo": {"musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {asin})"},
-            "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
-            "musicDashVersionList": ["SIREN_KATANA"],
-            "contentProtectionList": ["TRACK_PSSH"],
-            "customerInfo": {"customerId": customer_id, "marketplaceId": marketplace_id, "territoryId": music_territory},
-            "try3dAsinSubstitution": True, "tryAsinSubstitution": True
-        }
-        
-        async with self.session.post(dmls_url, json=dmls_payload, headers={"X-Amz-Target": "com.amazon.digitalmusiclocator.DigitalMusicLocatorServiceExternal.getDashManifestsV2"}) as resp:
-            if resp.status != 200: raise Exception(f"Gagal memuat MPD ({resp.status})")
-            dmls_data = await resp.json()
-            mpd_text = dmls_data["contentResponseList"][0].get("manifest", "")
-            
-        kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
-        kid = kid_match.group(1).strip() if kid_match else ""
-        
-        best_url = ""
-        reps = re.findall(r"<Representation\b([\s\S]*?)</Representation>", mpd_text, re.IGNORECASE)
-        for rep in reps:
-            url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", rep, re.IGNORECASE)
-            if url_match:
-                best_url = html.unescape(url_match.group(1).strip())
-                break
-                    
-        return {'title': self.meta.get('title'), 'artist': self.meta.get('artist'), 'album': self.meta.get('album'), 'url': best_url, 'kid': kid}
-
-    async def get_license(self, challenge_b64, track_asin):
-        url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
+        mid = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
         dtid = self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y")
+        
+        self.session.headers.update({
+            "x-amz-access-token": self.tokens['x-amz-access-token'],
+            "x-amzn-device-type-id": dtid, "x-amzn-device-id": self.tokens['device_id']
+        })
+        
+        # 1. Metadata Lookup
+        async with self.session.post(f"{self.base_url}{self.api_location}/api/muse/legacy/lookup", 
+            json={"asins": [asin], "features": ["expandTracklist"], "musicTerritory": self.region.upper(), "deviceId": self.tokens['device_id'], "deviceType": dtid},
+            headers={"X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup"}) as resp:
+            meta = {}
+            if resp.status == 200:
+                d = await resp.json()
+                t = d.get('trackList', [{}])[0]
+                meta = {'title': t.get('title', asin), 'artist': t.get('artist', {}).get('name'), 'album': t.get('album', {}).get('title')}
+
+        # 2. Get MPD Manifest
         payload = {
-            "deviceToken": {"deviceTypeId": dtid, "deviceId": self.tokens.get('device_id')},
-            "appInfo": {"musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {track_asin})"},
-            "DrmType": "PLAYREADY", "licenseChallenge": challenge_b64
+            "deviceToken": {"deviceTypeId": dtid, "deviceId": self.tokens['device_id']},
+            "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
+            "customerInfo": {"customerId": cid, "marketplaceId": mid, "territoryId": self.region.upper()},
+            "appInfo": {"musicAgent": f"Harley/3.12.11.183 ({uuid.uuid4()})"},
+            "musicDashVersionList": ["SIREN_KATANA"], "contentProtectionList": ["TRACK_PSSH"]
         }
-        async with self.session.post(url, json=payload, headers={"X-Amz-Target": "com.amazon.digitalmusiclocator.DigitalMusicLocatorServiceExternal.getLicenseForPlaybackV2"}) as resp:
+        async with self.session.post(f"{self.base_url}{self.api_location}/api/dmls/", json=payload,
+            headers={"X-Amz-Target": "com.amazon.digitalmusiclocator.DigitalMusicLocatorServiceExternal.getDashManifestsV2"}) as resp:
+            if resp.status != 200: raise Exception(f"DMLS Error {resp.status}")
             data = await resp.json()
-            return data["license"]
+            
+            # --- FIX: PENANGKAPAN KEYERROR contentResponseList ---
+            if "contentResponseList" not in data:
+                err = data.get("error", {}).get("message", "Amazon menolak akses (Mungkin butuh langganan Unlimited).")
+                raise Exception(f"Gagal mendapatkan Manifest: {err}")
+                
+            item = data["contentResponseList"][0]
+            if item.get("status") != "SUCCESS":
+                raise Exception(f"Amazon Error: {item.get('error', {}).get('code')}")
+                
+            mpd = item.get("manifest", "")
+            kid = re.search(r'default_KID=["\']([^"\']+)["\']', mpd, re.I).group(1) if "default_KID" in mpd else ""
+            url = html.unescape(re.search(r"<BaseURL[^>]*>([\s\S]*?)</BaseURL>", mpd, re.I).group(1).strip()) if "<BaseURL" in mpd else ""
+            
+        return {**meta, 'url': url, 'kid': kid}
+
+    async def get_license(self, challenge, asin):
+        payload = {
+            "deviceToken": {"deviceTypeId": self.tokens.get('deviceTypeId', "A1KAXIG6VXSG8Y"), "deviceId": self.tokens['device_id']},
+            "DrmType": "PLAYREADY", "licenseChallenge": challenge, "appInfo": {"musicAgent": f"Harley ({asin})"}
+        }
+        async with self.session.post(f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2", json=payload,
+            headers={"X-Amz-Target": "com.amazon.digitalmusiclocator.DigitalMusicLocatorServiceExternal.getLicenseForPlaybackV2"}) as resp:
+            return (await resp.json())["license"]
 
     async def close(self):
         if not self.session.closed: await self.session.close()
