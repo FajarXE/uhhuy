@@ -100,7 +100,6 @@ class AmazonApi:
                 self.tokens["marketplaceId"] = token_data.get("marketplaceId", "US")
                 self.tokens["deviceTypeId"] = "A1KAXIG6VXSG8Y"
                 
-                # --- FIX JWT PARSING & DATA EXTRACTION ---
                 if video_player_token:
                     try:
                         v_obj = json.loads(video_player_token)
@@ -161,8 +160,6 @@ class AmazonApi:
                     album = track.get('album', {}).get('title', 'Unknown Album')
         
         dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
-        
-        # --- FIX: JANGAN KIRIM CUSTOMER_ID JIKA KOSONG (MENCEGAH 400 VALIDATION) ---
         customer_info = {
             "marketplaceId": marketplace_id,
             "territoryId": marketplace_id
@@ -193,22 +190,34 @@ class AmazonApi:
             dmls_data = await resp.json()
             mpd_text = dmls_data["contentResponseList"][0]["manifest"]
             
-        representations = re.findall(r"<Representation\b[\s\S]*?</Representation>", mpd_text)
+        # --- FIX: EKSTRAKSI LEBIH TANGGUH & MENGIZINKAN TANPA DRM ---
         best_bw = 0
         best_url = ""
         
-        kid_match = re.search(r'cenc:default_KID="([^"]+)"', mpd_text)
+        kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
         kid = kid_match.group(1).strip() if kid_match else ""
         
-        for rep in representations:
-            bw_match = re.search(r'bandwidth="([^"]+)"', rep)
-            baseurl_match = re.search(r"<BaseURL>([\s\S]*?)</BaseURL>", rep)
-            if bw_match and baseurl_match:
-                bw = int(bw_match.group(1))
-                if bw > best_bw:
+        reps = re.findall(r"<Representation\b([\s\S]*?)</Representation>", mpd_text, re.IGNORECASE)
+        for rep in reps:
+            bw_match = re.search(r'bandwidth=["\'](\d+)["\']', rep, re.IGNORECASE)
+            url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", rep, re.IGNORECASE)
+            
+            if url_match:
+                bw = int(bw_match.group(1)) if bw_match else 0
+                if bw >= best_bw:
                     best_bw = bw
-                    best_url = html.unescape(baseurl_match.group(1).strip())
+                    best_url = html.unescape(url_match.group(1).strip())
                     
+        # Fallback jika BaseURL ada di luar Representation
+        if not best_url:
+            url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", mpd_text, re.IGNORECASE)
+            if url_match:
+                best_url = html.unescape(url_match.group(1).strip())
+                
+        # Debugging log jika formatnya benar-benar tidak dikenali
+        if not best_url:
+            LOGGER.error(f"Amazon MPD Parse Failed! Isi MPD: {mpd_text[:1000]}")
+            
         return {'title': title, 'artist': artist, 'album': album, 'url': best_url, 'kid': kid}
 
     async def get_license(self, challenge_b64, track_asin):
