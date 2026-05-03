@@ -922,6 +922,102 @@ async def uset_amz_login_cmd(client, message):
     )
     await message.reply_text(text)
 
+# --- COMMAND EKSEKUSI TV LOGIN ---
+@Client.on_message(filters.command("amazon_auth"))
+async def amz_tv_auth_cmd(client, message):
+    user_id = message.from_user.id
+
+    # --- BATAS MAKSIMAL 5 ANTREAN LOGIN ---
+    if len(PENDING_AMAZON_AUTH) >= 5 and user_id not in PENDING_AMAZON_AUTH:
+        return await message.reply_text(
+            "❌ **Antrean Login Penuh!**\n"
+            "Saat ini sudah ada 5 pengguna yang sedang memproses login. "
+            "Silakan coba beberapa saat lagi."
+        )
+
+    args = message.text.split()
+    region = args[1].lower() if len(args) > 1 else "us"
+    
+    valid_regions = ["us", "jp", "uk", "de", "fr", "mx", "br"]
+    if region not in valid_regions:
+        return await message.reply_text(f"❌ Region tidak valid. Pilih salah satu: {', '.join(valid_regions)}")
+        
+    msg = await message.reply_text("🔄 **Meminta kode TV dari Amazon...**")
+    
+    try:
+        from bot.helpers.amazon.amazon_api import AmazonApi
+        
+        amz_api = AmazonApi(region=region)
+        public_code, register_code, activation_url = await amz_api.get_tv_device_code()
+        
+        PENDING_AMAZON_AUTH[user_id] = {
+            "api": amz_api,
+            "register_code": register_code,
+            "region": region
+        }
+        
+        text = (
+            f"🔐 **AMAZON MUSIC TV LOGIN ({region.upper()})**\n\n"
+            f"1️⃣ Buka tautan: {activation_url}\n"
+            f"2️⃣ Masukkan kode ini: <code>{public_code}</code>\n"
+            f"3️⃣ Tekan tombol **Allow / Izinkan** di web Amazon\n"
+            f"4️⃣ Jika sudah selesai, tekan tombol di bawah ini."
+        )
+        
+        from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        buttons = [[InlineKeyboardButton("✅ Saya Sudah Login", callback_data="amz_auth_verify")]]
+        
+        await msg.edit_text(text, markup=InlineKeyboardMarkup(buttons))
+        
+    except Exception as e:
+        await msg.edit_text(f"❌ **Gagal mendapatkan kode TV:** {e}")
+
+# --- HANDLER VERIFIKASI LOGIN ---
+@Client.on_callback_query(filters.regex("^amz_auth_verify"))
+async def amz_auth_verify_cb(client, query):
+    user_id = query.from_user.id
+    
+    if user_id not in PENDING_AMAZON_AUTH:
+        return await query.answer("Sesi login tidak ditemukan atau sudah kadaluarsa. Silakan ulangi /amazon_auth.", show_alert=True)
+        
+    await query.answer("Memverifikasi login Anda di server Amazon...", show_alert=False)
+    
+    auth_data = PENDING_AMAZON_AUTH[user_id]
+    amz_api = auth_data["api"]
+    register_code = auth_data["register_code"]
+    region = auth_data["region"]
+    
+    # Panggil fungsi polling ke Amazon
+    tokens = await amz_api.poll_tv_auth(register_code)
+    
+    if not tokens:
+        return await query.message.reply_text("❌ **Verifikasi gagal.** Anda belum memasukkan kode atau menekan Allow di web Amazon.")
+        
+    # Jika berhasil, simpan ke database dan manager
+    try:
+        from bot.helpers.database.mongo_async import database
+        from bot.helpers.amazon.manager import amazon_manager
+        
+        account_data = {
+            "region": region,
+            "tokens": tokens
+        }
+        
+        # Simpan permanen ke MongoDB
+        await database.save_user_settings(user_id, {'amazon_account': account_data})
+        
+        # Masukkan ke dalam Manager
+        if hasattr(amazon_manager, 'add_user_account'):
+            await amazon_manager.add_user_account(user_id, account_data)
+            
+        await query.message.edit_text(f"✅ **Login Berhasil!**\nSesi Private Amazon Music (Region: {region.upper()}) Anda telah disimpan. Bot sekarang akan menggunakan akun Anda untuk mengunduh lagu.")
+        
+        # Bersihkan memori sementara
+        del PENDING_AMAZON_AUTH[user_id]
+        
+    except Exception as e:
+        await query.message.reply_text(f"❌ **Terjadi kesalahan saat menyimpan sesi:** {e}")
+
 # 2. CALLBACK MENU AUTH
 @Client.on_callback_query(filters.regex("^uamz_auth"))
 async def uset_amz_auth_handler(client, query):
