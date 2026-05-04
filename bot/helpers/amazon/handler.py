@@ -17,7 +17,14 @@ def generate_challenge(kid, prd_path):
     from bot.helpers.amazon.drm.pypr import PlayReadyHeaderBuilder, PSSH, Device, Cdm
     kid_clean = kid.replace("-", "")
     builder = PlayReadyHeaderBuilder(kid_clean)
-    header = builder.build_header(version="4.0", encryption_scheme="cenc", key_specs=[(kid_clean, kid_clean)])
+    
+    # [FIX] Tambahkan argumen header_spec=None sesuai permintaan modul
+    header = builder.build_header(
+        version="4.0", 
+        header_spec=None, 
+        encryption_scheme="cenc", 
+        key_specs=[(kid_clean, kid_clean)]
+    )
     playready_header = base64.b64encode(header).decode("ascii")
     
     device = Device.load(prd_path)
@@ -107,16 +114,20 @@ async def start_album(album_asin: str, user: dict, url: str):
         web_url = f"https://music.amazon.com/albums/{album_asin}"
         web_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         
-        async with client.session.get(web_url, headers=web_headers) as w_resp:
-            if w_resp.status == 200:
-                html_data = await w_resp.text()
+        try:
+            import requests
+            # [FIX] Menggunakan requests murni via to_thread untuk menghindari limitasi ukuran header aiohttp
+            w_resp = await asyncio.to_thread(requests.get, web_url, headers=web_headers, timeout=15)
+            if w_resp.status_code == 200:
+                html_data = w_resp.text
                 import re
                 # Cari pola JSON state Amazon yang menyimpan ID lagu
                 raw_asins = re.findall(r'"asin"\s*:\s*"([^"]+)"', html_data)
                 for a in raw_asins:
-                    # Ambil hanya ID yang diawali B0, memiliki panjang 10 karakter, dan bukan ASIN album itu sendiri
                     if a != album_asin and a.startswith('B0') and len(a) == 10 and a not in track_asins:
                         track_asins.append(a)
+        except Exception as weberr:
+            LOGGER.warning(f"Web scraper fallback gagal: {weberr}")
                 
     if not track_asins:
         raise Exception("Amazon menolak memberikan daftar lagu, dan fallback Web Scraper gagal menemukan ASIN.")
