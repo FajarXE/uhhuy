@@ -4,27 +4,20 @@ import asyncio
 import os
 import base64
 import shutil
+import aiohttp
 import urllib.parse as urlparse
 from pathvalidate import sanitize_filepath
 from bot.logger import LOGGER
 from config import Config
 from .manager import amazon_manager
 from bot.helpers.aria2_helper import aria2_download
-from bot.helpers.tidal.utils import ffmpeg_convert_and_tag
 from bot.helpers.uploder import telegram_upload
 
 def generate_challenge(kid, prd_path):
     from bot.helpers.amazon.drm.pypr import PlayReadyHeaderBuilder, PSSH, Device, Cdm
     kid_clean = kid.replace("-", "")
     builder = PlayReadyHeaderBuilder(kid_clean)
-    
-    # [FIX] Tambahkan argumen header_spec=None sesuai permintaan modul
-    header = builder.build_header(
-        version="4.0", 
-        header_spec=None, 
-        encryption_scheme="cenc", 
-        key_specs=[(kid_clean, kid_clean)]
-    )
+    header = builder.build_header(version="4.0", header_spec=None, encryption_scheme="cenc", key_specs=[(kid_clean, kid_clean)])
     playready_header = base64.b64encode(header).decode("ascii")
     
     device = Device.load(prd_path)
@@ -45,6 +38,88 @@ def parse_license_and_get_keys(cdm, session_id, license_b64):
         keys.append(f"{key.key_id.hex}:{key.key.hex()}")
     cdm.close(session_id)
     return keys
+
+# --- FUNGSI BARU: Pengekstrak FFmpeg Tangguh Khusus Amazon ---
+async def amazon_convert_and_tag(input_path, track_meta):
+    output_path = track_meta['filepath']
+    image_url = track_meta.get('image', '')
+    
+    cover_path = f"{input_path}_cover.jpg"
+    if image_url:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url) as resp:
+                    if resp.status == 200:
+                        with open(cover_path, 'wb') as f:
+                            f.write(await resp.read())
+                        track_meta['thumb'] = cover_path
+        except Exception as e:
+            LOGGER.warning(f"Gagal mengunduh cover: {e}")
+            cover_path = None
+    else:
+        cover_path = None
+
+    cmd = ['ffmpeg', '-y', '-i', input_path]
+    if cover_path and os.path.exists(cover_path):
+        # Muxing audio + sampul gambar tanpa rekode (aman untuk MP4 FLAC)
+        cmd.extend(['-i', cover_path, '-map', '0:a:0', '-map', '1:v:0', '-c:v', 'copy'])
+    else:
+        cmd.extend(['-map', '0:a:0'])
+    
+    cmd.extend(['-c:a', 'copy'])
+    
+    if output_path.endswith('.flac') and cover_path and os.path.exists(cover_path):
+        cmd.extend(['-disposition:v', 'attached_pic'])
+        
+    cmd.append(output_path)
+    
+    LOGGER.info(f"Amazon FFmpeg CMD: {' '.join(cmd)}")
+    
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await proc.communicate()
+    
+    if proc.returncode != 0:
+        LOGGER.error(f"FFmpeg gagal: {stderr.decode()}")
+        raise Exception("Gagal mengekstrak audio dari kontainer (FFmpeg Error).")
+        
+    try:
+        if output_path.endswith('.flac'):
+            from mutagen.flac import FLAC, Picture
+            audio = FLAC(output_path)
+            audio['title'] = track_meta['title']
+            audio['artist'] = track_meta['artist']
+            audio['album'] = track_meta['album']
+            if cover_path and os.path.exists(cover_path):
+                pic = Picture()
+                with open(cover_path, "rb") as f:
+                    pic.data = f.read()
+                pic.type = 3
+                pic.mime = "image/jpeg"
+                audio.add_picture(pic)
+            audio.save()
+        elif output_path.endswith('.m4a'):
+            from mutagen.mp4 import MP4, MP4Cover
+            audio = MP4(output_path)
+            audio['\xa9nam'] = track_meta['title']
+            audio['\xa9ART'] = track_meta['artist']
+            audio['\xa9alb'] = track_meta['album']
+            if cover_path and os.path.exists(cover_path):
+                with open(cover_path, "rb") as f:
+                    audio['covr'] = [MP4Cover(f.read(), imageformat=MP4Cover.FORMAT_JPEG)]
+            audio.save()
+        elif output_path.endswith('.opus') or output_path.endswith('.ogg'):
+            from mutagen.oggopus import OggOpus
+            audio = OggOpus(output_path)
+            audio['title'] = track_meta['title']
+            audio['artist'] = track_meta['artist']
+            audio['album'] = track_meta['album']
+            audio.save()
+    except Exception as e:
+        LOGGER.warning(f"Gagal menulis tag Mutagen: {e}")
 
 async def start_amazon(url: str, user: dict):
     parsed = urlparse.urlparse(url)
@@ -72,7 +147,7 @@ async def start_album(album_asin: str, user: dict, url: str):
 
     device_id = client.tokens.get('device_id')
     access_token = client.tokens.get('x-amz-access-token')
-    customer_id = client.tokens.get('customerId') # [FIX] Ambil ID pengguna
+    customer_id = client.tokens.get('customerId')
     
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     music_territory = client.region.upper() 
@@ -88,7 +163,6 @@ async def start_album(album_asin: str, user: dict, url: str):
         "deviceType": device_type_id
     }
     
-    # [FIX] Suntikkan customerId agar Amazon memberikan daftar lagu Premium
     if customer_id:
         lookup_payload["customerId"] = customer_id
         
@@ -108,7 +182,6 @@ async def start_album(album_asin: str, user: dict, url: str):
                     if track.get("asin"):
                         track_asins.append(track["asin"])
                         
-    # [FIX] FALLBACK: Ekstraksi dari Web jika API TV tetap memblokir daftar lagu
     if not track_asins:
         LOGGER.warning(f"API tidak memberikan trackList untuk {album_asin}. Menggunakan Web Scraper...")
         web_url = f"https://music.amazon.com/albums/{album_asin}"
@@ -116,12 +189,10 @@ async def start_album(album_asin: str, user: dict, url: str):
         
         try:
             import requests
-            # [FIX] Menggunakan requests murni via to_thread untuk menghindari limitasi ukuran header aiohttp
             w_resp = await asyncio.to_thread(requests.get, web_url, headers=web_headers, timeout=15)
             if w_resp.status_code == 200:
                 html_data = w_resp.text
                 import re
-                # Cari pola JSON state Amazon yang menyimpan ID lagu
                 raw_asins = re.findall(r'"asin"\s*:\s*"([^"]+)"', html_data)
                 for a in raw_asins:
                     if a != album_asin and a.startswith('B0') and len(a) == 10 and a not in track_asins:
@@ -152,7 +223,6 @@ async def start_track(asin: str, user: dict, url: str):
 
     LOGGER.info(f"Amazon: Mengambil info untuk lagu {asin}")
     
-    # --- FIX 2: Penanganan Akses Ditolak (Premium/Unlimited check) ---
     try:
         manifest_data = await client.get_playback_info(asin)
     except Exception as e:
@@ -161,10 +231,20 @@ async def start_track(asin: str, user: dict, url: str):
             raise Exception(f"Akses Ditolak: Lagu ini mewajibkan langganan Amazon Music Unlimited yang aktif atau tidak tersedia di wilayah akun Anda. Detail: {err_str}")
         raise e
     
+    # Penentuan ekstensi secara dinamis berdasarkan Codec
+    codec = manifest_data.get('codec', 'flac').lower()
+    if 'flac' in codec:
+        ext = 'flac'
+    elif 'opus' in codec:
+        ext = 'opus'
+    else:
+        ext = 'm4a'
+    
     track_meta = {
         'title': manifest_data.get('title', asin),
         'artist': manifest_data.get('artist', 'Unknown Artist'),
         'album': manifest_data.get('album', 'Unknown Album'),
+        'image': manifest_data.get('image', ''),
         'provider': 'Amazon Music',
         'type': 'track'
     }
@@ -172,6 +252,9 @@ async def start_track(asin: str, user: dict, url: str):
     folder_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Amazon Music/{track_meta['artist']}/{track_meta['album']}"
     folder_path = sanitize_filepath(folder_path)
     os.makedirs(folder_path, exist_ok=True)
+    
+    final_path = f"{folder_path}/{track_meta['title']}.{ext}"
+    track_meta['filepath'] = final_path
     track_meta['folderpath'] = folder_path
 
     audio_url = manifest_data.get('url') 
@@ -182,7 +265,6 @@ async def start_track(asin: str, user: dict, url: str):
         
     enc_path = f"{folder_path}/{track_meta['title']}.enc.mp4"
     dec_path = f"{folder_path}/{track_meta['title']}.dec.mp4"
-    final_path = f"{folder_path}/{track_meta['title']}.flac"
 
     details = None
     if 'bot_msg' in user:
@@ -199,12 +281,9 @@ async def start_track(asin: str, user: dict, url: str):
 
         LOGGER.info(f"Amazon: Mendekripsi file dengan keys {keys}")
         
-        # --- FIX: Sesuaikan dengan nama fungsi & format parameter di pydecrypt.py ---
         def run_decryption(enc, dec, key_list):
             from bot.helpers.amazon.drm import pydecrypt
-            # Ubah format string "KID:KEY" menjadi dictionary
             keys_by_track, keys_by_kid = pydecrypt.parse_keys(key_list)
-            # Jalankan dekripsi spesifik untuk format MP4
             pydecrypt.decrypt_mp4_file(enc, dec, keys_by_track, keys_by_kid)
 
         await asyncio.to_thread(run_decryption, enc_path, dec_path, keys)
@@ -212,8 +291,8 @@ async def start_track(asin: str, user: dict, url: str):
         LOGGER.info("Amazon: Trek ini bersifat Free/Unencrypted (Tanpa DRM), melewati dekripsi.")
         shutil.copy(enc_path, dec_path)
 
-    track_meta['filepath'] = final_path
-    await ffmpeg_convert_and_tag(dec_path, track_meta)
+    # Mengekstrak & Men-tag file menggunakan fungsi mandiri
+    await amazon_convert_and_tag(dec_path, track_meta)
 
     try:
         os.remove(enc_path)
