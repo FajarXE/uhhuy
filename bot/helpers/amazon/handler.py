@@ -75,7 +75,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     lookup_payload = {
         "asins": [album_asin],
         "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-        "requestedContent": "MUSIC_SUBSCRIPTION", # KEMBALIKAN KE NILAI INI
+        "requestedContent": "FULL_CATALOG", # Gunakan enum ini
         "musicTerritory": music_territory, 
         "deviceId": device_id,
         "deviceType": device_type_id
