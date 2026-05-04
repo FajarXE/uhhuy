@@ -66,22 +66,21 @@ async def start_album(album_asin: str, user: dict, url: str):
     device_id = client.tokens.get('device_id')
     access_token = client.tokens.get('x-amz-access-token')
     
-    # --- FIX: AMBIL DEVICE TYPE DARI TOKEN ---
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     music_territory = client.region.upper() 
     
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
     
+    # --- FIX 1: requestedContent diubah menjadi "ALBUM" ---
     lookup_payload = {
         "asins": [album_asin],
         "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-        "requestedContent": "MUSIC_SUBSCRIPTION",
+        "requestedContent": "ALBUM", 
         "musicTerritory": music_territory, 
         "deviceId": device_id,
         "deviceType": device_type_id
     }
     
-    # --- FIX: SUNTIKKAN HEADER SECARA EKSPLISIT ---
     lookup_headers = {
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
         "x-amz-access-token": access_token,
@@ -129,6 +128,7 @@ async def start_album(album_asin: str, user: dict, url: str):
             await start_track(t_asin, user, url)
         except Exception as e:
             LOGGER.error(f"Gagal mengunduh track {t_asin}: {e}")
+            # Melanjutkan ke lagu berikutnya jika satu lagu gagal (misal: terkunci premium)
             continue
 
 async def start_track(asin: str, user: dict, url: str):
@@ -140,7 +140,14 @@ async def start_track(asin: str, user: dict, url: str):
 
     LOGGER.info(f"Amazon: Mengambil info untuk lagu {asin}")
     
-    manifest_data = await client.get_playback_info(asin)
+    # --- FIX 2: Penanganan Akses Ditolak (Premium/Unlimited check) ---
+    try:
+        manifest_data = await client.get_playback_info(asin)
+    except Exception as e:
+        err_str = str(e)
+        if "Akses ditolak" in err_str or "EXPIRED_TOKEN" in err_str:
+            raise Exception(f"Akses Ditolak: Lagu ini mewajibkan langganan Amazon Music Unlimited yang aktif atau tidak tersedia di wilayah akun Anda. Detail: {err_str}")
+        raise e
     
     track_meta = {
         'title': manifest_data.get('title', asin),
