@@ -282,22 +282,16 @@ class AmazonApi:
                         if image:
                             image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
             
-            # --- 2. REQUEST MPD / MANIFEST ---
+            # --- 2. REQUEST DASH MANIFEST (MPD) ---
             dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
-            customer_info = {
-                "marketplaceId": marketplace_id,
-                "territoryId": music_territory,
-                "customerId": customer_id
-            }
-                
             dmls_payload = {
+                "customerId": customer_id,  # <--- TAMBAHKAN BARIS INI DI SINI
                 "deviceToken": {"deviceTypeId": device_type_id, "deviceId": device_id},
                 "appInfo": {"musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {asin})"},
                 "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
                 "musicDashVersionList": ["SIREN_KATANA"],
                 "contentProtectionList": ["TRACK_PSSH"],
-                "customerInfo": customer_info,
-                "try3dAsinSubstitution": True,
+                "customerInfo": {"marketplaceId": marketplace_id, "territoryId": music_territory, "customerId": customer_id},
                 "tryAsinSubstitution": True
             }
             
