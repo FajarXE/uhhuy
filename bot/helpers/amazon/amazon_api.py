@@ -343,52 +343,69 @@ class AmazonApi:
                     raise Exception(f"Ditolak Amazon: [{err_code}] {err_msg} | RAW: {raw_dump}...")
                     
                 mpd_text = item_resp.get("manifest", "")
+
+            target_rank = {"SD": 2, "HD": 3, "UHD": 4}.get(target_quality.upper(), 4)
+            
+            # Wadah untuk menyimpan semua representasi/kualitas yang terbaca
+            valid_reps = []
+            
+            # Cari seluruh blok AdaptationSet
+            adp_sets = re.findall(r"<AdaptationSet\b([\s\S]*?)</AdaptationSet>", mpd_text, re.IGNORECASE)
+            for adp in adp_sets:
+                kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', adp, re.IGNORECASE)
+                adp_kid = kid_match.group(1).strip() if kid_match else ""
                 
+                # Baca tiap varian kualitas lagu (Representation) di dalamnya
+                reps = re.findall(r"<Representation\b([\s\S]*?)</Representation>", adp, re.IGNORECASE)
+                for rep in reps:
+                    bw_match = re.search(r'bandwidth=["\'](\d+)["\']', rep, re.IGNORECASE)
+                    url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", rep, re.IGNORECASE)
+                    codec_match = re.search(r'codecs=["\']([^"\']+)["\']', rep, re.IGNORECASE)
+                    sr_match = re.search(r'audioSamplingRate=["\'](\d+)["\']', rep, re.IGNORECASE)
+                    
+                    if url_match:
+                        bw = int(bw_match.group(1)) if bw_match else 0
+                        rep_url = html.unescape(url_match.group(1).strip())
+                        rep_codec = html.unescape(codec_match.group(1).strip()).lower() if codec_match else "flac"
+                        sr = int(sr_match.group(1)) if sr_match else 44100
+                        
+                        # Tentukan Ranking Aktual Berdasarkan Fisik File (Sangat Akurat)
+                        if "mp4a" in rep_codec or "opus" in rep_codec:
+                            rep_rank = 2  # SD (Format Lossy / Hemat Kuota)
+                        elif sr <= 48000:
+                            rep_rank = 3  # HD (Format Lossless / Kualitas CD)
+                        else:
+                            rep_rank = 4  # UHD (Format Lossless / Kualitas Master Hi-Res)
+                            
+                        valid_reps.append({
+                            "url": rep_url,
+                            "bw": bw,
+                            "codec": rep_codec,
+                            "kid": adp_kid,
+                            "rank": rep_rank
+                        })
+            
             best_bw = 0
             best_url = ""
             best_codec = "flac"
             best_kid = ""
             
-            # --- SISTEM RANKING KUALITAS ---
-            quality_ranks = {"LD": 1, "SD": 2, "HD": 3, "UHD": 4}
-            max_rank = quality_ranks.get(target_quality.upper(), 4)
+            # --- PROSES FILTERING ---
+            # Buang kualitas yang tingkatnya melebihi target pengguna
+            filtered_reps = [r for r in valid_reps if r["rank"] <= target_rank]
             
-            # Cari seluruh AdaptationSet
-            adp_sets = re.findall(r"<AdaptationSet\b([\s\S]*?)</AdaptationSet>", mpd_text, re.IGNORECASE)
-            for adp in adp_sets:
-                # Ambil KID spesifik untuk AdaptationSet ini
-                kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', adp, re.IGNORECASE)
-                adp_kid = kid_match.group(1).strip() if kid_match else ""
+            # Jika kosong (Misal minta HD tapi Amazon anehnya cuma sediakan UHD), ambil semua lagi
+            if not filtered_reps:
+                filtered_reps = valid_reps
                 
-                # Cek tipe trek kualitas Amazon (LD, SD, HD, UHD)
-                tt_match = re.search(r'amz-music:trackType"\s*value=["\']([^"\']+)["\']', adp, re.IGNORECASE)
-                track_type = tt_match.group(1).upper() if tt_match else "UHD"
-                
-                current_rank = quality_ranks.get(track_type, 4)
-                
-                # FILTER UTAMA: Lewati jika kualitas ini LEBIH TINGGI dari target user
-                if current_rank > max_rank:
-                    continue
-                
-                reps = re.findall(r"<Representation\b([\s\S]*?)</Representation>", adp, re.IGNORECASE)
-                for rep in reps:
-                    bw_match = re.search(r'bandwidth=["\'](\d+)["\']', rep, re.IGNORECASE)
-                    url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", rep, re.IGNORECASE)
-                    
-                    if url_match:
-                        bw = int(bw_match.group(1)) if bw_match else 0
-                        # Ambil yang tertinggi dari sisa kualitas yang DIIZINKAN
-                        if bw >= best_bw:
-                            best_bw = bw
-                            best_url = html.unescape(url_match.group(1).strip())
-                            best_kid = adp_kid
-                            
-                            codec_match = re.search(r'codecs=["\']([^"\']+)["\']', rep, re.IGNORECASE)
-                            if codec_match:
-                                best_codec = html.unescape(codec_match.group(1).strip())
-                                
-            # Fallback jika format MPD anomali
-            if not best_url:
+            if filtered_reps:
+                # Pilih file dengan ukuran/bitrate (bandwidth) paling besar dari SISA KUALITAS YANG DIIZINKAN
+                best_rep = max(filtered_reps, key=lambda x: x["bw"])
+                best_url = best_rep["url"]
+                best_kid = best_rep["kid"]
+                best_codec = best_rep["codec"]
+            else:
+                # Fallback ekstrim (hanya jika regex gagal total)
                 url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", mpd_text, re.IGNORECASE)
                 if url_match:
                     best_url = html.unescape(url_match.group(1).strip())
