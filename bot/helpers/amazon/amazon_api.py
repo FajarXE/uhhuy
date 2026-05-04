@@ -238,10 +238,14 @@ class AmazonApi:
             LOGGER.debug(f"Amazon Search API Cover fallback failed: {e}")
         return None
 
-    # --- TAMBAHAN BARU: PENGAMBIL COVER ITUNES (STUDIO MASTER) ---
+    # --- PENGAMBIL COVER ITUNES (STUDIO MASTER) ---
     async def fetch_itunes_cover(self, artist, album):
         try:
-            term = quote(f"{artist} {album}")
+            # Bersihkan teks agar pencarian iTunes lebih akurat
+            clean_artist = re.sub(r'\(.*?\)', '', artist).strip()
+            clean_album = re.sub(r'\(.*?\)', '', album).strip()
+            term = quote(f"{clean_artist} {clean_album}")
+            
             url = f"https://itunes.apple.com/search?term={term}&entity=album&limit=1"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=10) as resp:
@@ -250,13 +254,12 @@ class AmazonApi:
                         if data.get('resultCount', 0) > 0:
                             artwork = data['results'][0].get('artworkUrl100')
                             if artwork:
-                                # Trik 10000x10000bb memaksa iTunes memberikan resolusi 
-                                # paling maksimal yang diunggah label rekaman (biasanya 3000x3000)
+                                # Trik 10000x10000bb memaksa CDN Apple memberikan resolusi
+                                # murni yang paling maksimal (tanpa upscale!)
                                 return artwork.replace('100x100bb.jpg', '10000x10000bb.jpg')
         except Exception as e:
             LOGGER.debug(f"iTunes cover fallback failed: {e}")
         return None
-    # -------------------------------------------------------------
 
     async def get_playback_info(self, asin: str, target_quality: str = "UHD"):
         for attempt in range(2):
@@ -349,31 +352,28 @@ class AmazonApi:
                         isrc = track_data_obj.get('isrc', '')
                         composer = ', '.join(track_data_obj.get('songWriters', []))
 
-                        # --- STRATEGI PENEMBUSAN COVER MASTER ---
+                        # --- STRATEGI PENEMBUSAN COVER MASTER (REVISI: ITUNES FIRST) ---
                         album_asin = album_main_obj.get('asin') or album_obj.get('asin')
                         master_cover = None
                         
-                        if album_asin and album:
-                            # 1. Coba Search API Tenzing
+                        # 1. PRIORITAS UTAMA: RAMPAS DARI ITUNES API!
+                        # Apple Music punya standar wajib cover murni resolusi raksasa
+                        master_cover = await self.fetch_itunes_cover(albumartist or artist, album)
+                        
+                        # 2. Jika gagal di iTunes, baru Fallback ke Tenzing Amazon
+                        if not master_cover and album_asin and album:
                             master_cover = await self.fetch_master_cover(album, album_asin)
-                            
-                        # 2. Jika Tenzing Amazon gagal, RAMPAS DARI ITUNES API!
-                        if not master_cover:
-                            master_cover = await self.fetch_itunes_cover(albumartist or artist, album)
                             
                         if master_cover:
                             image = master_cover
                             
                         if image:
-                            # 3. Proses Akhir: Penyesuaian Dinamis Resolusi Master
+                            # 3. Proses Akhir Resolusi
                             if 'mzstatic.com' in image or 'itunes.apple.com' in image:
-                                pass # iTunes sudah ditangani otomatis oleh 10000x10000bb
+                                pass # Biarkan URL iTunes 10000x10000bb bekerja (Server Apple akan otomatis beri ukuran native terbesar)
                             else:
-                                # Cukup hapus sepenuhnya modifier ukuran Amazon (seperti ._SX500_ dll)
-                                # Dengan begini, server CDN akan merilis file RAW asli berapapun ukuran maksimalnya!
+                                # Jika terpaksa pakai Amazon, ambil file mentah (RAW)
                                 image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
-                                # Gunakan UX untuk memaksa Upscale (Exact Width) meskipun gambar di Amazon kecil
-                                image = re.sub(r'\.(jpg|jpeg|png)$', r'._UX1400_QL100_FMjpg.\1', image, flags=re.IGNORECASE)
             
             # --- 2. PENCARIAN FILE AUDIO (MPD) ---
             dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
