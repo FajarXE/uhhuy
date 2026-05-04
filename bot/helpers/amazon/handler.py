@@ -258,21 +258,22 @@ async def start_track(asin: str, user: dict, url: str):
     LOGGER.info(f"Amazon: Mengambil info untuk lagu {asin}")
     
     try:
-        # --- PENAMBAHAN FILTER KUALITAS MULAI DI SINI ---
-        # Mengambil setting kualitas dari database user (Default ke UHD jika tidak ada)
-        user_quality = user.get('quality', 'UHD')
+        # --- FIX: Ambil dari database bot_set menggunakan key 'amazon_qual' ---
+        from bot.settings import bot_set
+        user_data = bot_set.user_data.get(user_id, {})
         
-        # Menerjemahkan setting bot ke format ranking Amazon
+        # Ambil 'amazon_qual' dari database, default ke HD jika kosong
+        user_quality = user_data.get('amazon_qual', 'HD')
+        
         if "FLAC" in user_quality.upper() or "HIRES" in user_quality.upper() or "MAX" in user_quality.upper() or "UHD" in user_quality.upper():
             target_q = "UHD"
         elif "HD" in user_quality.upper():
             target_q = "HD"
         else:
-            target_q = "SD" # Opus/AAC standar untuk penghematan kuota
+            target_q = "SD" 
             
         LOGGER.info(f"Amazon: Target batas maksimal kualitas: {target_q}")
         
-        # Menyuntikkan target_quality ke request MPD
         manifest_data = await client.get_playback_info(asin, target_quality=target_q)
         # --- PENAMBAHAN FILTER KUALITAS SELESAI ---
         
