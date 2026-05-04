@@ -71,21 +71,14 @@ async def start_album(album_asin: str, user: dict, url: str):
     
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
     
-    # --- FIX 1: requestedContent diubah menjadi "ALBUM" ---
+    # Di dalam fungsi start_album
     lookup_payload = {
         "asins": [album_asin],
         "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-        "requestedContent": "ALBUM", 
+        "requestedContent": "MUSIC_SUBSCRIPTION", # KEMBALIKAN KE NILAI INI
         "musicTerritory": music_territory, 
         "deviceId": device_id,
         "deviceType": device_type_id
-    }
-    
-    lookup_headers = {
-        "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
-        "x-amz-access-token": access_token,
-        "x-amzn-device-type-id": device_type_id,
-        "x-amzn-hardware-device-type-id": device_type_id
     }
     
     track_asins = []
