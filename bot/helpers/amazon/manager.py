@@ -30,7 +30,8 @@ class AmazonManager:
         for auth_data in accounts_list:
             client = AmazonApi(region=auth_data.get('region', 'jp'))
             try:
-                client.tokens = auth_data.get('tokens', {})
+                # [FIX] Menggunakan load_tokens agar customerId terekstrak otomatis
+                client.load_tokens(auth_data.get('tokens', {}))
                 self.clients.append(client)
             except Exception as e:
                 LOGGER.error(f"Amazon: Gagal meload akun Global: {e}")
@@ -45,7 +46,8 @@ class AmazonManager:
         tokens = account_data.get('tokens', {})
         
         client = AmazonApi(region=region)
-        client.tokens = tokens
+        # [FIX] Menggunakan load_tokens agar customerId terekstrak otomatis
+        client.load_tokens(tokens)
         
         self.user_clients[user_id] = client
         LOGGER.info(f"Amazon: Private session ditambahkan untuk user {user_id}")
@@ -84,7 +86,8 @@ class AmazonManager:
                 acc_data = user_data.get('amazon_account')
                 if acc_data:
                     client = AmazonApi(region=acc_data.get('region', 'us'))
-                    client.tokens = acc_data.get('tokens', {})
+                    # [FIX] Menggunakan load_tokens agar customerId terekstrak otomatis
+                    client.load_tokens(acc_data.get('tokens', {}))
                     self.user_clients[user_id] = client
                     return client
         
