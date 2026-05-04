@@ -347,32 +347,45 @@ class AmazonApi:
             best_bw = 0
             best_url = ""
             best_codec = "flac"
-            kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
-            kid = kid_match.group(1).strip() if kid_match else ""
+            best_kid = "" # Gunakan best_kid
             
-            reps = re.findall(r"<Representation\b([\s\S]*?)</Representation>", mpd_text, re.IGNORECASE)
-            for rep in reps:
-                bw_match = re.search(r'bandwidth=["\'](\d+)["\']', rep, re.IGNORECASE)
-                url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", rep, re.IGNORECASE)
+            # Cari seluruh AdaptationSet
+            adp_sets = re.findall(r"<AdaptationSet\b([\s\S]*?)</AdaptationSet>", mpd_text, re.IGNORECASE)
+            for adp in adp_sets:
+                # Ambil KID spesifik untuk AdaptationSet ini
+                kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', adp, re.IGNORECASE)
+                adp_kid = kid_match.group(1).strip() if kid_match else ""
                 
-                if url_match:
-                    bw = int(bw_match.group(1)) if bw_match else 0
-                    if bw >= best_bw:
-                        best_bw = bw
-                        best_url = html.unescape(url_match.group(1).strip())
-                        codec_match = re.search(r'codecs=["\']([^"\']+)["\']', rep, re.IGNORECASE)
-                        if codec_match:
-                            best_codec = html.unescape(codec_match.group(1).strip())
+                reps = re.findall(r"<Representation\b([\s\S]*?)</Representation>", adp, re.IGNORECASE)
+                for rep in reps:
+                    bw_match = re.search(r'bandwidth=["\'](\d+)["\']', rep, re.IGNORECASE)
+                    url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", rep, re.IGNORECASE)
+                    
+                    if url_match:
+                        bw = int(bw_match.group(1)) if bw_match else 0
+                        if bw >= best_bw:
+                            best_bw = bw
+                            best_url = html.unescape(url_match.group(1).strip())
+                            best_kid = adp_kid # Update KID agar cocok dengan URL yang diunduh
                             
+                            codec_match = re.search(r'codecs=["\']([^"\']+)["\']', rep, re.IGNORECASE)
+                            if codec_match:
+                                best_codec = html.unescape(codec_match.group(1).strip())
+                                
+            # Fallback jika format MPD anomali
             if not best_url:
                 url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", mpd_text, re.IGNORECASE)
                 if url_match:
                     best_url = html.unescape(url_match.group(1).strip())
+                kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
+                if kid_match:
+                    best_kid = kid_match.group(1).strip()
                     
             if not best_url:
                 LOGGER.error(f"Amazon MPD Parse Failed! Isi MPD: {mpd_text[:1000]}")
                 
-            return {'title': title, 'artist': artist, 'album': album, 'image': image, 'url': best_url, 'kid': kid, 'codec': best_codec}
+            # Pastikan mengembalikan 'kid': best_kid
+            return {'title': title, 'artist': artist, 'album': album, 'image': image, 'url': best_url, 'kid': best_kid, 'codec': best_codec}
 
     async def get_license(self, challenge_b64, track_asin):
         for attempt in range(2):
