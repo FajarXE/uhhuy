@@ -39,118 +39,30 @@ def parse_license_and_get_keys(cdm, session_id, license_b64):
     cdm.close(session_id)
     return keys
 
-# --- FUNGSI BARU: Pengekstrak FFmpeg & Metadata Super Lengkap ---
-async def amazon_convert_and_tag(input_path, track_meta):
-    output_path = track_meta['filepath']
-    image_url = track_meta.get('image', '')
-    cover_path = f"{input_path}_cover.jpg"
+async def amazon_convert_only(input_path, final_path):
+    """
+    Fungsi ringan yang hanya mengekstrak audio dari kontainer MP4 hasil dekripsi.
+    Penulisan metadata (Tagging/Cover Art) akan diserahkan sepenuhnya ke bot.helpers.metadata.
+    """
+    cmd = ['ffmpeg', '-y', '-i', input_path, '-map', '0:a:0', '-c:a', 'copy', final_path]
+    LOGGER.info(f"Amazon FFmpeg CMD: {' '.join(cmd)}")
     
-    if image_url:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as resp:
-                    if resp.status == 200:
-                        with open(cover_path, 'wb') as f:
-                            f.write(await resp.read())
-                        track_meta['thumb'] = cover_path
-        except Exception as e:
-            LOGGER.warning(f"Gagal mengunduh cover: {e}")
-            cover_path = None
-    else:
-        cover_path = None
-
-    cmd = ['ffmpeg', '-y', '-i', input_path]
-    if output_path.endswith('.opus') or output_path.endswith('.ogg'):
-        cmd.extend(['-map', '0:a:0', '-c:a', 'copy'])
-    elif cover_path and os.path.exists(cover_path):
-        cmd.extend(['-i', cover_path, '-map', '0:a:0', '-map', '1:v:0', '-c:v', 'copy', '-c:a', 'copy'])
-        if output_path.endswith('.flac'):
-            cmd.extend(['-disposition:v', 'attached_pic'])
-    else:
-        cmd.extend(['-map', '0:a:0', '-c:a', 'copy'])
-        
-    cmd.append(output_path)
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    stdout, stderr = await proc.communicate()
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    _, stderr = await proc.communicate()
     
     if proc.returncode != 0:
         LOGGER.error(f"FFmpeg gagal: {stderr.decode()}")
         raise Exception("Gagal mengekstrak audio dari kontainer (FFmpeg Error).")
-        
-    try:
-        # === PENULISAN METADATA LENGKAP ===
-        if output_path.endswith('.flac'):
-            from mutagen.flac import FLAC, Picture
-            audio = FLAC(output_path)
-            audio['title'] = track_meta['title']
-            audio['artist'] = track_meta['artist']
-            audio['album'] = track_meta['album']
-            audio['albumartist'] = track_meta['albumartist']
-            audio['tracknumber'] = str(track_meta['tracknumber'])
-            audio['tracktotal'] = str(track_meta['tracktotal'])
-            audio['discnumber'] = str(track_meta['discnumber'])
-            if track_meta.get('date'): audio['date'] = track_meta['date']
-            if track_meta.get('genre'): audio['genre'] = track_meta['genre']
-            if track_meta.get('copyright'): audio['copyright'] = track_meta['copyright']
-            if track_meta.get('isrc'): audio['isrc'] = track_meta['isrc']
-            if track_meta.get('composer'): audio['composer'] = track_meta['composer']
-            
-            if cover_path and os.path.exists(cover_path):
-                pic = Picture()
-                with open(cover_path, "rb") as f: pic.data = f.read()
-                pic.type, pic.mime = 3, "image/jpeg"
-                audio.add_picture(pic)
-            audio.save()
-            
-        elif output_path.endswith('.m4a'):
-            from mutagen.mp4 import MP4, MP4Cover
-            audio = MP4(output_path)
-            audio['\xa9nam'] = track_meta['title']
-            audio['\xa9ART'] = track_meta['artist']
-            audio['\xa9alb'] = track_meta['album']
-            audio['aART'] = track_meta['albumartist']
-            audio['trkn'] = [(int(track_meta['tracknumber']), int(track_meta['tracktotal']))]
-            audio['disk'] = [(int(track_meta['discnumber']), 0)]
-            if track_meta.get('date'): audio['\xa9day'] = track_meta['date']
-            if track_meta.get('genre'): audio['\xa9gen'] = track_meta['genre']
-            if track_meta.get('copyright'): audio['cprt'] = track_meta['copyright']
-            if track_meta.get('composer'): audio['\xa9wrt'] = track_meta['composer']
-            if track_meta.get('isrc'): audio['----:com.apple.iTunes:ISRC'] = track_meta['isrc'].encode()
-            
-            if cover_path and os.path.exists(cover_path):
-                with open(cover_path, "rb") as f:
-                    audio['covr'] = [MP4Cover(f.read(), imageformat=MP4Cover.FORMAT_JPEG)]
-            audio.save()
-            
-        elif output_path.endswith('.opus') or output_path.endswith('.ogg'):
-            from mutagen.oggopus import OggOpus
-            from mutagen.flac import Picture
-            import base64
-            audio = OggOpus(output_path)
-            audio['title'] = track_meta['title']
-            audio['artist'] = track_meta['artist']
-            audio['album'] = track_meta['album']
-            audio['albumartist'] = track_meta['albumartist']
-            audio['tracknumber'] = str(track_meta['tracknumber'])
-            audio['tracktotal'] = str(track_meta['tracktotal'])
-            audio['discnumber'] = str(track_meta['discnumber'])
-            if track_meta.get('date'): audio['date'] = track_meta['date']
-            if track_meta.get('genre'): audio['genre'] = track_meta['genre']
-            
-            if cover_path and os.path.exists(cover_path):
-                pic = Picture()
-                with open(cover_path, "rb") as f: pic.data = f.read()
-                pic.type, pic.mime, pic.desc = 3, "image/jpeg", "Cover"
-                audio["metadata_block_picture"] = [base64.b64encode(pic.write()).decode("ascii")]
-            audio.save()
-            
-    except Exception as e:
-        LOGGER.warning(f"Gagal menulis tag Mutagen: {e}")
 
 async def start_amazon(url: str, user: dict):
     parsed = urlparse.urlparse(url)
     qs = urlparse.parse_qs(parsed.query)
     
+    # Deteksi URL Single Track di dalam Album
     if 'trackAsin' in qs:
         asin = qs['trackAsin'][0]
         await start_track(asin, user, url)
@@ -158,6 +70,7 @@ async def start_amazon(url: str, user: dict):
     
     asin = parsed.path.strip('/').split('/')[-1]
     
+    # Deteksi Album vs Track
     if '/albums/' in parsed.path or '/album/' in parsed.path:
         await start_album(asin, user, url)
     else:
@@ -174,9 +87,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     device_id = client.tokens.get('device_id')
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     
-    # Deteksi region dan API Endpoint langsung dari URL yang dikirim user
-    # Ini memungkinkan bot melakukan Guest Lookup lintas-negara tanpa error!
-    import urllib.parse as urlparse
+    # Deteksi region Guest Lookup langsung dari URL
     domain = urlparse.urlparse(url).netloc.lower()
     
     lookup_base = client.base_url
@@ -184,37 +95,22 @@ async def start_album(album_asin: str, user: dict, url: str):
     music_territory = client.region.upper()
     
     if 'amazon.fr' in domain:
-        lookup_base = "https://music.amazon.fr/"
-        api_loc = "EU"
-        music_territory = "FR"
+        lookup_base, api_loc, music_territory = "https://music.amazon.fr/", "EU", "FR"
     elif 'amazon.co.jp' in domain:
-        lookup_base = "https://music.amazon.co.jp/"
-        api_loc = "FE"
-        music_territory = "JP"
+        lookup_base, api_loc, music_territory = "https://music.amazon.co.jp/", "FE", "JP"
     elif 'amazon.co.uk' in domain:
-        lookup_base = "https://music.amazon.co.uk/"
-        api_loc = "EU"
-        music_territory = "UK"
+        lookup_base, api_loc, music_territory = "https://music.amazon.co.uk/", "EU", "UK"
     elif 'amazon.de' in domain:
-        lookup_base = "https://music.amazon.de/"
-        api_loc = "EU"
-        music_territory = "DE"
+        lookup_base, api_loc, music_territory = "https://music.amazon.de/", "EU", "DE"
     elif 'amazon.com.mx' in domain:
-        lookup_base = "https://music.amazon.com.mx/"
-        api_loc = "NA"
-        music_territory = "MX"
+        lookup_base, api_loc, music_territory = "https://music.amazon.com.mx/", "NA", "MX"
     elif 'amazon.com.br' in domain:
-        lookup_base = "https://music.amazon.com.br/"
-        api_loc = "NA"
-        music_territory = "BR"
+        lookup_base, api_loc, music_territory = "https://music.amazon.com.br/", "NA", "BR"
     elif 'amazon.com' in domain:
-        lookup_base = "https://music.amazon.com/"
-        api_loc = "NA"
-        music_territory = "US"
+        lookup_base, api_loc, music_territory = "https://music.amazon.com/", "NA", "US"
 
     lookup_url = f"{lookup_base}{api_loc}/api/muse/legacy/lookup"
     
-    # RAHASIA UTAMA: Hapus 'x-amz-access-token' agar Amazon tidak memfilter katalog berdasarkan akun
     lookup_headers = {
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
         "x-amzn-device-type-id": device_type_id,
@@ -233,20 +129,19 @@ async def start_album(album_asin: str, user: dict, url: str):
             "deviceId": device_id,
             "deviceType": device_type_id
         }
-        # RAHASIA 2: Jangan masukkan 'customerId' ke payload
         
         try:
             async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     
-                    # 1. Cek struktur Album (tracks)
+                    # 1. Cek struktur Album Penuh
                     for album in data.get("albumList", []):
                         for track in album.get("tracks", []):
                             if isinstance(track, dict) and track.get("asin"):
                                 track_asins.append(track["asin"])
                                 
-                    # 2. Cek struktur Single (trackList)
+                    # 2. Cek struktur Single
                     if not track_asins:
                         for track in data.get("trackList", []):
                             if isinstance(track, dict) and track.get("asin"):
@@ -284,11 +179,8 @@ async def start_track(asin: str, user: dict, url: str):
     LOGGER.info(f"Amazon: Mengambil info untuk lagu {asin}")
     
     try:
-        # --- FIX: Ambil dari database bot_set menggunakan key 'amazon_qual' ---
         from bot.settings import bot_set
         user_data = bot_set.user_data.get(user_id, {})
-        
-        # Ambil 'amazon_qual' dari database, default ke HD jika kosong
         user_quality = user_data.get('amazon_qual', 'HD')
         
         if "FLAC" in user_quality.upper() or "HIRES" in user_quality.upper() or "MAX" in user_quality.upper() or "UHD" in user_quality.upper():
@@ -301,7 +193,6 @@ async def start_track(asin: str, user: dict, url: str):
         LOGGER.info(f"Amazon: Target batas maksimal kualitas: {target_q}")
         
         manifest_data = await client.get_playback_info(asin, target_quality=target_q)
-        # --- PENAMBAHAN FILTER KUALITAS SELESAI ---
         
     except Exception as e:
         err_str = str(e)
@@ -309,7 +200,6 @@ async def start_track(asin: str, user: dict, url: str):
             raise Exception(f"Akses Ditolak: Lagu ini mewajibkan langganan Amazon Music Unlimited yang aktif atau tidak tersedia di wilayah akun Anda. Detail: {err_str}")
         raise e
     
-    # Penentuan ekstensi secara dinamis berdasarkan Codec
     codec = manifest_data.get('codec', 'flac').lower()
     if 'flac' in codec:
         ext = 'flac'
@@ -318,20 +208,22 @@ async def start_track(asin: str, user: dict, url: str):
     else:
         ext = 'm4a'
     
+    # Penyelarasan format metadata dengan metadata.py
     track_meta = {
         'title': manifest_data.get('title', asin),
         'artist': manifest_data.get('artist', 'Unknown Artist'),
         'album': manifest_data.get('album', 'Unknown Album'),
-        'albumartist': manifest_data.get('albumartist', manifest_data.get('artist', 'Unknown Artist')),
+        'albumartist': manifest_data.get('albumartist', 'Unknown Artist'),
         'tracknumber': manifest_data.get('tracknumber', 1),
-        'tracktotal': manifest_data.get('tracktotal', 1),
+        'totaltracks': manifest_data.get('totaltracks', 1),
         'discnumber': manifest_data.get('discnumber', 1),
-        'date': manifest_data.get('date', ''),
+        'release_date': manifest_data.get('release_date', ''),
         'genre': manifest_data.get('genre', ''),
         'copyright': manifest_data.get('copyright', ''),
+        'publisher': manifest_data.get('publisher', ''),
         'isrc': manifest_data.get('isrc', ''),
         'composer': manifest_data.get('composer', ''),
-        'image': manifest_data.get('image', ''),
+        'cover': manifest_data.get('cover', ''),  
         'provider': 'Amazon Music',
         'type': 'track'
     }
@@ -374,7 +266,6 @@ async def start_track(asin: str, user: dict, url: str):
             try:
                 pydecrypt.decrypt_mp4_file(enc, dec, keys_by_track, keys_by_kid)
             except SystemExit:
-                # Tangkap perintah sys.exit(1) dari pydecrypt agar bot tidak crash/mati!
                 raise Exception("Dekripsi digagalkan oleh pydecrypt (KID tidak cocok atau file MP4 rusak).")
 
         await asyncio.to_thread(run_decryption, enc_path, dec_path, keys)
@@ -382,8 +273,8 @@ async def start_track(asin: str, user: dict, url: str):
         LOGGER.info("Amazon: Trek ini bersifat Free/Unencrypted (Tanpa DRM), melewati dekripsi.")
         shutil.copy(enc_path, dec_path)
 
-    # Mengekstrak & Men-tag file menggunakan fungsi mandiri
-    await amazon_convert_and_tag(dec_path, track_meta)
+    # 1. Ekstrak audio dari kontainer DRM (Abaikan gambar)
+    await amazon_convert_only(dec_path, final_path)
 
     try:
         os.remove(enc_path)
@@ -391,4 +282,9 @@ async def start_track(asin: str, user: dict, url: str):
     except:
         pass
 
+    # 2. Sisipkan seluruh metadata, gambar, dan lirik via mesin utama bot
+    from bot.helpers.metadata import set_metadata
+    await set_metadata(track_meta, user_id)
+
+    # 3. Unggah ke Telegram dengan data yang sudah sempurna
     await telegram_upload(track_meta, user)
