@@ -9,7 +9,7 @@ import aiohttp
 import re
 import html
 import base64
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 from bot.logger import LOGGER
 
 class AmazonApi:
@@ -186,7 +186,6 @@ class AmazonApi:
                 if str(e) == "AUTH_EXPIRED": raise e
                 return False
 
-    # --- FUNGSI BARU: Pencuri Resolusi Master via Tenzing Search API ---
     async def fetch_master_cover(self, album_title, album_asin):
         try:
             site_region = self.region if self.region != 'uk' else 'gb'
@@ -219,9 +218,10 @@ class AmazonApi:
                     "maxResults": 10
                 }]
             }
+            # Gunakan Bearer Token murni untuk menembus Tenzing Web API
             headers = {
                 "X-Amz-Target": "com.amazon.tenzing.textsearch.v1_1.TenzingTextSearchServiceExternalV1_1.search",
-                "x-amz-access-token": self.tokens.get('x-amz-access-token'),
+                "Authorization": f"Bearer {self.tokens.get('x-amz-access-token')}",
                 "Content-Encoding": "amz-1.0",
             }
             async with self.session.post(url, json=payload, headers=headers) as resp:
@@ -235,9 +235,28 @@ class AmazonApi:
                                 if doc.get("artOriginal") and doc["artOriginal"].get("URL"):
                                     return doc["artOriginal"]["URL"]
         except Exception as e:
-            LOGGER.debug(f"Search API Cover fallback failed: {e}")
+            LOGGER.debug(f"Amazon Search API Cover fallback failed: {e}")
         return None
-    # -------------------------------------------------------------------
+
+    # --- TAMBAHAN BARU: PENGAMBIL COVER ITUNES (STUDIO MASTER) ---
+    async def fetch_itunes_cover(self, artist, album):
+        try:
+            term = quote(f"{artist} {album}")
+            url = f"https://itunes.apple.com/search?term={term}&entity=album&limit=1"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('resultCount', 0) > 0:
+                            artwork = data['results'][0].get('artworkUrl100')
+                            if artwork:
+                                # Trik 10000x10000bb memaksa iTunes memberikan resolusi 
+                                # paling maksimal yang diunggah label rekaman (biasanya 3000x3000)
+                                return artwork.replace('100x100bb.jpg', '10000x10000bb.jpg')
+        except Exception as e:
+            LOGGER.debug(f"iTunes cover fallback failed: {e}")
+        return None
+    # -------------------------------------------------------------
 
     async def get_playback_info(self, asin: str, target_quality: str = "UHD"):
         for attempt in range(2):
@@ -330,16 +349,29 @@ class AmazonApi:
                         isrc = track_data_obj.get('isrc', '')
                         composer = ', '.join(track_data_obj.get('songWriters', []))
 
-                        # --- FIX RESOLUSI COVER: Ambil artOriginal via Search API ---
+                        # --- STRATEGI PENEMBUSAN COVER MASTER ---
                         album_asin = album_main_obj.get('asin') or album_obj.get('asin')
+                        master_cover = None
+                        
                         if album_asin and album:
+                            # 1. Coba Search API Tenzing
                             master_cover = await self.fetch_master_cover(album, album_asin)
-                            if master_cover:
-                                image = master_cover
-
+                            
+                        # 2. Jika Tenzing Amazon gagal, RAMPAS DARI ITUNES API!
+                        if not master_cover:
+                            master_cover = await self.fetch_itunes_cover(albumartist or artist, album)
+                            
+                        if master_cover:
+                            image = master_cover
+                            
                         if image:
-                            image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
-                            image = re.sub(r'\.(jpg|jpeg|png)$', r'._SX1400_QL100_FMjpg.\1', image, flags=re.IGNORECASE)
+                            # 3. Proses Akhir: Jangan sentuh jika dari iTunes
+                            if 'mzstatic.com' in image or 'itunes.apple.com' in image:
+                                pass
+                            else:
+                                image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
+                                # Gunakan UX untuk memaksa Upscale (Exact Width) meskipun gambar di Amazon kecil
+                                image = re.sub(r'\.(jpg|jpeg|png)$', r'._UX1400_QL100_FMjpg.\1', image, flags=re.IGNORECASE)
             
             # --- 2. PENCARIAN FILE AUDIO (MPD) ---
             dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
