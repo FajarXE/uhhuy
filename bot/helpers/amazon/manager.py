@@ -42,11 +42,14 @@ class AmazonManager:
 
     async def add_user_account(self, user_id: int, account_data: dict):
         """Memasukkan sesi private ke memori bot saat user baru login"""
+        # [FIX] Hentikan dan tutup sesi lama jika user menimpa login
+        if user_id in self.user_clients:
+            await self.user_clients[user_id].close()
+
         region = account_data.get('region', 'us')
         tokens = account_data.get('tokens', {})
         
         client = AmazonApi(region=region)
-        # [FIX] Menggunakan load_tokens agar customerId terekstrak otomatis
         client.load_tokens(tokens)
         
         self.user_clients[user_id] = client
