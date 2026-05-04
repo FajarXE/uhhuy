@@ -40,10 +40,6 @@ def parse_license_and_get_keys(cdm, session_id, license_b64):
     return keys
 
 async def amazon_convert_only(input_path, final_path):
-    """
-    Fungsi ringan yang hanya mengekstrak audio dari kontainer MP4 hasil dekripsi.
-    Penulisan metadata (Tagging/Cover Art) akan diserahkan sepenuhnya ke bot.helpers.metadata.
-    """
     cmd = ['ffmpeg', '-y', '-i', input_path, '-map', '0:a:0', '-c:a', 'copy', final_path]
     LOGGER.info(f"Amazon FFmpeg CMD: {' '.join(cmd)}")
     
@@ -62,7 +58,6 @@ async def start_amazon(url: str, user: dict):
     parsed = urlparse.urlparse(url)
     qs = urlparse.parse_qs(parsed.query)
     
-    # Deteksi URL Single Track di dalam Album
     if 'trackAsin' in qs:
         asin = qs['trackAsin'][0]
         await start_track(asin, user, url)
@@ -70,7 +65,6 @@ async def start_amazon(url: str, user: dict):
     
     asin = parsed.path.strip('/').split('/')[-1]
     
-    # Deteksi Album vs Track
     if '/albums/' in parsed.path or '/album/' in parsed.path:
         await start_album(asin, user, url)
     else:
@@ -87,7 +81,6 @@ async def start_album(album_asin: str, user: dict, url: str):
     device_id = client.tokens.get('device_id')
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     
-    # Deteksi region Guest Lookup langsung dari URL
     domain = urlparse.urlparse(url).netloc.lower()
     
     lookup_base = client.base_url
@@ -135,19 +128,16 @@ async def start_album(album_asin: str, user: dict, url: str):
                 if resp.status == 200:
                     data = await resp.json()
                     
-                    # 1. Cek struktur Album Penuh
                     for album in data.get("albumList", []):
                         for track in album.get("tracks", []):
                             if isinstance(track, dict) and track.get("asin"):
                                 track_asins.append(track["asin"])
                                 
-                    # 2. Cek struktur Single
                     if not track_asins:
                         for track in data.get("trackList", []):
                             if isinstance(track, dict) and track.get("asin"):
                                 track_asins.append(track["asin"])
                                 
-            # Hilangkan duplikat ASIN
             track_asins = list(dict.fromkeys(track_asins))
             
             if track_asins:
@@ -162,14 +152,63 @@ async def start_album(album_asin: str, user: dict, url: str):
     if 'bot_msg' in user:
         await user['bot_msg'].edit_text(f"💿 **Data Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
 
+    # --- PERBAIKAN: WADAH PENGUMPUL METADATA ALBUM ---
+    album_tracks = []
+    album_folder = ""
+    album_title = ""
+    album_artist = ""
+    album_cover = ""
+
     for t_asin in track_asins:
         try:
-            await start_track(t_asin, user, url)
+            # Panggil start_track dalam mode "is_album=True" agar tidak langsung dilempar ke Telegram!
+            t_meta = await start_track(t_asin, user, url, is_album=True)
+            if t_meta:
+                album_tracks.append(t_meta)
+                if not album_folder:
+                    album_folder = t_meta.get('folderpath', '')
+                    album_title = t_meta.get('album', '')
+                    album_artist = t_meta.get('albumartist', '')
+                    album_cover = t_meta.get('cover', '')
         except Exception as e:
             LOGGER.error(f"Gagal mengunduh track {t_asin}: {e}")
             continue
 
-async def start_track(asin: str, user: dict, url: str):
+    # --- PERBAIKAN: EKSEKUSI ZIP & ART POSTER SEKALIGUS (ALBUM UPLOAD) ---
+    if album_tracks:
+        album_metadata = {
+            'type': 'album',
+            'title': album_title,
+            'album': album_title,
+            'artist': album_artist,
+            'albumartist': album_artist,
+            'folderpath': album_folder,
+            'tracks': album_tracks,
+            'provider': 'Amazon Music',
+            'cover': album_cover,
+            'quality': album_tracks[0].get('quality', 'UHD') if album_tracks else 'UHD'
+        }
+        
+        # 1. Panggil fungsi pengeposan Art Poster (Ini akan memunculkan Gambar Kotak Album)
+        from bot.helpers.utils import post_art_poster
+        poster_msg = await post_art_poster(user, album_metadata)
+        
+        if poster_msg:
+            album_metadata['poster_msg'] = poster_msg
+            # Hapus pesan status teks lama agar tampilan UI bersih
+            if 'bot_msg' in user:
+                try: 
+                    from bot.tgclient import aio
+                    await aio.delete_messages(user['chat_id'], user['bot_msg'].id)
+                except: pass
+        else:
+            album_metadata['poster_msg'] = user.get('bot_msg')
+            
+        # 2. Serahkan seluruh keranjang ke mesin pengunggah (untuk proses Zip / Folder Batch)
+        from bot.helpers.uploder import album_upload
+        await album_upload(album_metadata, user)
+
+async def start_track(asin: str, user: dict, url: str, is_album=False):
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
     
@@ -191,24 +230,19 @@ async def start_track(asin: str, user: dict, url: str):
             target_q = "SD" 
             
         LOGGER.info(f"Amazon: Target batas maksimal kualitas: {target_q}")
-        
         manifest_data = await client.get_playback_info(asin, target_quality=target_q)
         
     except Exception as e:
         err_str = str(e)
         if "Akses ditolak" in err_str or "EXPIRED_TOKEN" in err_str:
-            raise Exception(f"Akses Ditolak: Lagu ini mewajibkan langganan Amazon Music Unlimited yang aktif atau tidak tersedia di wilayah akun Anda. Detail: {err_str}")
+            raise Exception(f"Akses Ditolak: Mewajibkan langganan Amazon Music Unlimited yang aktif atau tidak tersedia. Detail: {err_str}")
         raise e
     
     codec = manifest_data.get('codec', 'flac').lower()
-    if 'flac' in codec:
-        ext = 'flac'
-    elif 'opus' in codec:
-        ext = 'opus'
-    else:
-        ext = 'm4a'
+    if 'flac' in codec: ext = 'flac'
+    elif 'opus' in codec: ext = 'opus'
+    else: ext = 'm4a'
     
-    # Penyelarasan format metadata dengan metadata.py
     track_meta = {
         'title': manifest_data.get('title', asin),
         'artist': manifest_data.get('artist', 'Unknown Artist'),
@@ -224,6 +258,7 @@ async def start_track(asin: str, user: dict, url: str):
         'isrc': manifest_data.get('isrc', ''),
         'composer': manifest_data.get('composer', ''),
         'cover': manifest_data.get('cover', ''),  
+        'quality': target_q, # --- FIX: AGAR CAPTION TELEGRAM TERISI ---
         'provider': 'Amazon Music',
         'type': 'track'
     }
@@ -258,22 +293,18 @@ async def start_track(asin: str, user: dict, url: str):
         license_b64 = await client.get_license(challenge_b64, asin)
         keys = await asyncio.to_thread(parse_license_and_get_keys, cdm, session_id, license_b64)
 
-        LOGGER.info(f"Amazon: Mendekripsi file dengan keys {keys}")
-        
         def run_decryption(enc, dec, key_list):
             from bot.helpers.amazon.drm import pydecrypt
             keys_by_track, keys_by_kid = pydecrypt.parse_keys(key_list)
             try:
                 pydecrypt.decrypt_mp4_file(enc, dec, keys_by_track, keys_by_kid)
             except SystemExit:
-                raise Exception("Dekripsi digagalkan oleh pydecrypt (KID tidak cocok atau file MP4 rusak).")
+                raise Exception("Dekripsi digagalkan oleh pydecrypt (KID tidak cocok).")
 
         await asyncio.to_thread(run_decryption, enc_path, dec_path, keys)
     else:
-        LOGGER.info("Amazon: Trek ini bersifat Free/Unencrypted (Tanpa DRM), melewati dekripsi.")
         shutil.copy(enc_path, dec_path)
 
-    # 1. Ekstrak audio dari kontainer DRM (Abaikan gambar)
     await amazon_convert_only(dec_path, final_path)
 
     try:
@@ -282,9 +313,12 @@ async def start_track(asin: str, user: dict, url: str):
     except:
         pass
 
-    # 2. Sisipkan seluruh metadata, gambar, dan lirik via mesin utama bot
     from bot.helpers.metadata import set_metadata
     await set_metadata(track_meta, user_id)
 
-    # 3. Unggah ke Telegram dengan data yang sudah sempurna
-    await telegram_upload(track_meta, user)
+    # 3. Unggah ke Telegram HANYA JIKA BUKAN ALBUM
+    # Jika mode is_album=True, ia hanya mengembalikan track_meta untuk dikumpulkan.
+    if not is_album:
+        await telegram_upload(track_meta, user)
+        
+    return track_meta
