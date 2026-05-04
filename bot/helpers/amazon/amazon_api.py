@@ -93,7 +93,6 @@ class AmazonApi:
             extracted = self._extract_jwt_data(access_token)
             self.tokens.update(extracted)
 
-        # [FIX] Ekstrak clientId dari service_token untuk otorisasi Refresh Token
         if not self.tokens.get("client_id") and self.tokens.get("service_token"):
             try:
                 st_data = json.loads(self.tokens["service_token"])
@@ -147,7 +146,6 @@ class AmazonApi:
                 self.tokens["x-amz-access-token"] = token_data.get("accessToken")
                 self.tokens["refresh_token"] = token_data.get("refreshToken") 
                 
-                # [FIX] Simpan client_id saat pertama kali auth berhasil
                 if "clientId" in token_data:
                     self.tokens["client_id"] = token_data["clientId"]
                 
@@ -180,7 +178,6 @@ class AmazonApi:
             "refresh_token": refresh_token,
         }
         
-        # [FIX] Menambahkan client_id yang diwajibkan oleh Amazon OAuth2
         if client_id:
             payload["client_id"] = client_id
         
@@ -202,9 +199,6 @@ class AmazonApi:
                     return True
                 else:
                     err_txt = await resp.text()
-                    LOGGER.error(f"Gagal memperbarui token Amazon ({resp.status}): {err_txt}")
-                    
-                    # [FIX] Jika token memang sudah mati permanen atau invalid
                     if resp.status == 400 and ("invalid_grant" in err_txt or "client_id" in err_txt):
                         raise Exception("AUTH_EXPIRED")
                     return False
@@ -236,6 +230,8 @@ class AmazonApi:
                 "deviceId": device_id,
                 "deviceType": device_type_id
             }
+            if customer_id:
+                lookup_payload["customerId"] = customer_id
             
             lookup_headers = {
                 "x-amzn-requestid": str(uuid.uuid4()),
@@ -245,7 +241,7 @@ class AmazonApi:
                 "x-amzn-hardware-device-type-id": device_type_id
             }
             
-            title, artist, album = asin, "Unknown Artist", "Unknown Album"
+            title, artist, album, image = asin, "Unknown Artist", "Unknown Album", ""
             async with self.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
                 if resp.status == 403 and attempt == 0:
                     LOGGER.warning("Token Expired saat Lookup. Mencoba Refresh Token...")
@@ -266,7 +262,12 @@ class AmazonApi:
                         track = lookup_data['trackList'][0]
                         title = track.get('title', asin)
                         artist = track.get('artist', {}).get('name', 'Unknown Artist')
-                        album = track.get('album', {}).get('title', 'Unknown Album')
+                        album_obj = track.get('album', {})
+                        if isinstance(album_obj, dict):
+                            album = album_obj.get('title', 'Unknown Album')
+                            image = album_obj.get('image', '')
+                        if not image and 'albumList' in lookup_data and lookup_data['albumList']:
+                            image = lookup_data['albumList'][0].get('image', '')
             
             dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
             
@@ -345,6 +346,7 @@ class AmazonApi:
                 
             best_bw = 0
             best_url = ""
+            best_codec = "flac"
             kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
             kid = kid_match.group(1).strip() if kid_match else ""
             
@@ -358,7 +360,10 @@ class AmazonApi:
                     if bw >= best_bw:
                         best_bw = bw
                         best_url = html.unescape(url_match.group(1).strip())
-                        
+                        codec_match = re.search(r'codecs=["\']([^"\']+)["\']', rep, re.IGNORECASE)
+                        if codec_match:
+                            best_codec = html.unescape(codec_match.group(1).strip())
+                            
             if not best_url:
                 url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", mpd_text, re.IGNORECASE)
                 if url_match:
@@ -367,7 +372,7 @@ class AmazonApi:
             if not best_url:
                 LOGGER.error(f"Amazon MPD Parse Failed! Isi MPD: {mpd_text[:1000]}")
                 
-            return {'title': title, 'artist': artist, 'album': album, 'url': best_url, 'kid': kid}
+            return {'title': title, 'artist': artist, 'album': album, 'image': image, 'url': best_url, 'kid': kid, 'codec': best_codec}
 
     async def get_license(self, challenge_b64, track_asin):
         for attempt in range(2):
