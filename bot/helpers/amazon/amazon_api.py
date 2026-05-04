@@ -144,25 +144,55 @@ class AmazonApi:
         old_access_token = self.tokens.get("x-amz-access-token")
         
         async with self.refresh_lock:
+            # Cegah tabrakan refresh jika antrian sebelumnya sudah berhasil
             if self.tokens.get("x-amz-access-token") != old_access_token:
                 return True
                 
-            refresh_token = self.tokens.get("refresh_token")
-            if not refresh_token: return False
+            # --- PERBAIKAN FATAL: Menggunakan Logika 'transferPlayback' ala main_tv.py ---
+            service_token = self.tokens.get("service_token")
+            device_id = self.tokens.get("device_id")
+            
+            if not service_token or not device_id:
+                LOGGER.error("Gagal Refresh: service_token atau device_id tidak tersedia.")
+                return False
 
-            url = "https://api.amazon.com/auth/o2/token"
-            payload = {"grant_type": "refresh_token", "refresh_token": refresh_token}
-            if self.tokens.get("client_id"): payload["client_id"] = self.tokens.get("client_id")
-
-            headers = {"User-Agent": self.default_headers["user-agent"], "Content-Type": "application/x-www-form-urlencoded"}
+            url = f"https://{self.api_url}/api/transferPlayback"
+            payload = {
+                "showNowPlaying": "false",
+                "newMediaRequired": "true",
+                "userHash": "",
+            }
+            
+            headers = {
+                "x-amzn-request-id": str(uuid.uuid4()),
+                "x-amzn-timestamp": str(int(time.time() * 1000)),
+                "x-amzn-authentication": service_token,
+                "x-amzn-device-id": device_id,
+            }
             
             try:
-                async with self.session.post(url, data=payload, headers=headers) as resp:
+                async with self.session.post(url, json=payload, headers=headers) as resp:
                     if resp.status == 200:
-                        data = await resp.json()
-                        self.tokens["x-amz-access-token"] = data.get("access_token")
-                        if "refresh_token" in data: self.tokens["refresh_token"] = data.get("refresh_token")
+                        transfer_json = await resp.json()
+                        transferred_service_token = None
                         
+                        for item in transfer_json.get("methods", []):
+                            if item.get("interface") == "PlaybackAuthenticationInterface.v1_0.SetAuthenticationMethod" and item.get("authentication"):
+                                transferred_service_token = item["authentication"]
+                                break
+                                
+                        if not transferred_service_token:
+                            raise Exception("Amazon tidak memberikan token transfer baru.")
+
+                        # Ekstrak token baru ke memori
+                        transfer_token_data = json.loads(transferred_service_token)
+                        self.tokens["service_token"] = transferred_service_token
+                        self.tokens["x-amz-access-token"] = transfer_token_data.get("accessToken")
+                        
+                        if transfer_token_data.get("marketplaceId"):
+                            self.tokens["marketplaceId"] = transfer_token_data["marketplaceId"]
+                        
+                        # --- PENGAMANAN PERMANEN KE DATABASE MANAGER ---
                         try:
                             from bot.helpers.amazon.manager import amazon_manager
                             if hasattr(amazon_manager, 'clients'):
@@ -175,15 +205,20 @@ class AmazonApi:
                                 if hasattr(amazon_manager, save_func):
                                     getattr(amazon_manager, save_func)()
                                     break
+                            LOGGER.info("Amazon API: Sesi TV berhasil disegarkan (transferPlayback) dan disimpan!")
                         except: pass
                         return True
                     else:
                         err_txt = await resp.text()
-                        if resp.status == 400 and ("invalid_grant" in err_txt or "client_id" in err_txt):
+                        LOGGER.error(f"Gagal Refresh TV Session: {resp.status} - {err_txt}")
+                        # Hanya vonis mati permanen jika HTTP 400/401
+                        if resp.status in [400, 401, 403]:
                             raise Exception("AUTH_EXPIRED")
                         return False
+                        
             except Exception as e:
                 if str(e) == "AUTH_EXPIRED": raise e
+                LOGGER.error(f"Koneksi gagal saat refresh TV Amazon: {e}")
                 return False
 
     async def fetch_master_cover(self, album_title, album_asin):
