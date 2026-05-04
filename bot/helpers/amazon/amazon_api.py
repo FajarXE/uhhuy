@@ -221,56 +221,69 @@ class AmazonApi:
             marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
             music_territory = self.region.upper()
             
+            # --- 1. LOOKUP METADATA LENGKAP ---
             lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
             lookup_payload = {
                 "asins": [asin],
-                "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+                "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability", "albumArtist", "fullAlbumDetails"],
                 "requestedContent": "MUSIC_SUBSCRIPTION",
                 "musicTerritory": music_territory, 
                 "deviceId": device_id,
                 "deviceType": device_type_id
             }
-            if customer_id:
-                lookup_payload["customerId"] = customer_id
             
+            # Mode "Guest Lookup" (Tanpa customerId & access_token) untuk mengatasi Geo-Block Metadata
             lookup_headers = {
                 "x-amzn-requestid": str(uuid.uuid4()),
                 "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
-                "x-amz-access-token": access_token,
                 "x-amzn-device-type-id": device_type_id,
                 "x-amzn-hardware-device-type-id": device_type_id
             }
             
             title, artist, album, image = asin, "Unknown Artist", "Unknown Album", ""
+            albumartist, tracknumber, discnumber, tracktotal = "Unknown Artist", 1, 1, 1
+            isrc, composer, genre, copyright, release_date = "", "", "", "", ""
+            
             async with self.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-                if resp.status == 403 and attempt == 0:
-                    LOGGER.warning("Token Expired saat Lookup. Mencoba Refresh Token...")
-                    try:
-                        is_refreshed = await self.refresh_access_token()
-                    except Exception as e:
-                        if str(e) == "AUTH_EXPIRED":
-                            raise Exception("Sesi Amazon Music Anda telah kedaluwarsa secara permanen. Silakan gunakan perintah login kembali.")
-                        is_refreshed = False
-                        
-                    if is_refreshed:
-                        continue 
-                    raise Exception("Gagal memperbarui sesi Amazon yang sudah kedaluwarsa.")
-                
                 if resp.status == 200:
                     lookup_data = await resp.json()
+                    
+                    track_data_obj = None
                     if 'trackList' in lookup_data and lookup_data['trackList']:
-                        track = lookup_data['trackList'][0]
-                        title = track.get('title', asin)
-                        artist = track.get('artist', {}).get('name', 'Unknown Artist')
-                        album_obj = track.get('album', {})
+                        track_data_obj = lookup_data['trackList'][0]
+                    elif 'albumList' in lookup_data and lookup_data['albumList']:
+                        album_tracks = lookup_data['albumList'][0].get('tracks', [])
+                        if album_tracks: track_data_obj = album_tracks[0]
+
+                    if track_data_obj:
+                        title = track_data_obj.get('title', asin)
+                        artist = track_data_obj.get('artist', {}).get('name', 'Unknown Artist')
+                        
+                        album_obj = track_data_obj.get('album', {})
                         if isinstance(album_obj, dict):
                             album = album_obj.get('title', 'Unknown Album')
                             image = album_obj.get('image', '')
-                        if not image and 'albumList' in lookup_data and lookup_data['albumList']:
-                            image = lookup_data['albumList'][0].get('image', '')
+                            albumartist = album_obj.get('primaryArtistName', artist)
+                            tracktotal = album_obj.get('trackCount', 1)
+                            genre = album_obj.get('productDetails', {}).get('primaryGenreName', '')
+                            copyright = album_obj.get('productDetails', {}).get('copyright', '')
+                            
+                            date_ms = album_obj.get('originalReleaseDate') or album_obj.get('merchantReleaseDate')
+                            if date_ms:
+                                from datetime import datetime, timedelta
+                                release_date = (datetime(1970, 1, 1) + timedelta(seconds=date_ms / 1000)).strftime('%Y-%m-%d')
+
+                        tracknumber = track_data_obj.get('trackNum', 1)
+                        discnumber = track_data_obj.get('discNum', 1)
+                        isrc = track_data_obj.get('isrc', '')
+                        composer = ', '.join(track_data_obj.get('songWriters', []))
+
+                        # FIX RESOLUSI COVER: Buang tagging kompresi untuk ukuran Master
+                        if image:
+                            image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
             
+            # --- 2. REQUEST MPD / MANIFEST ---
             dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
-            
             customer_info = {
                 "marketplaceId": marketplace_id,
                 "territoryId": music_territory,
@@ -338,13 +351,12 @@ class AmazonApi:
                         if is_refreshed:
                             continue
                             
-                    import json
                     raw_dump = json.dumps(item_resp)[:250] 
                     raise Exception(f"Ditolak Amazon: [{err_code}] {err_msg} | RAW: {raw_dump}...")
                     
                 mpd_text = item_resp.get("manifest", "")
 
-            # --- SISTEM RANKING KUALITAS (REVISI DETEKSI BIT-DEPTH) ---
+            # --- 3. FILTER RANKING KUALITAS & DETEKSI BIT-DEPTH ---
             target_rank = {"SD": 2, "HD": 3, "UHD": 4}.get(target_quality.upper(), 4)
             valid_reps = []
             
@@ -366,11 +378,9 @@ class AmazonApi:
                         rep_codec = html.unescape(codec_match.group(1).strip()).lower() if codec_match else "flac"
                         sr = int(sr_match.group(1)) if sr_match else 44100
                         
-                        # LOGIKA BARU: Tentukan kualitas berdasarkan codec, sr, dan bandwidth (bit-depth)
                         if "mp4a" in rep_codec or "opus" in rep_codec:
                             rep_rank = 2  # SD (Lossy)
                         elif "flac" in rep_codec:
-                            # Jika SR > 48kHz ATAU Bandwidth > 1.2 Mbps, itu pasti 24-bit (UHD)
                             if sr > 48000 or bw > 1200000:
                                 rep_rank = 4  # UHD
                             else:
@@ -391,14 +401,11 @@ class AmazonApi:
             best_codec = "flac"
             best_kid = ""
             
-            # --- PROSES FILTERING ---
             filtered_reps = [r for r in valid_reps if r["rank"] <= target_rank]
-            
             if not filtered_reps:
                 filtered_reps = valid_reps
                 
             if filtered_reps:
-                # Sekarang, nilai tertinggi yang diambil PASTI tertahan di bawah 1.2 Mbps untuk HD
                 best_rep = max(filtered_reps, key=lambda x: x["bw"])
                 best_url = best_rep["url"]
                 best_kid = best_rep["kid"]
@@ -414,7 +421,13 @@ class AmazonApi:
             if not best_url:
                 LOGGER.error(f"Amazon MPD Parse Failed! Isi MPD: {mpd_text[:1000]}")
                 
-            return {'title': title, 'artist': artist, 'album': album, 'image': image, 'url': best_url, 'kid': best_kid, 'codec': best_codec}
+            return {
+                'title': title, 'artist': artist, 'album': album, 'albumartist': albumartist,
+                'tracknumber': tracknumber, 'discnumber': discnumber, 'tracktotal': tracktotal,
+                'isrc': isrc, 'composer': composer, 'genre': genre, 'copyright': copyright,
+                'date': release_date, 'image': image, 'url': best_url, 
+                'kid': best_kid, 'codec': best_codec
+            }
 
     async def get_license(self, challenge_b64, track_asin):
         for attempt in range(2):
