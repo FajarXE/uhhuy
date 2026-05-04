@@ -65,23 +65,26 @@ async def start_album(album_asin: str, user: dict, url: str):
 
     device_id = client.tokens.get('device_id')
     access_token = client.tokens.get('x-amz-access-token')
+    customer_id = client.tokens.get('customerId') # [FIX] Ambil ID pengguna
     
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     music_territory = client.region.upper() 
     
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
     
-    # Di dalam fungsi start_album
     lookup_payload = {
         "asins": [album_asin],
         "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-        "requestedContent": "FULL_CATALOG", # Gunakan enum ini
+        "requestedContent": "FULL_CATALOG", 
         "musicTerritory": music_territory, 
         "deviceId": device_id,
         "deviceType": device_type_id
     }
-
-    # ▼ PASTIKAN BLOK KODE INI DIKEMBALIKAN ▼
+    
+    # [FIX] Suntikkan customerId agar Amazon memberikan daftar lagu Premium
+    if customer_id:
+        lookup_payload["customerId"] = customer_id
+        
     lookup_headers = {
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
         "x-amz-access-token": access_token,
@@ -93,32 +96,30 @@ async def start_album(album_asin: str, user: dict, url: str):
     async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
         if resp.status == 200:
             data = await resp.json()
-            
             for album in data.get("albumList", []):
                 for track in album.get("trackList", []):
                     if track.get("asin"):
                         track_asins.append(track["asin"])
                         
-            if not track_asins:
-                def extract_track_asins(obj):
-                    found = []
-                    if isinstance(obj, dict):
-                        if 'asin' in obj and ('trackNumber' in obj or 'durationSeconds' in obj):
-                            found.append(obj['asin'])
-                        for v in obj.values():
-                            found.extend(extract_track_asins(v))
-                    elif isinstance(obj, list):
-                        for item in obj:
-                            found.extend(extract_track_asins(item))
-                    return found
-                track_asins = list(dict.fromkeys(extract_track_asins(data))) 
+    # [FIX] FALLBACK: Ekstraksi dari Web jika API TV tetap memblokir daftar lagu
+    if not track_asins:
+        LOGGER.warning(f"API tidak memberikan trackList untuk {album_asin}. Menggunakan Web Scraper...")
+        web_url = f"https://music.amazon.com/albums/{album_asin}"
+        web_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        
+        async with client.session.get(web_url, headers=web_headers) as w_resp:
+            if w_resp.status == 200:
+                html_data = await w_resp.text()
+                import re
+                # Cari pola JSON state Amazon yang menyimpan ID lagu
+                raw_asins = re.findall(r'"asin"\s*:\s*"([^"]+)"', html_data)
+                for a in raw_asins:
+                    # Ambil hanya ID yang diawali B0, memiliki panjang 10 karakter, dan bukan ASIN album itu sendiri
+                    if a != album_asin and a.startswith('B0') and len(a) == 10 and a not in track_asins:
+                        track_asins.append(a)
                 
-            if not track_asins:
-                err_dump = str(data)[:500] 
-                raise Exception(f"Amazon tidak mengembalikan daftar lagu. Respons server: {err_dump}")
-        else:
-            err_txt = await resp.text()
-            raise Exception(f"HTTP Error {resp.status} saat mencari album: {err_txt}")
+    if not track_asins:
+        raise Exception("Amazon menolak memberikan daftar lagu, dan fallback Web Scraper gagal menemukan ASIN.")
             
     LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album.")
     if 'bot_msg' in user:
@@ -129,7 +130,6 @@ async def start_album(album_asin: str, user: dict, url: str):
             await start_track(t_asin, user, url)
         except Exception as e:
             LOGGER.error(f"Gagal mengunduh track {t_asin}: {e}")
-            # Melanjutkan ke lagu berikutnya jika satu lagu gagal (misal: terkunci premium)
             continue
 
 async def start_track(asin: str, user: dict, url: str):
