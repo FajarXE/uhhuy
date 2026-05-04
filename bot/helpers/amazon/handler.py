@@ -47,8 +47,8 @@ async def amazon_convert_and_tag(input_path, track_meta):
     cover_path = f"{input_path}_cover.jpg"
     if image_url:
         import re
-        # RAHASIA RESOLUSI TERTINGGI: Buang kode kompresi (._SS500_ dll) dari URL Amazon
-        high_res_url = re.sub(r'\._[a-zA-Z0-9_]+_\.(jpg|jpeg|png)$', r'.\1', image_url, flags=re.IGNORECASE)
+        # FIX RAHASIA RESOLUSI TERTINGGI: Tangkap semua karakter (termasuk koma dll) di antara '._' dan '.jpg'
+        high_res_url = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image_url, flags=re.IGNORECASE)
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -131,7 +131,6 @@ async def amazon_convert_and_tag(input_path, track_meta):
             audio['artist'] = track_meta['artist']
             audio['album'] = track_meta['album']
             
-            # --- FIX OPUS COVER: Menggunakan Base64 Metadata Block Picture ---
             if cover_path and os.path.exists(cover_path):
                 pic = Picture()
                 with open(cover_path, "rb") as f:
