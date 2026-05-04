@@ -365,10 +365,12 @@ class AmazonApi:
                             image = master_cover
                             
                         if image:
-                            # 3. Proses Akhir: Jangan sentuh jika dari iTunes
+                            # 3. Proses Akhir: Penyesuaian Dinamis Resolusi Master
                             if 'mzstatic.com' in image or 'itunes.apple.com' in image:
-                                pass
+                                pass # iTunes sudah ditangani otomatis oleh 10000x10000bb
                             else:
+                                # Cukup hapus sepenuhnya modifier ukuran Amazon (seperti ._SX500_ dll)
+                                # Dengan begini, server CDN akan merilis file RAW asli berapapun ukuran maksimalnya!
                                 image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
                                 # Gunakan UX untuk memaksa Upscale (Exact Width) meskipun gambar di Amazon kecil
                                 image = re.sub(r'\.(jpg|jpeg|png)$', r'._UX1400_QL100_FMjpg.\1', image, flags=re.IGNORECASE)
