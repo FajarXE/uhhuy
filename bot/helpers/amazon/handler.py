@@ -80,6 +80,14 @@ async def start_album(album_asin: str, user: dict, url: str):
         "deviceId": device_id,
         "deviceType": device_type_id
     }
+
+    # ▼ PASTIKAN BLOK KODE INI DIKEMBALIKAN ▼
+    lookup_headers = {
+        "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
+        "x-amz-access-token": access_token,
+        "x-amzn-device-type-id": device_type_id,
+        "x-amzn-hardware-device-type-id": device_type_id
+    }
     
     track_asins = []
     async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
