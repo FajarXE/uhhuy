@@ -146,54 +146,100 @@ async def start_album(album_asin: str, user: dict, url: str):
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
 
     device_id = client.tokens.get('device_id')
-    access_token = client.tokens.get('x-amz-access-token')
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
-    music_territory = client.region.upper() 
     
-    lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
+    # Deteksi region dan API Endpoint langsung dari URL yang dikirim user
+    # Ini memungkinkan bot melakukan Guest Lookup lintas-negara tanpa error!
+    import urllib.parse as urlparse
+    domain = urlparse.urlparse(url).netloc.lower()
     
-    lookup_payload = {
-        "asins": [album_asin],
-        "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-        "requestedContent": "MUSIC_SUBSCRIPTION", 
-        "musicTerritory": music_territory, 
-        "deviceId": device_id,
-        "deviceType": device_type_id
-    }
+    lookup_base = client.base_url
+    api_loc = client.api_location
+    music_territory = client.region.upper()
     
+    if 'amazon.fr' in domain:
+        lookup_base = "https://music.amazon.fr/"
+        api_loc = "EU"
+        music_territory = "FR"
+    elif 'amazon.co.jp' in domain:
+        lookup_base = "https://music.amazon.co.jp/"
+        api_loc = "FE"
+        music_territory = "JP"
+    elif 'amazon.co.uk' in domain:
+        lookup_base = "https://music.amazon.co.uk/"
+        api_loc = "EU"
+        music_territory = "UK"
+    elif 'amazon.de' in domain:
+        lookup_base = "https://music.amazon.de/"
+        api_loc = "EU"
+        music_territory = "DE"
+    elif 'amazon.com.mx' in domain:
+        lookup_base = "https://music.amazon.com.mx/"
+        api_loc = "NA"
+        music_territory = "MX"
+    elif 'amazon.com.br' in domain:
+        lookup_base = "https://music.amazon.com.br/"
+        api_loc = "NA"
+        music_territory = "BR"
+    elif 'amazon.com' in domain:
+        lookup_base = "https://music.amazon.com/"
+        api_loc = "NA"
+        music_territory = "US"
+
+    lookup_url = f"{lookup_base}{api_loc}/api/muse/legacy/lookup"
+    
+    # RAHASIA UTAMA: Hapus 'x-amz-access-token' agar Amazon tidak memfilter katalog berdasarkan akun
     lookup_headers = {
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
-        "x-amz-access-token": access_token,
         "x-amzn-device-type-id": device_type_id,
         "x-amzn-hardware-device-type-id": device_type_id
     }
     
     track_asins = []
-    async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-        if resp.status == 200:
-            data = await resp.json()
+    enum_options = ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]
+    
+    for req_content in enum_options:
+        lookup_payload = {
+            "asins": [album_asin],
+            "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+            "requestedContent": req_content, 
+            "musicTerritory": music_territory, 
+            "deviceId": device_id,
+            "deviceType": device_type_id
+        }
+        # RAHASIA 2: Jangan masukkan 'customerId' ke payload
+        
+        try:
+            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # 1. Cek struktur Album (tracks)
+                    for album in data.get("albumList", []):
+                        for track in album.get("tracks", []):
+                            if isinstance(track, dict) and track.get("asin"):
+                                track_asins.append(track["asin"])
+                                
+                    # 2. Cek struktur Single (trackList)
+                    if not track_asins:
+                        for track in data.get("trackList", []):
+                            if isinstance(track, dict) and track.get("asin"):
+                                track_asins.append(track["asin"])
+                                
+            # Hilangkan duplikat ASIN
+            track_asins = list(dict.fromkeys(track_asins))
             
-            # 1. Cek apakah ini Album penuh (Mencari di dalam albumList -> tracks)
-            for album in data.get("albumList", []):
-                for track in album.get("tracks", []):
-                    if isinstance(track, dict) and track.get("asin"):
-                        track_asins.append(track["asin"])
-            
-            # 2. Cek apakah ini Single (Mencari langsung di trackList jika albumList kosong)
-            if not track_asins:
-                for track in data.get("trackList", []):
-                    if isinstance(track, dict) and track.get("asin"):
-                        track_asins.append(track["asin"])
-                        
-    # Hilangkan duplikat jika ada
-    track_asins = list(dict.fromkeys(track_asins))
+            if track_asins:
+                LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu dari Region {music_territory} ({req_content})")
+                break
+        except Exception as e:
+            continue
             
     if not track_asins:
         raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk album {album_asin}. Pastikan link valid.")
             
-    LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album.")
     if 'bot_msg' in user:
-        await user['bot_msg'].edit_text(f"💿 **Album Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
+        await user['bot_msg'].edit_text(f"💿 **Data Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
 
     for t_asin in track_asins:
         try:
