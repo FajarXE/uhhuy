@@ -152,6 +152,15 @@ async def start_album(album_asin: str, user: dict, url: str):
     
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
     
+    lookup_payload = {
+        "asins": [album_asin],
+        "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+        "requestedContent": "MUSIC_SUBSCRIPTION", 
+        "musicTerritory": music_territory, 
+        "deviceId": device_id,
+        "deviceType": device_type_id
+    }
+    
     lookup_headers = {
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
         "x-amz-access-token": access_token,
@@ -159,59 +168,25 @@ async def start_album(album_asin: str, user: dict, url: str):
         "x-amzn-hardware-device-type-id": device_type_id
     }
     
-    # Fungsi pembantu untuk mencari ASIN lagu di seluruh struktur JSON (Sangat Tangguh)
-    def extract_track_asins(obj):
-        found = []
-        if isinstance(obj, dict):
-            # Cek apakah objek ini adalah sebuah lagu (biasanya punya ASIN dan nomor trek/durasi)
-            if 'asin' in obj and any(k in obj for k in ['trackNumber', 'trackNum', 'durationSeconds', 'duration']):
-                found.append(obj['asin'])
-            # Telusuri ke dalam setiap kunci dictionary
-            for v in obj.values():
-                found.extend(extract_track_asins(v))
-        elif isinstance(obj, list):
-            # Telusuri setiap item di dalam list
-            for item in obj:
-                found.extend(extract_track_asins(item))
-        return found
-
     track_asins = []
-    # Loop pada enum untuk memastikan Amazon membuka katalog yang tepat
-    for req_content in ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]:
-        lookup_payload = {
-            "asins": [album_asin],
-            "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-            "requestedContent": req_content, 
-            "musicTerritory": music_territory, 
-            "deviceId": device_id,
-            "deviceType": device_type_id
-        }
-        if client.tokens.get('customerId'):
-            lookup_payload["customerId"] = client.tokens.get('customerId')
-            
-        try:
-            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    # Ambil semua ASIN lagu yang ditemukan di dalam JSON secara otomatis
-                    discovered = extract_track_asins(data)
-                    for asin in discovered:
-                        # Pastikan itu lagu (B0...), bukan ASIN album itu sendiri, dan unik
-                        if asin != album_asin and asin.startswith('B0') and asin not in track_asins:
-                            track_asins.append(asin)
-            
-            if track_asins:
-                LOGGER.info(f"Amazon: Berhasil menemukan {len(track_asins)} lagu dengan metode rekursif ({req_content}).")
-                break
-        except Exception as e:
-            LOGGER.debug(f"Percobaan enum {req_content} gagal: {e}")
-            continue
+    async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
+        if resp.status == 200:
+            data = await resp.json()
+            for album in data.get("albumList", []):
+                # --- FIX UTAMA: Gunakan key "tracks" sesuai struktur asli Amazon ---
+                for track in album.get("tracks", []):
+                    if isinstance(track, dict) and track.get("asin"):
+                        track_asins.append(track["asin"])
+                        
+    # Hilangkan duplikat jika ada
+    track_asins = list(dict.fromkeys(track_asins))
             
     if not track_asins:
-        raise Exception(f"Gagal mendapatkan daftar lagu untuk {album_asin}. Ini bisa disebabkan oleh pembatasan wilayah (Regional Lock) atau tautan tidak valid.")
+        raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk album {album_asin}. Pastikan link valid.")
             
+    LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album.")
     if 'bot_msg' in user:
-        await user['bot_msg'].edit_text(f"💿 **Data Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
+        await user['bot_msg'].edit_text(f"💿 **Album Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
 
     for t_asin in track_asins:
         try:
