@@ -293,13 +293,15 @@ class AmazonApi:
                     err_code = item_resp.get("error", {}).get("code", "UNKNOWN")
                     err_msg = item_resp.get("error", {}).get("message", "Akses ditolak.")
                     
-                    # Intersep kode EXPIRED_TOKEN (meskipun HTTP 200)
                     if err_code == "EXPIRED_TOKEN" and attempt == 0:
                         LOGGER.warning("Menerima kode EXPIRED_TOKEN di dalam JSON. Mencoba refresh...")
                         if await self.refresh_access_token():
                             continue
                             
-                    raise Exception(f"Ditolak Amazon: [{err_code}] {err_msg}")
+                    # [FIX] Cetak JSON mentahnya agar kita tahu alasan sebenarnya dari Amazon
+                    import json
+                    raw_dump = json.dumps(item_resp)
+                    raise Exception(f"Ditolak Amazon: [{err_code}] {err_msg} | RAW: {raw_dump}")
                     
                 mpd_text = item_resp.get("manifest", "")
                 
