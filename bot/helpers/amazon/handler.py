@@ -205,7 +205,10 @@ async def start_album(album_asin: str, user: dict, url: str):
         'folderpath': album_folder,
         'tracks': album_tracks,
         'provider': 'Amazon Music',
-        'cover': album_cover or album_tracks[0].get('cover', ''),
+        
+        # --- FIX: Gunakan cover LOKAL dari lagu pertama, BUKAN URL MENTAH ---
+        'cover': album_tracks[0].get('cover', '') if album_tracks else '', 
+        
         'quality': album_tracks[0].get('quality', 'UHD') if album_tracks else 'UHD'
     }
     
