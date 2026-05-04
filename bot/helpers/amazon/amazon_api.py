@@ -144,25 +144,17 @@ class AmazonApi:
         old_access_token = self.tokens.get("x-amz-access-token")
         
         async with self.refresh_lock:
-            # Cegah tabrakan refresh jika antrian sebelumnya sudah berhasil
             if self.tokens.get("x-amz-access-token") != old_access_token:
                 return True
                 
-            # --- PERBAIKAN FATAL: Menggunakan Logika 'transferPlayback' ala main_tv.py ---
             service_token = self.tokens.get("service_token")
             device_id = self.tokens.get("device_id")
             
             if not service_token or not device_id:
-                LOGGER.error("Gagal Refresh: service_token atau device_id tidak tersedia.")
                 return False
 
             url = f"https://{self.api_url}/api/transferPlayback"
-            payload = {
-                "showNowPlaying": "false",
-                "newMediaRequired": "true",
-                "userHash": "",
-            }
-            
+            payload = {"showNowPlaying": "false", "newMediaRequired": "true", "userHash": ""}
             headers = {
                 "x-amzn-request-id": str(uuid.uuid4()),
                 "x-amzn-timestamp": str(int(time.time() * 1000)),
@@ -181,18 +173,13 @@ class AmazonApi:
                                 transferred_service_token = item["authentication"]
                                 break
                                 
-                        if not transferred_service_token:
-                            raise Exception("Amazon tidak memberikan token transfer baru.")
+                        if not transferred_service_token: raise Exception("Tidak ada token.")
 
-                        # Ekstrak token baru ke memori
                         transfer_token_data = json.loads(transferred_service_token)
                         self.tokens["service_token"] = transferred_service_token
                         self.tokens["x-amz-access-token"] = transfer_token_data.get("accessToken")
+                        if transfer_token_data.get("marketplaceId"): self.tokens["marketplaceId"] = transfer_token_data["marketplaceId"]
                         
-                        if transfer_token_data.get("marketplaceId"):
-                            self.tokens["marketplaceId"] = transfer_token_data["marketplaceId"]
-                        
-                        # --- PENGAMANAN PERMANEN KE DATABASE MANAGER ---
                         try:
                             from bot.helpers.amazon.manager import amazon_manager
                             if hasattr(amazon_manager, 'clients'):
@@ -205,20 +192,14 @@ class AmazonApi:
                                 if hasattr(amazon_manager, save_func):
                                     getattr(amazon_manager, save_func)()
                                     break
-                            LOGGER.info("Amazon API: Sesi TV berhasil disegarkan (transferPlayback) dan disimpan!")
                         except: pass
                         return True
                     else:
                         err_txt = await resp.text()
-                        LOGGER.error(f"Gagal Refresh TV Session: {resp.status} - {err_txt}")
-                        # Hanya vonis mati permanen jika HTTP 400/401
-                        if resp.status in [400, 401, 403]:
-                            raise Exception("AUTH_EXPIRED")
+                        if resp.status in [400, 401, 403]: raise Exception("AUTH_EXPIRED")
                         return False
-                        
             except Exception as e:
                 if str(e) == "AUTH_EXPIRED": raise e
-                LOGGER.error(f"Koneksi gagal saat refresh TV Amazon: {e}")
                 return False
 
     async def fetch_master_cover(self, album_title, album_asin):
@@ -272,43 +253,67 @@ class AmazonApi:
             LOGGER.debug(f"Amazon Search API Cover fallback failed: {e}")
         return None
 
-    # --- PENGAMBIL COVER MUSICBRAINZ (COVER ART ARCHIVE) ---
-    async def fetch_musicbrainz_cover(self, artist, album):
-        try:
-            # MusicBrainz butuh nama yang bersih
-            clean_artist = re.sub(r'\(.*?\)', '', artist).strip()
-            clean_album = re.sub(r'\(.*?\)', '', album).strip()
+    # --- REVISI: MUSICBRAINZ PINTAR MENGGUNAKAN ISRC ---
+    async def fetch_musicbrainz_cover(self, isrc, artist, album):
+        headers = {"User-Agent": "HarleyBot/1.0 ( music-downloader )"}
+        mbid = None
+        
+        async with aiohttp.ClientSession() as session:
+            # 1. PENCARIAN PRESISI TINGGI MENGGUNAKAN ISRC
+            if isrc:
+                try:
+                    # Endpoint ISRC langsung memetakan kode track ke daftar Release/Album
+                    isrc_url = f"https://musicbrainz.org/ws/2/isrc/{isrc}?fmt=json&inc=releases"
+                    async with session.get(isrc_url, headers=headers, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            recordings = data.get('recordings', [])
+                            if recordings:
+                                for rec in recordings:
+                                    releases = rec.get('releases', [])
+                                    if releases:
+                                        mbid = releases[0].get('id')
+                                        LOGGER.info(f"MusicBrainz ISRC Match Found! MBID: {mbid}")
+                                        break
+                except Exception as e:
+                    LOGGER.debug(f"MusicBrainz ISRC Lookup failed: {e}")
             
-            # 1. Cari Release MBID
-            query = quote(f'artist:"{clean_artist}" AND release:"{clean_album}"')
-            search_url = f'https://musicbrainz.org/ws/2/release/?query={query}&fmt=json'
+            # 2. JIKA ISRC GAGAL, FALLBACK KE TEXT SEARCH ALBUM
+            if not mbid and artist and album:
+                try:
+                    clean_artist = re.sub(r'\(.*?\)', '', artist).strip()
+                    clean_album = re.sub(r'\(.*?\)', '', album).strip()
+                    query = quote(f'artist:"{clean_artist}" AND release:"{clean_album}"')
+                    search_url = f'https://musicbrainz.org/ws/2/release/?query={query}&fmt=json'
+                    
+                    async with session.get(search_url, headers=headers, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            releases = data.get('releases', [])
+                            if releases:
+                                mbid = releases[0].get('id')
+                                LOGGER.info(f"MusicBrainz Text Match Found! MBID: {mbid}")
+                except Exception as e:
+                    LOGGER.debug(f"MusicBrainz Text Lookup failed: {e}")
             
-            # Wajib isi User-Agent khusus, kalau tidak akan kena HTTP 403 dari MusicBrainz
-            headers = {"User-Agent": "HarleyBot/1.0 ( music-downloader )"}
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, headers=headers, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        releases = data.get('releases', [])
-                        if releases:
-                            mbid = releases[0].get('id')
-                            
-                            # 2. Ambil gambar mentah dari Cover Art Archive menggunakan MBID
-                            if mbid:
-                                cover_url = f'https://coverartarchive.org/release/{mbid}'
-                                async with session.get(cover_url, headers=headers, timeout=10) as cover_resp:
-                                    if cover_resp.status == 200:
-                                        cover_data = await cover_resp.json()
-                                        images = cover_data.get('images', [])
-                                        for img in images:
-                                            # Ambil URL 'image' mentah (bukan thumbnail kompresi 250/500)
-                                            if img.get('front'):
-                                                return img.get('image')
-        except Exception as e:
-            LOGGER.debug(f"MusicBrainz cover fallback failed: {e}")
+            # 3. RAMPAS GAMBAR RAW DARI COVER ART ARCHIVE
+            if mbid:
+                try:
+                    cover_url = f'https://coverartarchive.org/release/{mbid}'
+                    async with session.get(cover_url, headers=headers, timeout=10) as cover_resp:
+                        if cover_resp.status == 200:
+                            cover_data = await cover_resp.json()
+                            images = cover_data.get('images', [])
+                            for img in images:
+                                # Mengambil URL File Mentah, bukan Thumbnail!
+                                if img.get('front') and img.get('image'):
+                                    LOGGER.info("Sukses merampas file Cover RAW dari MusicBrainz!")
+                                    return img.get('image')
+                except Exception as e:
+                    LOGGER.debug(f"Cover Art Archive failed: {e}")
+                    
         return None
-    # -------------------------------------------------------------
+    # -------------------------------------------------------------------
 
     async def get_playback_info(self, asin: str, target_quality: str = "UHD"):
         for attempt in range(2):
@@ -401,14 +406,14 @@ class AmazonApi:
                         isrc = track_data_obj.get('isrc', '')
                         composer = ', '.join(track_data_obj.get('songWriters', []))
 
-                        # --- STRATEGI PENEMBUSAN COVER MASTER (MUSICBRAINZ FIRST) ---
+                        # --- STRATEGI PENEMBUSAN COVER MASTER DENGAN ISRC ---
                         album_asin = album_main_obj.get('asin') or album_obj.get('asin')
                         master_cover = None
                         
-                        # 1. PRIORITAS UTAMA: RAMPAS DARI MUSICBRAINZ (COVER ART ARCHIVE)
-                        master_cover = await self.fetch_musicbrainz_cover(albumartist or artist, album)
+                        # 1. Panggil MusicBrainz dengan menyertakan ISRC dari metadata Amazon!
+                        master_cover = await self.fetch_musicbrainz_cover(isrc, albumartist or artist, album)
                         
-                        # 2. Jika gagal di MusicBrainz, Fallback ke Tenzing Amazon
+                        # 2. Jika MusicBrainz gagal atau lagu tidak memiliki ISRC, Fallback ke Amazon Search
                         if not master_cover and album_asin and album:
                             master_cover = await self.fetch_master_cover(album, album_asin)
                             
@@ -418,9 +423,9 @@ class AmazonApi:
                         if image:
                             # 3. Proses Akhir Resolusi
                             if 'coverartarchive.org' in image:
-                                pass # Biarkan Archive URL bekerja, server akan mengirim file RAW resolusi terbesar
+                                pass # Biarkan URL mentah ini apa adanya
                             else:
-                                # Jika terpaksa pakai Amazon, ambil file mentah (RAW) tanpa modifier
+                                # Hapus modifier untuk memaksa Amazon memberi file Original
                                 image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
             
             # --- 2. PENCARIAN FILE AUDIO (MPD) ---
