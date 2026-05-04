@@ -39,55 +39,38 @@ def parse_license_and_get_keys(cdm, session_id, license_b64):
     cdm.close(session_id)
     return keys
 
-# --- FUNGSI BARU: Pengekstrak FFmpeg Tangguh & Metadata Resolusi Tinggi ---
+# --- FUNGSI BARU: Pengekstrak FFmpeg & Metadata Super Lengkap ---
 async def amazon_convert_and_tag(input_path, track_meta):
     output_path = track_meta['filepath']
     image_url = track_meta.get('image', '')
-    
     cover_path = f"{input_path}_cover.jpg"
+    
     if image_url:
-        import re
-        # FIX RAHASIA RESOLUSI TERTINGGI: Tangkap semua karakter (termasuk koma dll) di antara '._' dan '.jpg'
-        high_res_url = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image_url, flags=re.IGNORECASE)
-        
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(high_res_url) as resp:
+                async with session.get(image_url) as resp:
                     if resp.status == 200:
                         with open(cover_path, 'wb') as f:
                             f.write(await resp.read())
                         track_meta['thumb'] = cover_path
         except Exception as e:
-            LOGGER.warning(f"Gagal mengunduh cover resolusi tinggi: {e}")
+            LOGGER.warning(f"Gagal mengunduh cover: {e}")
             cover_path = None
     else:
         cover_path = None
 
     cmd = ['ffmpeg', '-y', '-i', input_path]
-    
     if output_path.endswith('.opus') or output_path.endswith('.ogg'):
-        # OPUS tidak mendukung penyisipan gambar via FFmpeg, ambil audionya saja
         cmd.extend(['-map', '0:a:0', '-c:a', 'copy'])
-        
     elif cover_path and os.path.exists(cover_path):
-        # Muxing audio + sampul gambar untuk FLAC / M4A
         cmd.extend(['-i', cover_path, '-map', '0:a:0', '-map', '1:v:0', '-c:v', 'copy', '-c:a', 'copy'])
         if output_path.endswith('.flac'):
             cmd.extend(['-disposition:v', 'attached_pic'])
-            
     else:
-        # Mode aman jika tidak ada cover art
         cmd.extend(['-map', '0:a:0', '-c:a', 'copy'])
         
     cmd.append(output_path)
-    
-    LOGGER.info(f"Amazon FFmpeg CMD: {' '.join(cmd)}")
-    
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stdout, stderr = await proc.communicate()
     
     if proc.returncode != 0:
@@ -95,18 +78,27 @@ async def amazon_convert_and_tag(input_path, track_meta):
         raise Exception("Gagal mengekstrak audio dari kontainer (FFmpeg Error).")
         
     try:
+        # === PENULISAN METADATA LENGKAP ===
         if output_path.endswith('.flac'):
             from mutagen.flac import FLAC, Picture
             audio = FLAC(output_path)
             audio['title'] = track_meta['title']
             audio['artist'] = track_meta['artist']
             audio['album'] = track_meta['album']
+            audio['albumartist'] = track_meta['albumartist']
+            audio['tracknumber'] = str(track_meta['tracknumber'])
+            audio['tracktotal'] = str(track_meta['tracktotal'])
+            audio['discnumber'] = str(track_meta['discnumber'])
+            if track_meta.get('date'): audio['date'] = track_meta['date']
+            if track_meta.get('genre'): audio['genre'] = track_meta['genre']
+            if track_meta.get('copyright'): audio['copyright'] = track_meta['copyright']
+            if track_meta.get('isrc'): audio['isrc'] = track_meta['isrc']
+            if track_meta.get('composer'): audio['composer'] = track_meta['composer']
+            
             if cover_path and os.path.exists(cover_path):
                 pic = Picture()
-                with open(cover_path, "rb") as f:
-                    pic.data = f.read()
-                pic.type = 3
-                pic.mime = "image/jpeg"
+                with open(cover_path, "rb") as f: pic.data = f.read()
+                pic.type, pic.mime = 3, "image/jpeg"
                 audio.add_picture(pic)
             audio.save()
             
@@ -116,6 +108,15 @@ async def amazon_convert_and_tag(input_path, track_meta):
             audio['\xa9nam'] = track_meta['title']
             audio['\xa9ART'] = track_meta['artist']
             audio['\xa9alb'] = track_meta['album']
+            audio['aART'] = track_meta['albumartist']
+            audio['trkn'] = [(int(track_meta['tracknumber']), int(track_meta['tracktotal']))]
+            audio['disk'] = [(int(track_meta['discnumber']), 0)]
+            if track_meta.get('date'): audio['\xa9day'] = track_meta['date']
+            if track_meta.get('genre'): audio['\xa9gen'] = track_meta['genre']
+            if track_meta.get('copyright'): audio['cprt'] = track_meta['copyright']
+            if track_meta.get('composer'): audio['\xa9wrt'] = track_meta['composer']
+            if track_meta.get('isrc'): audio['----:com.apple.iTunes:ISRC'] = track_meta['isrc'].encode()
+            
             if cover_path and os.path.exists(cover_path):
                 with open(cover_path, "rb") as f:
                     audio['covr'] = [MP4Cover(f.read(), imageformat=MP4Cover.FORMAT_JPEG)]
@@ -125,25 +126,22 @@ async def amazon_convert_and_tag(input_path, track_meta):
             from mutagen.oggopus import OggOpus
             from mutagen.flac import Picture
             import base64
-            
             audio = OggOpus(output_path)
             audio['title'] = track_meta['title']
             audio['artist'] = track_meta['artist']
             audio['album'] = track_meta['album']
+            audio['albumartist'] = track_meta['albumartist']
+            audio['tracknumber'] = str(track_meta['tracknumber'])
+            audio['tracktotal'] = str(track_meta['tracktotal'])
+            audio['discnumber'] = str(track_meta['discnumber'])
+            if track_meta.get('date'): audio['date'] = track_meta['date']
+            if track_meta.get('genre'): audio['genre'] = track_meta['genre']
             
             if cover_path and os.path.exists(cover_path):
                 pic = Picture()
-                with open(cover_path, "rb") as f:
-                    pic.data = f.read()
-                pic.type = 3
-                pic.mime = "image/jpeg"
-                pic.desc = "Cover"
-                
-                # Encode ke string Base64 agar dikenali oleh wadah Ogg/Opus
-                pic_data = pic.write()
-                encoded_data = base64.b64encode(pic_data).decode("ascii")
-                audio["metadata_block_picture"] = [encoded_data]
-                
+                with open(cover_path, "rb") as f: pic.data = f.read()
+                pic.type, pic.mime, pic.desc = 3, "image/jpeg", "Cover"
+                audio["metadata_block_picture"] = [base64.b64encode(pic.write()).decode("ascii")]
             audio.save()
             
     except Exception as e:
@@ -324,6 +322,15 @@ async def start_track(asin: str, user: dict, url: str):
         'title': manifest_data.get('title', asin),
         'artist': manifest_data.get('artist', 'Unknown Artist'),
         'album': manifest_data.get('album', 'Unknown Album'),
+        'albumartist': manifest_data.get('albumartist', manifest_data.get('artist', 'Unknown Artist')),
+        'tracknumber': manifest_data.get('tracknumber', 1),
+        'tracktotal': manifest_data.get('tracktotal', 1),
+        'discnumber': manifest_data.get('discnumber', 1),
+        'date': manifest_data.get('date', ''),
+        'genre': manifest_data.get('genre', ''),
+        'copyright': manifest_data.get('copyright', ''),
+        'isrc': manifest_data.get('isrc', ''),
+        'composer': manifest_data.get('composer', ''),
         'image': manifest_data.get('image', ''),
         'provider': 'Amazon Music',
         'type': 'track'
