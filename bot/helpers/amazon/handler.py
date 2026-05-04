@@ -39,27 +39,30 @@ def parse_license_and_get_keys(cdm, session_id, license_b64):
     cdm.close(session_id)
     return keys
 
-# --- FUNGSI BARU: Pengekstrak FFmpeg Tangguh Khusus Amazon ---
+# --- FUNGSI BARU: Pengekstrak FFmpeg Tangguh & Metadata Resolusi Tinggi ---
 async def amazon_convert_and_tag(input_path, track_meta):
     output_path = track_meta['filepath']
     image_url = track_meta.get('image', '')
     
     cover_path = f"{input_path}_cover.jpg"
     if image_url:
+        import re
+        # RAHASIA RESOLUSI TERTINGGI: Buang kode kompresi (._SS500_ dll) dari URL Amazon
+        high_res_url = re.sub(r'\._[a-zA-Z0-9_]+_\.(jpg|jpeg|png)$', r'.\1', image_url, flags=re.IGNORECASE)
+        
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as resp:
+                async with session.get(high_res_url) as resp:
                     if resp.status == 200:
                         with open(cover_path, 'wb') as f:
                             f.write(await resp.read())
                         track_meta['thumb'] = cover_path
         except Exception as e:
-            LOGGER.warning(f"Gagal mengunduh cover: {e}")
+            LOGGER.warning(f"Gagal mengunduh cover resolusi tinggi: {e}")
             cover_path = None
     else:
         cover_path = None
 
-    # --- PERBAIKAN LOGIKA FFMPEG UNTUK OPUS DI SINI ---
     cmd = ['ffmpeg', '-y', '-i', input_path]
     
     if output_path.endswith('.opus') or output_path.endswith('.ogg'):
@@ -77,7 +80,6 @@ async def amazon_convert_and_tag(input_path, track_meta):
         cmd.extend(['-map', '0:a:0', '-c:a', 'copy'])
         
     cmd.append(output_path)
-    # ----------------------------------------------------
     
     LOGGER.info(f"Amazon FFmpeg CMD: {' '.join(cmd)}")
     
@@ -107,6 +109,7 @@ async def amazon_convert_and_tag(input_path, track_meta):
                 pic.mime = "image/jpeg"
                 audio.add_picture(pic)
             audio.save()
+            
         elif output_path.endswith('.m4a'):
             from mutagen.mp4 import MP4, MP4Cover
             audio = MP4(output_path)
@@ -117,14 +120,33 @@ async def amazon_convert_and_tag(input_path, track_meta):
                 with open(cover_path, "rb") as f:
                     audio['covr'] = [MP4Cover(f.read(), imageformat=MP4Cover.FORMAT_JPEG)]
             audio.save()
+            
         elif output_path.endswith('.opus') or output_path.endswith('.ogg'):
             from mutagen.oggopus import OggOpus
+            from mutagen.flac import Picture
+            import base64
+            
             audio = OggOpus(output_path)
             audio['title'] = track_meta['title']
             audio['artist'] = track_meta['artist']
             audio['album'] = track_meta['album']
-            # Cover art di OPUS ditangani otomatis oleh Telegram nanti
+            
+            # --- FIX OPUS COVER: Menggunakan Base64 Metadata Block Picture ---
+            if cover_path and os.path.exists(cover_path):
+                pic = Picture()
+                with open(cover_path, "rb") as f:
+                    pic.data = f.read()
+                pic.type = 3
+                pic.mime = "image/jpeg"
+                pic.desc = "Cover"
+                
+                # Encode ke string Base64 agar dikenali oleh wadah Ogg/Opus
+                pic_data = pic.write()
+                encoded_data = base64.b64encode(pic_data).decode("ascii")
+                audio["metadata_block_picture"] = [encoded_data]
+                
             audio.save()
+            
     except Exception as e:
         LOGGER.warning(f"Gagal menulis tag Mutagen: {e}")
 
