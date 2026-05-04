@@ -167,20 +167,19 @@ class AmazonApi:
     async def refresh_access_token(self):
         refresh_token = self.tokens.get("refresh_token")
         if not refresh_token:
-            LOGGER.error("Gagal Refresh: refresh_token tidak tersedia.")
+            LOGGER.error("Gagal Refresh: refresh_token tidak tersedia di memori.")
             return False
 
         client_id = self.tokens.get("client_id")
-        
+
         url = "https://api.amazon.com/auth/o2/token"
         payload = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }
-        
         if client_id:
             payload["client_id"] = client_id
-        
+
         headers = {
             "User-Agent": self.default_headers["user-agent"],
             "Content-Type": "application/x-www-form-urlencoded"
@@ -196,12 +195,28 @@ class AmazonApi:
                         self.tokens["refresh_token"] = data.get("refresh_token")
                         
                     LOGGER.info("Amazon API: Token berhasil diperbarui (Oauth2 Refresh).")
+                    
+                    # --- FIX AMNESIA: Paksa sinkronisasi ke Database Bot ---
+                    # Ini mencegah token baru hilang saat bot dimatikan oleh Render
+                    try:
+                        from bot.settings import bot_set
+                        for uid, udata in bot_set.user_data.items():
+                            # Cari sesi milik user ini dan perbarui tokennya
+                            if udata.get('amazon_api') and udata['amazon_api'].tokens.get('customerId') == self.tokens.get('customerId'):
+                                udata['amazon_api'].tokens.update(self.tokens)
+                    except Exception as e:
+                        LOGGER.warning(f"Gagal Auto-Sync ke DB: {e}")
+                        
                     return True
                 else:
                     err_txt = await resp.text()
-                    if resp.status == 400 and ("invalid_grant" in err_txt or "client_id" in err_txt):
+                    LOGGER.error(f"Amazon Refresh API Ditolak (400): {err_txt}")
+                    
+                    # Hanya vonis mati permanen jika token benar-benar ditarik/kadaluwarsa (invalid_grant)
+                    if resp.status == 400 and "invalid_grant" in err_txt:
                         raise Exception("AUTH_EXPIRED")
                     return False
+                    
         except Exception as e:
             if str(e) == "AUTH_EXPIRED":
                 raise e
@@ -231,11 +246,15 @@ class AmazonApi:
                 "deviceId": device_id,
                 "deviceType": device_type_id
             }
+            # Kembalikan Customer ID ke Payload
+            if customer_id:
+                lookup_payload["customerId"] = customer_id
             
-            # Mode "Guest Lookup" (Tanpa customerId & access_token) untuk mengatasi Geo-Block Metadata
+            # FIX: Kembalikan Access Token ke Headers agar Amazon mau memberikan metadata lengkap!
             lookup_headers = {
                 "x-amzn-requestid": str(uuid.uuid4()),
                 "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
+                "x-amz-access-token": access_token,
                 "x-amzn-device-type-id": device_type_id,
                 "x-amzn-hardware-device-type-id": device_type_id
             }
