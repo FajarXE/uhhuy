@@ -27,4 +27,4 @@ uvloop
 cryptography
 inquirer
 ecpy
-construct
+construct==2.10.67
