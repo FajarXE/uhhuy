@@ -306,10 +306,11 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
             'type': track_meta.get('type', 'Track').capitalize()
         }
         
-    # Karena details diset None saat mengunduh Album (upload=False),
-    # Aria2 tidak akan membuat pesan "Download Track" individual!
-    err = await aria2_download(audio_url, enc_path, details=details)
-    if err is not None:
+    # --- FIX: Gunakan Try-Except standar untuk Aria2 ---
+    try:
+        await aria2_download(audio_url, enc_path, details=details)
+    except Exception as e:
+        LOGGER.error(f"Gagal mengunduh dengan Aria2: {e}")
         return False
 
     if kid:
