@@ -228,17 +228,17 @@ async def start_album(album_asin: str, user: dict, url: str):
     # 1. Panggil fungsi pengeposan Art Poster
     poster_msg = await post_art_poster(user, album_metadata)
     
+    # --- FIX UI RADAR: Tiru persis gaya Qobuz ---
+    # JANGAN menghapus user['bot_msg'] agar pesan status unduhan sebelumnya
+    # dapat di-edit dan diubah menjadi Progress Bar Upload oleh message.py!
+    
     if poster_msg:
         album_metadata['poster_msg'] = poster_msg
-        if 'bot_msg' in user:
-            try: 
-                from bot.tgclient import aio
-                await aio.delete_messages(user['chat_id'], user['bot_msg'].id)
-            except: pass
     else:
         album_metadata['poster_msg'] = user.get('bot_msg')
         
-    # 2. Serahkan keranjang ke mesin pengunggah
+    # 2. Langsung serahkan keranjang ke mesin pengunggah
+    from bot.helpers.uploder import album_upload
     await album_upload(album_metadata, user)
 
 async def start_track(asin: str, user: dict, url: str, upload=True):
