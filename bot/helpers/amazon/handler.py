@@ -305,11 +305,34 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
         'type': 'track'
     }
     
-    folder_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Amazon Music/{track_meta['artist']}/{track_meta['album']}"
-    folder_path = sanitize_filepath(folder_path)
+    # --- FIX 1: SEDOT LIRIK OTOMATIS MENGGUNAKAN MESIN BAWAAN BOT ---
+    try:
+        from bot.helpers.lyrics.manager import lyrics_manager
+        if lyrics_manager:
+            # Cari lirik berdasarkan Judul dan Artis
+            lirik = await lyrics_manager.get_lyrics(track_meta['title'], track_meta['artist'])
+            if lirik:
+                track_meta['lyrics'] = lirik
+    except Exception as e:
+        LOGGER.debug(f"Pencarian lirik diabaikan/gagal: {e}")
+    # ----------------------------------------------------------------
+    
+    # --- FIX 2: PENOMORAN FILE (01 - Judul Lagu) ---
+    # Gunakan zfill(2) agar nomor track selalu 2 digit (01, 02, dst)
+    track_num = str(track_meta['tracknumber']).zfill(2)
+    
+    # Bersihkan karakter ilegal dari nama menggunakan sanitize_filepath
+    clean_title = sanitize_filepath(track_meta['title'])
+    clean_artist = sanitize_filepath(track_meta['artist'])
+    clean_album = sanitize_filepath(track_meta['album'])
+    
+    # Format Nama File Baru
+    file_name = f"{track_num} - {clean_title}"
+    folder_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Amazon Music/{clean_artist}/{clean_album}"
+    
     os.makedirs(folder_path, exist_ok=True)
     
-    final_path = f"{folder_path}/{track_meta['title']}.{ext}"
+    final_path = f"{folder_path}/{file_name}.{ext}"
     track_meta['filepath'] = final_path
     track_meta['folderpath'] = folder_path
 
@@ -319,8 +342,10 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
     if not audio_url:
         raise Exception(f"Gagal menemukan Audio URL untuk lagu {asin}.")
         
-    enc_path = f"{folder_path}/{track_meta['title']}.enc.mp4"
-    dec_path = f"{folder_path}/{track_meta['title']}.dec.mp4"
+    # Sesuaikan juga nama file enkripsi dan dekripsi sementaranya
+    enc_path = f"{folder_path}/{file_name}.enc.mp4"
+    dec_path = f"{folder_path}/{file_name}.dec.mp4"
+    # -----------------------------------------------
 
     # --- PERBAIKAN RADAR ARIA2: Bisukan Radar Jika Di Dalam Album ---
     details = None
