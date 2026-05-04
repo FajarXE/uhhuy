@@ -147,6 +147,8 @@ async def start_album(album_asin: str, user: dict, url: str):
 
     device_id = client.tokens.get('device_id')
     access_token = client.tokens.get('x-amz-access-token')
+    customer_id = client.tokens.get('customerId')
+    
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     music_territory = client.region.upper() 
     
@@ -161,7 +163,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     
     track_asins = []
     
-    # Coba gunakan dua level enum untuk memaksa Amazon membuka katalog
+    # Mencoba berbagai enum untuk memaksa Amazon membongkar katalog lagu
     enum_options = ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]
     
     for req_content in enum_options:
@@ -174,41 +176,42 @@ async def start_album(album_asin: str, user: dict, url: str):
             "deviceType": device_type_id
         }
         
+        if customer_id:
+            lookup_payload["customerId"] = customer_id
+            
         try:
             async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     
-                    # 1. Cek apakah ini Album standar (Cari di dalam albumList -> tracks)
+                    # 1. Cek struktur Album (Sesuai logika amazonmusic_manifest.py)
                     for album in data.get("albumList", []):
+                        # Menggunakan key "tracks" sesuai struktur asli Amazon
                         for track in album.get("tracks", []):
                             if isinstance(track, dict) and track.get("asin"):
                                 track_asins.append(track["asin"])
                                 
-                    # 2. Cek apakah ini Single/Trek Tunggal (Cari langsung di trackList)
+                    # 2. Cek struktur Single (Fallback jika tracks di atas kosong)
                     if not track_asins:
                         for track in data.get("trackList", []):
                             if isinstance(track, dict) and track.get("asin"):
                                 track_asins.append(track["asin"])
                                 
-            # Hilangkan duplikat jika ada
+            # Hilangkan duplikat ASIN
             track_asins = list(dict.fromkeys(track_asins))
             
-            # Jika berhasil mendapat data lagu, hentikan pencarian
             if track_asins:
-                LOGGER.info(f"Amazon: Daftar lagu ditemukan menggunakan parameter '{req_content}'.")
+                LOGGER.info(f"Amazon: Berhasil mendapatkan {len(track_asins)} lagu dengan parameter '{req_content}'")
                 break
-                
         except Exception as e:
-            LOGGER.debug(f"Pencarian dengan enum {req_content} error: {e}")
-            pass
+            LOGGER.debug(f"Pencarian dengan enum {req_content} gagal: {e}")
+            continue
             
     if not track_asins:
-        raise Exception(f"Amazon menolak mengembalikan daftar lagu untuk {album_asin}. Ini biasanya terjadi jika album dibatasi secara geografis di luar wilayah akun Anda ({music_territory}).")
+        raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk {album_asin}. Ini biasanya karena pembatasan wilayah akun ({music_territory}).")
             
-    LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album/single ini.")
     if 'bot_msg' in user:
-        await user['bot_msg'].edit_text(f"💿 **Data Ditemukan!**\nMemulai proses unduhan {len(track_asins)} lagu...")
+        await user['bot_msg'].edit_text(f"💿 **Data Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
 
     for t_asin in track_asins:
         try:
