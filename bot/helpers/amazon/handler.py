@@ -258,7 +258,24 @@ async def start_track(asin: str, user: dict, url: str):
     LOGGER.info(f"Amazon: Mengambil info untuk lagu {asin}")
     
     try:
-        manifest_data = await client.get_playback_info(asin)
+        # --- PENAMBAHAN FILTER KUALITAS MULAI DI SINI ---
+        # Mengambil setting kualitas dari database user (Default ke UHD jika tidak ada)
+        user_quality = user.get('quality', 'UHD')
+        
+        # Menerjemahkan setting bot ke format ranking Amazon
+        if "FLAC" in user_quality.upper() or "HIRES" in user_quality.upper() or "MAX" in user_quality.upper() or "UHD" in user_quality.upper():
+            target_q = "UHD"
+        elif "HD" in user_quality.upper():
+            target_q = "HD"
+        else:
+            target_q = "SD" # Opus/AAC standar untuk penghematan kuota
+            
+        LOGGER.info(f"Amazon: Target batas maksimal kualitas: {target_q}")
+        
+        # Menyuntikkan target_quality ke request MPD
+        manifest_data = await client.get_playback_info(asin, target_quality=target_q)
+        # --- PENAMBAHAN FILTER KUALITAS SELESAI ---
+        
     except Exception as e:
         err_str = str(e)
         if "Akses ditolak" in err_str or "EXPIRED_TOKEN" in err_str:
