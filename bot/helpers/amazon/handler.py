@@ -198,8 +198,16 @@ async def start_track(asin: str, user: dict, url: str):
         keys = await asyncio.to_thread(parse_license_and_get_keys, cdm, session_id, license_b64)
 
         LOGGER.info(f"Amazon: Mendekripsi file dengan keys {keys}")
-        from bot.helpers.amazon.drm import pydecrypt
-        await asyncio.to_thread(pydecrypt.decrypt_file, enc_path, dec_path, keys)
+        
+        # --- FIX: Sesuaikan dengan nama fungsi & format parameter di pydecrypt.py ---
+        def run_decryption(enc, dec, key_list):
+            from bot.helpers.amazon.drm import pydecrypt
+            # Ubah format string "KID:KEY" menjadi dictionary
+            keys_by_track, keys_by_kid = pydecrypt.parse_keys(key_list)
+            # Jalankan dekripsi spesifik untuk format MP4
+            pydecrypt.decrypt_mp4_file(enc, dec, keys_by_track, keys_by_kid)
+
+        await asyncio.to_thread(run_decryption, enc_path, dec_path, keys)
     else:
         LOGGER.info("Amazon: Trek ini bersifat Free/Unencrypted (Tanpa DRM), melewati dekripsi.")
         shutil.copy(enc_path, dec_path)
