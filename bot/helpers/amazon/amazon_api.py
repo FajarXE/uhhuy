@@ -65,7 +65,6 @@ class AmazonApi:
         self.session.headers.update(self.default_headers)
 
     def _extract_jwt_data(self, token_str):
-        """Mengekstrak customerId dan deviceId dari JWT token dengan aman."""
         if not token_str or token_str.count(".") < 2:
             return {}
         try:
@@ -87,14 +86,21 @@ class AmazonApi:
             return {}
 
     def load_tokens(self, saved_tokens):
-        """Memuat token dari database (manager.py) dan memastikan identitas terekstrak."""
         self.tokens.update(saved_tokens)
         
-        # Ekstrak ulang customerId jika hilang
         if not self.tokens.get("customerId"):
             access_token = self.tokens.get("x-amz-access-token", "")
             extracted = self._extract_jwt_data(access_token)
             self.tokens.update(extracted)
+
+        # [FIX] Ekstrak clientId dari service_token untuk otorisasi Refresh Token
+        if not self.tokens.get("client_id") and self.tokens.get("service_token"):
+            try:
+                st_data = json.loads(self.tokens["service_token"])
+                if "clientId" in st_data:
+                    self.tokens["client_id"] = st_data["clientId"]
+            except:
+                pass
 
     async def get_tv_device_code(self):
         self.tokens["device_id"] = os.urandom(8).hex()
@@ -141,11 +147,13 @@ class AmazonApi:
                 self.tokens["x-amz-access-token"] = token_data.get("accessToken")
                 self.tokens["refresh_token"] = token_data.get("refreshToken") 
                 
-                # Coba ekstrak data dari access_token terlebih dahulu
+                # [FIX] Simpan client_id saat pertama kali auth berhasil
+                if "clientId" in token_data:
+                    self.tokens["client_id"] = token_data["clientId"]
+                
                 if self.tokens["x-amz-access-token"]:
                     self.tokens.update(self._extract_jwt_data(self.tokens["x-amz-access-token"]))
                 
-                # Jika masih kosong, coba dari video_player_token
                 if video_player_token and not self.tokens.get("customerId"):
                     try:
                         v_obj = json.loads(video_player_token)
@@ -159,20 +167,27 @@ class AmazonApi:
         return False
 
     async def refresh_access_token(self):
-        """Memperbarui access_token yang sudah mati (ExpiredToken) menggunakan refresh_token."""
         refresh_token = self.tokens.get("refresh_token")
         if not refresh_token:
             LOGGER.error("Gagal Refresh: refresh_token tidak tersedia.")
             return False
 
+        client_id = self.tokens.get("client_id")
+        
         url = "https://api.amazon.com/auth/o2/token"
         payload = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }
         
-        # Opsi header tambahan
-        headers = {"User-Agent": self.default_headers["user-agent"]}
+        # [FIX] Menambahkan client_id yang diwajibkan oleh Amazon OAuth2
+        if client_id:
+            payload["client_id"] = client_id
+        
+        headers = {
+            "User-Agent": self.default_headers["user-agent"],
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
         
         try:
             async with self.session.post(url, data=payload, headers=headers) as resp:
@@ -188,13 +203,18 @@ class AmazonApi:
                 else:
                     err_txt = await resp.text()
                     LOGGER.error(f"Gagal memperbarui token Amazon ({resp.status}): {err_txt}")
+                    
+                    # [FIX] Jika token memang sudah mati permanen atau invalid
+                    if resp.status == 400 and ("invalid_grant" in err_txt or "client_id" in err_txt):
+                        raise Exception("AUTH_EXPIRED")
                     return False
         except Exception as e:
+            if str(e) == "AUTH_EXPIRED":
+                raise e
             LOGGER.error(f"Koneksi gagal saat refresh token Amazon: {e}")
             return False
 
     async def get_playback_info(self, asin: str):
-        # Auto-retry loop (Maksimal 2 percobaan)
         for attempt in range(2):
             device_id = self.tokens.get('device_id')
             access_token = self.tokens.get('x-amz-access-token')
@@ -207,7 +227,6 @@ class AmazonApi:
             marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
             music_territory = self.region.upper()
             
-            # --- 1. TAHAP LOOKUP (Cari Info Metadata) ---
             lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
             lookup_payload = {
                 "asins": [asin],
@@ -228,11 +247,17 @@ class AmazonApi:
             
             title, artist, album = asin, "Unknown Artist", "Unknown Album"
             async with self.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-                # Tangkap 403 Expired Token
                 if resp.status == 403 and attempt == 0:
                     LOGGER.warning("Token Expired saat Lookup. Mencoba Refresh Token...")
-                    if await self.refresh_access_token():
-                        continue # Ulangi loop
+                    try:
+                        is_refreshed = await self.refresh_access_token()
+                    except Exception as e:
+                        if str(e) == "AUTH_EXPIRED":
+                            raise Exception("Sesi Amazon Music Anda telah kedaluwarsa secara permanen. Silakan gunakan perintah login kembali.")
+                        is_refreshed = False
+                        
+                    if is_refreshed:
+                        continue 
                     raise Exception("Gagal memperbarui sesi Amazon yang sudah kedaluwarsa.")
                 
                 if resp.status == 200:
@@ -243,7 +268,6 @@ class AmazonApi:
                         artist = track.get('artist', {}).get('name', 'Unknown Artist')
                         album = track.get('album', {}).get('title', 'Unknown Album')
             
-            # --- 2. TAHAP PEMUATAN MANIFEST / MPD ---
             dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
             
             customer_info = {
@@ -275,7 +299,14 @@ class AmazonApi:
             async with self.session.post(dmls_url, json=dmls_payload, headers=dmls_headers) as resp:
                 if resp.status == 403 and attempt == 0:
                     LOGGER.warning("Token Expired saat mengambil MPD. Mencoba Refresh Token...")
-                    if await self.refresh_access_token():
+                    try:
+                        is_refreshed = await self.refresh_access_token()
+                    except Exception as e:
+                        if str(e) == "AUTH_EXPIRED":
+                            raise Exception("Sesi Amazon Music Anda telah kedaluwarsa secara permanen. Silakan gunakan perintah login kembali.")
+                        is_refreshed = False
+                        
+                    if is_refreshed:
                         continue 
                     raise Exception("Gagal memperbarui sesi Amazon yang kedaluwarsa.")
                     
@@ -288,8 +319,6 @@ class AmazonApi:
                     raise Exception(f"Amazon menolak memberikan file. Respons: {json.dumps(dmls_data)}")
                     
                 item_resp = dmls_data["contentResponseList"][0]
-                
-                # --- FIX: Periksa 'contentResponseStatusCode' selain 'status' ---
                 status_code = item_resp.get("contentResponseStatusCode") or item_resp.get("status")
                 
                 if status_code != "SUCCESS" or "error" in item_resp:
@@ -298,11 +327,17 @@ class AmazonApi:
                     
                     if err_code == "EXPIRED_TOKEN" and attempt == 0:
                         LOGGER.warning("Menerima kode EXPIRED_TOKEN di dalam JSON. Mencoba refresh...")
-                        if await self.refresh_access_token():
+                        try:
+                            is_refreshed = await self.refresh_access_token()
+                        except Exception as e:
+                            if str(e) == "AUTH_EXPIRED":
+                                raise Exception("Sesi Amazon Music Anda kedaluwarsa. Silakan login kembali.")
+                            is_refreshed = False
+                            
+                        if is_refreshed:
                             continue
                             
                     import json
-                    # Potong panjang teks RAW agar tidak membuat Telegram error (400 MESSAGE_TOO_LONG)
                     raw_dump = json.dumps(item_resp)[:250] 
                     raise Exception(f"Ditolak Amazon: [{err_code}] {err_msg} | RAW: {raw_dump}...")
                     
@@ -335,7 +370,6 @@ class AmazonApi:
             return {'title': title, 'artist': artist, 'album': album, 'url': best_url, 'kid': kid}
 
     async def get_license(self, challenge_b64, track_asin):
-        # Auto-retry loop untuk Lisensi (Maksimal 2 percobaan)
         for attempt in range(2):
             url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
             device_type_id = self.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
@@ -363,7 +397,14 @@ class AmazonApi:
             
             async with self.session.post(url, json=payload, headers=headers) as resp:
                 if resp.status == 403 and attempt == 0:
-                    if await self.refresh_access_token():
+                    try:
+                        is_refreshed = await self.refresh_access_token()
+                    except Exception as e:
+                        if str(e) == "AUTH_EXPIRED":
+                            raise Exception("Sesi Amazon Music Anda kedaluwarsa permanen. Silakan hapus akun dan login kembali.")
+                        is_refreshed = False
+                        
+                    if is_refreshed:
                         continue
                     raise Exception("Gagal refresh sesi saat meminta lisensi DRM.")
                     
@@ -372,10 +413,13 @@ class AmazonApi:
                     
                 data = await resp.json()
                 if "license" not in data:
-                    # Amazon terkadang menyembunyikan EXPIRED_TOKEN dalam JSON sukses
                     err_code = data.get("error", {}).get("code")
                     if err_code == "EXPIRED_TOKEN" and attempt == 0:
-                        if await self.refresh_access_token():
+                        try:
+                            is_refreshed = await self.refresh_access_token()
+                        except Exception:
+                            is_refreshed = False
+                        if is_refreshed:
                             continue
                     raise Exception(f"Lisensi PlayReady ditolak: {data.get('error', 'Unknown Error')}")
                     
@@ -384,4 +428,3 @@ class AmazonApi:
     async def close(self):
         if not self.session.closed:
             await self.session.close()
-
