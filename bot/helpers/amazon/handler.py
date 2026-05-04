@@ -11,7 +11,14 @@ from bot.logger import LOGGER
 from config import Config
 from .manager import amazon_manager
 from bot.helpers.aria2_helper import aria2_download
-from bot.helpers.uploder import telegram_upload
+
+# --- IMPORT EKOSISTEM UTAMA BOT ---
+from bot.settings import bot_set
+import bot.helpers.translations as lang
+from bot.helpers.uploder import track_upload, album_upload
+from bot.helpers.utils import run_concurrent_tasks, fetch_zip_settings, post_art_poster
+from bot.helpers.message import edit_message
+# ----------------------------------
 
 def generate_challenge(kid, prd_path):
     from bot.helpers.amazon.drm.pypr import PlayReadyHeaderBuilder, PSSH, Device, Cdm
@@ -111,6 +118,10 @@ async def start_album(album_asin: str, user: dict, url: str):
     }
     
     track_asins = []
+    album_title = "Unknown Album"
+    album_artist = "Unknown Artist"
+    album_cover = ""
+    
     enum_options = ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]
     
     for req_content in enum_options:
@@ -129,6 +140,10 @@ async def start_album(album_asin: str, user: dict, url: str):
                     data = await resp.json()
                     
                     for album in data.get("albumList", []):
+                        album_title = album.get("title", album_title)
+                        album_artist = album.get("primaryArtistName", album_artist)
+                        album_cover = album.get("image", album_cover)
+                        
                         for track in album.get("tracks", []):
                             if isinstance(track, dict) and track.get("asin"):
                                 track_asins.append(track["asin"])
@@ -148,67 +163,69 @@ async def start_album(album_asin: str, user: dict, url: str):
             
     if not track_asins:
         raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk album {album_asin}. Pastikan link valid.")
-            
+
     if 'bot_msg' in user:
-        await user['bot_msg'].edit_text(f"💿 **Data Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
+        await edit_message(user['bot_msg'], f"💿 **Data Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
 
-    # --- PERBAIKAN: WADAH PENGUMPUL METADATA ALBUM ---
-    album_tracks = []
-    album_folder = ""
-    album_title = ""
-    album_artist = ""
-    album_cover = ""
-
+    # --- PERBAIKAN: GUNAKAN RUN_CONCURRENT_TASKS ALA QOBUZ ---
+    update_details = {
+        'text': lang.s.DOWNLOAD_PROGRESS, 
+        'msg': user.get('bot_msg'), 
+        'title': album_title, 
+        'type': 'Album'
+    }
+    
+    tasks = []
     for t_asin in track_asins:
-        try:
-            # Panggil start_track dalam mode "is_album=True" agar tidak langsung dilempar ke Telegram!
-            t_meta = await start_track(t_asin, user, url, is_album=True)
-            if t_meta:
-                album_tracks.append(t_meta)
-                if not album_folder:
-                    album_folder = t_meta.get('folderpath', '')
-                    album_title = t_meta.get('album', '')
-                    album_artist = t_meta.get('albumartist', '')
-                    album_cover = t_meta.get('cover', '')
-        except Exception as e:
-            LOGGER.error(f"Gagal mengunduh track {t_asin}: {e}")
-            continue
-
-    # --- PERBAIKAN: EKSEKUSI ZIP & ART POSTER SEKALIGUS (ALBUM UPLOAD) ---
-    if album_tracks:
-        album_metadata = {
-            'type': 'album',
-            'title': album_title,
-            'album': album_title,
-            'artist': album_artist,
-            'albumartist': album_artist,
-            'folderpath': album_folder,
-            'tracks': album_tracks,
-            'provider': 'Amazon Music',
-            'cover': album_cover,
-            'quality': album_tracks[0].get('quality', 'UHD') if album_tracks else 'UHD'
-        }
+        # Panggil start_track dengan upload=False agar tidak membuat UI "Download Track" mandiri
+        tasks.append(start_track(t_asin, user, url, upload=False))
         
-        # 1. Panggil fungsi pengeposan Art Poster (Ini akan memunculkan Gambar Kotak Album)
-        from bot.helpers.utils import post_art_poster
-        poster_msg = await post_art_poster(user, album_metadata)
-        
-        if poster_msg:
-            album_metadata['poster_msg'] = poster_msg
-            # Hapus pesan status teks lama agar tampilan UI bersih
-            if 'bot_msg' in user:
-                try: 
-                    from bot.tgclient import aio
-                    await aio.delete_messages(user['chat_id'], user['bot_msg'].id)
-                except: pass
-        else:
-            album_metadata['poster_msg'] = user.get('bot_msg')
-            
-        # 2. Serahkan seluruh keranjang ke mesin pengunggah (untuk proses Zip / Folder Batch)
-        from bot.helpers.uploder import album_upload
-        await album_upload(album_metadata, user)
+    # Konfigurasi batas paralel (Sequential vs Concurrent)
+    limit_pekerja = Config.MAX_WORKERS if getattr(bot_set, 'playlist_conc', True) else 1
+    
+    # Eksekusi paralel yang membungkus UI menjadi "Downloading Album"
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=limit_pekerja)
+    
+    album_tracks = [res for res in task_results if res]
+    
+    if not album_tracks:
+        if 'bot_msg' in user:
+            await edit_message(user['bot_msg'], "❌ Gagal: Tidak ada lagu yang berhasil diunduh.")
+        return
 
-async def start_track(asin: str, user: dict, url: str, is_album=False):
+    # Penyiapan Folder & Cover
+    album_folder = album_tracks[0].get('folderpath', '')
+    
+    album_metadata = {
+        'type': 'album',
+        'title': album_title,
+        'album': album_title,
+        'artist': album_artist,
+        'albumartist': album_artist,
+        'folderpath': album_folder,
+        'tracks': album_tracks,
+        'provider': 'Amazon Music',
+        'cover': album_cover or album_tracks[0].get('cover', ''),
+        'quality': album_tracks[0].get('quality', 'UHD') if album_tracks else 'UHD'
+    }
+    
+    # 1. Panggil fungsi pengeposan Art Poster
+    poster_msg = await post_art_poster(user, album_metadata)
+    
+    if poster_msg:
+        album_metadata['poster_msg'] = poster_msg
+        if 'bot_msg' in user:
+            try: 
+                from bot.tgclient import aio
+                await aio.delete_messages(user['chat_id'], user['bot_msg'].id)
+            except: pass
+    else:
+        album_metadata['poster_msg'] = user.get('bot_msg')
+        
+    # 2. Serahkan keranjang ke mesin pengunggah
+    await album_upload(album_metadata, user)
+
+async def start_track(asin: str, user: dict, url: str, upload=True):
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
     
@@ -258,7 +275,7 @@ async def start_track(asin: str, user: dict, url: str, is_album=False):
         'isrc': manifest_data.get('isrc', ''),
         'composer': manifest_data.get('composer', ''),
         'cover': manifest_data.get('cover', ''),  
-        'quality': target_q, # --- FIX: AGAR CAPTION TELEGRAM TERISI ---
+        'quality': target_q, 
         'provider': 'Amazon Music',
         'type': 'track'
     }
@@ -280,11 +297,20 @@ async def start_track(asin: str, user: dict, url: str, is_album=False):
     enc_path = f"{folder_path}/{track_meta['title']}.enc.mp4"
     dec_path = f"{folder_path}/{track_meta['title']}.dec.mp4"
 
+    # --- PERBAIKAN RADAR ARIA2: Bisukan Radar Jika Di Dalam Album ---
     details = None
-    if 'bot_msg' in user:
-        details = {'msg': user['bot_msg'], 'title': track_meta['title'], 'type': 'Track'}
+    if upload and 'bot_msg' in user:
+        details = {
+            'msg': user['bot_msg'], 
+            'title': track_meta.get('title', 'Unknown'), 
+            'type': track_meta.get('type', 'Track').capitalize()
+        }
         
-    await aria2_download(audio_url, enc_path, details=details)
+    # Karena details diset None saat mengunduh Album (upload=False),
+    # Aria2 tidak akan membuat pesan "Download Track" individual!
+    err = await aria2_download(audio_url, enc_path, details=details)
+    if err is not None:
+        return False
 
     if kid:
         LOGGER.info(f"Amazon: Memulai proses DRM untuk KID {kid}")
@@ -316,9 +342,8 @@ async def start_track(asin: str, user: dict, url: str, is_album=False):
     from bot.helpers.metadata import set_metadata
     await set_metadata(track_meta, user_id)
 
-    # 3. Unggah ke Telegram HANYA JIKA BUKAN ALBUM
-    # Jika mode is_album=True, ia hanya mengembalikan track_meta untuk dikumpulkan.
-    if not is_album:
-        await telegram_upload(track_meta, user)
+    # 3. Panggil uploader utama (Mendukung Cloud / Local / Telegram)
+    if upload:
+        await track_upload(track_meta, user, disable_link=False)
         
     return track_meta
