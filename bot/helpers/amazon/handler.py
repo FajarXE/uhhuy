@@ -318,7 +318,11 @@ async def start_track(asin: str, user: dict, url: str):
         def run_decryption(enc, dec, key_list):
             from bot.helpers.amazon.drm import pydecrypt
             keys_by_track, keys_by_kid = pydecrypt.parse_keys(key_list)
-            pydecrypt.decrypt_mp4_file(enc, dec, keys_by_track, keys_by_kid)
+            try:
+                pydecrypt.decrypt_mp4_file(enc, dec, keys_by_track, keys_by_kid)
+            except SystemExit:
+                # Tangkap perintah sys.exit(1) dari pydecrypt agar bot tidak crash/mati!
+                raise Exception("Dekripsi digagalkan oleh pydecrypt (KID tidak cocok atau file MP4 rusak).")
 
         await asyncio.to_thread(run_decryption, enc_path, dec_path, keys)
     else:
