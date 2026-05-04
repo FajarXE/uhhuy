@@ -344,18 +344,15 @@ class AmazonApi:
                     
                 mpd_text = item_resp.get("manifest", "")
 
+            # --- SISTEM RANKING KUALITAS (REVISI DETEKSI BIT-DEPTH) ---
             target_rank = {"SD": 2, "HD": 3, "UHD": 4}.get(target_quality.upper(), 4)
-            
-            # Wadah untuk menyimpan semua representasi/kualitas yang terbaca
             valid_reps = []
             
-            # Cari seluruh blok AdaptationSet
             adp_sets = re.findall(r"<AdaptationSet\b([\s\S]*?)</AdaptationSet>", mpd_text, re.IGNORECASE)
             for adp in adp_sets:
                 kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', adp, re.IGNORECASE)
                 adp_kid = kid_match.group(1).strip() if kid_match else ""
                 
-                # Baca tiap varian kualitas lagu (Representation) di dalamnya
                 reps = re.findall(r"<Representation\b([\s\S]*?)</Representation>", adp, re.IGNORECASE)
                 for rep in reps:
                     bw_match = re.search(r'bandwidth=["\'](\d+)["\']', rep, re.IGNORECASE)
@@ -369,13 +366,17 @@ class AmazonApi:
                         rep_codec = html.unescape(codec_match.group(1).strip()).lower() if codec_match else "flac"
                         sr = int(sr_match.group(1)) if sr_match else 44100
                         
-                        # Tentukan Ranking Aktual Berdasarkan Fisik File (Sangat Akurat)
+                        # LOGIKA BARU: Tentukan kualitas berdasarkan codec, sr, dan bandwidth (bit-depth)
                         if "mp4a" in rep_codec or "opus" in rep_codec:
-                            rep_rank = 2  # SD (Format Lossy / Hemat Kuota)
-                        elif sr <= 48000:
-                            rep_rank = 3  # HD (Format Lossless / Kualitas CD)
+                            rep_rank = 2  # SD (Lossy)
+                        elif "flac" in rep_codec:
+                            # Jika SR > 48kHz ATAU Bandwidth > 1.2 Mbps, itu pasti 24-bit (UHD)
+                            if sr > 48000 or bw > 1200000:
+                                rep_rank = 4  # UHD
+                            else:
+                                rep_rank = 3  # HD
                         else:
-                            rep_rank = 4  # UHD (Format Lossless / Kualitas Master Hi-Res)
+                            rep_rank = 3
                             
                         valid_reps.append({
                             "url": rep_url,
@@ -391,21 +392,18 @@ class AmazonApi:
             best_kid = ""
             
             # --- PROSES FILTERING ---
-            # Buang kualitas yang tingkatnya melebihi target pengguna
             filtered_reps = [r for r in valid_reps if r["rank"] <= target_rank]
             
-            # Jika kosong (Misal minta HD tapi Amazon anehnya cuma sediakan UHD), ambil semua lagi
             if not filtered_reps:
                 filtered_reps = valid_reps
                 
             if filtered_reps:
-                # Pilih file dengan ukuran/bitrate (bandwidth) paling besar dari SISA KUALITAS YANG DIIZINKAN
+                # Sekarang, nilai tertinggi yang diambil PASTI tertahan di bawah 1.2 Mbps untuk HD
                 best_rep = max(filtered_reps, key=lambda x: x["bw"])
                 best_url = best_rep["url"]
                 best_kid = best_rep["kid"]
                 best_codec = best_rep["codec"]
             else:
-                # Fallback ekstrim (hanya jika regex gagal total)
                 url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", mpd_text, re.IGNORECASE)
                 if url_match:
                     best_url = html.unescape(url_match.group(1).strip())
