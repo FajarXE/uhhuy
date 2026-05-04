@@ -208,7 +208,7 @@ class AmazonApi:
             LOGGER.error(f"Koneksi gagal saat refresh token Amazon: {e}")
             return False
 
-    async def get_playback_info(self, asin: str):
+    async def get_playback_info(self, asin: str, target_quality: str = "UHD"):
         for attempt in range(2):
             device_id = self.tokens.get('device_id')
             access_token = self.tokens.get('x-amz-access-token')
@@ -347,7 +347,11 @@ class AmazonApi:
             best_bw = 0
             best_url = ""
             best_codec = "flac"
-            best_kid = "" # Gunakan best_kid
+            best_kid = ""
+            
+            # --- SISTEM RANKING KUALITAS ---
+            quality_ranks = {"LD": 1, "SD": 2, "HD": 3, "UHD": 4}
+            max_rank = quality_ranks.get(target_quality.upper(), 4)
             
             # Cari seluruh AdaptationSet
             adp_sets = re.findall(r"<AdaptationSet\b([\s\S]*?)</AdaptationSet>", mpd_text, re.IGNORECASE)
@@ -356,6 +360,16 @@ class AmazonApi:
                 kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', adp, re.IGNORECASE)
                 adp_kid = kid_match.group(1).strip() if kid_match else ""
                 
+                # Cek tipe trek kualitas Amazon (LD, SD, HD, UHD)
+                tt_match = re.search(r'amz-music:trackType"\s*value=["\']([^"\']+)["\']', adp, re.IGNORECASE)
+                track_type = tt_match.group(1).upper() if tt_match else "UHD"
+                
+                current_rank = quality_ranks.get(track_type, 4)
+                
+                # FILTER UTAMA: Lewati jika kualitas ini LEBIH TINGGI dari target user
+                if current_rank > max_rank:
+                    continue
+                
                 reps = re.findall(r"<Representation\b([\s\S]*?)</Representation>", adp, re.IGNORECASE)
                 for rep in reps:
                     bw_match = re.search(r'bandwidth=["\'](\d+)["\']', rep, re.IGNORECASE)
@@ -363,10 +377,11 @@ class AmazonApi:
                     
                     if url_match:
                         bw = int(bw_match.group(1)) if bw_match else 0
+                        # Ambil yang tertinggi dari sisa kualitas yang DIIZINKAN
                         if bw >= best_bw:
                             best_bw = bw
                             best_url = html.unescape(url_match.group(1).strip())
-                            best_kid = adp_kid # Update KID agar cocok dengan URL yang diunduh
+                            best_kid = adp_kid
                             
                             codec_match = re.search(r'codecs=["\']([^"\']+)["\']', rep, re.IGNORECASE)
                             if codec_match:
@@ -384,7 +399,6 @@ class AmazonApi:
             if not best_url:
                 LOGGER.error(f"Amazon MPD Parse Failed! Isi MPD: {mpd_text[:1000]}")
                 
-            # Pastikan mengembalikan 'kid': best_kid
             return {'title': title, 'artist': artist, 'album': album, 'image': image, 'url': best_url, 'kid': best_kid, 'codec': best_codec}
 
     async def get_license(self, challenge_b64, track_asin):
