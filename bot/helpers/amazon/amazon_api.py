@@ -285,7 +285,7 @@ class AmazonApi:
             # --- 2. REQUEST DASH MANIFEST (MPD) ---
             dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
             dmls_payload = {
-                "customerId": customer_id,  # <--- TAMBAHKAN BARIS INI DI SINI
+                "customerId": customer_id,
                 "deviceToken": {"deviceTypeId": device_type_id, "deviceId": device_id},
                 "appInfo": {"musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {asin})"},
                 "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
@@ -305,8 +305,11 @@ class AmazonApi:
             }
             
             async with self.session.post(dmls_url, json=dmls_payload, headers=dmls_headers) as resp:
-                if resp.status == 403 and attempt == 0:
-                    LOGGER.warning("Token Expired saat mengambil MPD. Mencoba Refresh Token...")
+                resp_text = await resp.text()
+                
+                # TANGKAP ERROR 400 INVALID_TOKEN DAN LAKUKAN AUTO-REFRESH
+                if (resp.status == 403 or (resp.status == 400 and "INVALID_TOKEN" in resp_text)) and attempt == 0:
+                    LOGGER.warning("Token ditolak (INVALID_TOKEN / 403). Mencoba Refresh Token...")
                     try:
                         is_refreshed = await self.refresh_access_token()
                     except Exception as e:
@@ -319,12 +322,12 @@ class AmazonApi:
                     raise Exception("Gagal memperbarui sesi Amazon yang kedaluwarsa.")
                     
                 if resp.status != 200:
-                    raise Exception(f"Gagal memuat MPD Amazon ({resp.status}): {await resp.text()}")
+                    raise Exception(f"Gagal memuat MPD Amazon ({resp.status}): {resp_text}")
                 
-                dmls_data = await resp.json()
+                dmls_data = json.loads(resp_text)
                 
                 if not dmls_data.get("contentResponseList"):
-                    raise Exception(f"Amazon menolak memberikan file. Respons: {json.dumps(dmls_data)}")
+                    raise Exception(f"Amazon menolak memberikan file. Respons: {resp_text}")
                     
                 item_resp = dmls_data["contentResponseList"][0]
                 status_code = item_resp.get("contentResponseStatusCode") or item_resp.get("status")
@@ -337,11 +340,8 @@ class AmazonApi:
                         LOGGER.warning("Menerima kode EXPIRED_TOKEN di dalam JSON. Mencoba refresh...")
                         try:
                             is_refreshed = await self.refresh_access_token()
-                        except Exception as e:
-                            if str(e) == "AUTH_EXPIRED":
-                                raise Exception("Sesi Amazon Music Anda kedaluwarsa. Silakan login kembali.")
+                        except Exception:
                             is_refreshed = False
-                            
                         if is_refreshed:
                             continue
                             
