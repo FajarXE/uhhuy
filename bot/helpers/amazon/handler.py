@@ -59,19 +59,25 @@ async def amazon_convert_and_tag(input_path, track_meta):
     else:
         cover_path = None
 
+    # --- PERBAIKAN LOGIKA FFMPEG UNTUK OPUS DI SINI ---
     cmd = ['ffmpeg', '-y', '-i', input_path]
-    if cover_path and os.path.exists(cover_path):
-        # Muxing audio + sampul gambar tanpa rekode (aman untuk MP4 FLAC)
-        cmd.extend(['-i', cover_path, '-map', '0:a:0', '-map', '1:v:0', '-c:v', 'copy'])
+    
+    if output_path.endswith('.opus') or output_path.endswith('.ogg'):
+        # OPUS tidak mendukung penyisipan gambar via FFmpeg, ambil audionya saja
+        cmd.extend(['-map', '0:a:0', '-c:a', 'copy'])
+        
+    elif cover_path and os.path.exists(cover_path):
+        # Muxing audio + sampul gambar untuk FLAC / M4A
+        cmd.extend(['-i', cover_path, '-map', '0:a:0', '-map', '1:v:0', '-c:v', 'copy', '-c:a', 'copy'])
+        if output_path.endswith('.flac'):
+            cmd.extend(['-disposition:v', 'attached_pic'])
+            
     else:
-        cmd.extend(['-map', '0:a:0'])
-    
-    cmd.extend(['-c:a', 'copy'])
-    
-    if output_path.endswith('.flac') and cover_path and os.path.exists(cover_path):
-        cmd.extend(['-disposition:v', 'attached_pic'])
+        # Mode aman jika tidak ada cover art
+        cmd.extend(['-map', '0:a:0', '-c:a', 'copy'])
         
     cmd.append(output_path)
+    # ----------------------------------------------------
     
     LOGGER.info(f"Amazon FFmpeg CMD: {' '.join(cmd)}")
     
@@ -117,6 +123,7 @@ async def amazon_convert_and_tag(input_path, track_meta):
             audio['title'] = track_meta['title']
             audio['artist'] = track_meta['artist']
             audio['album'] = track_meta['album']
+            # Cover art di OPUS ditangani otomatis oleh Telegram nanti
             audio.save()
     except Exception as e:
         LOGGER.warning(f"Gagal menulis tag Mutagen: {e}")
