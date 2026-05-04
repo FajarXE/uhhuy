@@ -145,6 +145,7 @@ class AmazonApi:
         old_access_token = self.tokens.get("x-amz-access-token")
         
         async with self.refresh_lock:
+            # Cegah tabrakan refresh jika antrian sebelumnya sudah berhasil
             if self.tokens.get("x-amz-access-token") != old_access_token:
                 return True
                 
@@ -164,18 +165,41 @@ class AmazonApi:
                         self.tokens["x-amz-access-token"] = data.get("access_token")
                         if "refresh_token" in data: self.tokens["refresh_token"] = data.get("refresh_token")
                         
+                        # --- PENGAMANAN PERMANEN KE DATABASE MANAGER ---
                         try:
-                            from bot.settings import bot_set
-                            for uid, udata in bot_set.user_data.items():
-                                if udata.get('amazon_account') and udata['amazon_account'].get('tokens', {}).get('customerId') == self.tokens.get('customerId'):
-                                    udata['amazon_account']['tokens'].update(self.tokens)
-                        except: pass
+                            from bot.helpers.amazon.manager import amazon_manager
+                            
+                            # 1. Sinkronisasi ke Global Clients
+                            if hasattr(amazon_manager, 'clients'):
+                                for c in amazon_manager.clients:
+                                    if c.tokens.get('customerId') == self.tokens.get('customerId'):
+                                        c.tokens.update(self.tokens)
+                                        
+                            # 2. Sinkronisasi ke Private Clients
+                            if hasattr(amazon_manager, 'user_clients'):
+                                for uid, c in amazon_manager.user_clients.items():
+                                    if c.tokens.get('customerId') == self.tokens.get('customerId'):
+                                        c.tokens.update(self.tokens)
+                                        
+                            # 3. Paksa simpan ke file JSON / Database 
+                            # (Mencoba berbagai nama fungsi simpan yang umum digunakan)
+                            for save_func in ['save_data', 'save_config', 'save_database', 'save']:
+                                if hasattr(amazon_manager, save_func):
+                                    getattr(amazon_manager, save_func)()
+                                    break
+                                    
+                            LOGGER.info("Amazon API: Token baru sukses diperbarui dan disalin ke Database!")
+                        except Exception as e:
+                            LOGGER.warning(f"Gagal Auto-Sync ke Manager: {e}")
+                            
                         return True
                     else:
                         err_txt = await resp.text()
+                        # Jika Amazon membalas invalid_grant, berarti token benar-benar diblokir
                         if resp.status == 400 and ("invalid_grant" in err_txt or "client_id" in err_txt):
                             raise Exception("AUTH_EXPIRED")
                         return False
+                        
             except Exception as e:
                 if str(e) == "AUTH_EXPIRED": raise e
                 return False
