@@ -404,7 +404,10 @@ class AmazonApi:
                         tracknumber = track_data_obj.get('trackNum', 1)
                         discnumber = track_data_obj.get('discNum', 1)
                         isrc = track_data_obj.get('isrc', '')
-                        composer = ', '.join(track_data_obj.get('songWriters', []))
+                        
+                        # --- FIX COMPOSER NULL EXCEPTION ---
+                        writers = track_data_obj.get('songWriters')
+                        composer = ', '.join(writers) if isinstance(writers, list) else ''
 
                         # --- STRATEGI PENEMBUSAN COVER MASTER DENGAN ISRC ---
                         album_asin = album_main_obj.get('asin') or album_obj.get('asin')
