@@ -246,11 +246,9 @@ class AmazonApi:
                 "deviceId": device_id,
                 "deviceType": device_type_id
             }
-            # Kembalikan Customer ID ke Payload
             if customer_id:
                 lookup_payload["customerId"] = customer_id
             
-            # FIX: Kembalikan Access Token ke Headers agar Amazon mau memberikan metadata lengkap!
             lookup_headers = {
                 "x-amzn-requestid": str(uuid.uuid4()),
                 "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
@@ -274,30 +272,59 @@ class AmazonApi:
                         album_tracks = lookup_data['albumList'][0].get('tracks', [])
                         if album_tracks: track_data_obj = album_tracks[0]
 
+                    # --- FIX GENRE & COVER: Tarik Data Album Penuh ---
+                    album_main_obj = {}
+                    if 'albumList' in lookup_data and lookup_data['albumList']:
+                        album_main_obj = lookup_data['albumList'][0]
+                    elif track_data_obj and track_data_obj.get('album', {}).get('asin'):
+                        # Jika hanya mendapat data Track, lakukan request kilat ke ASIN Album
+                        # untuk mengambil Genre dan Master Cover
+                        alb_payload = lookup_payload.copy()
+                        alb_payload['asins'] = [track_data_obj['album']['asin']]
+                        try:
+                            async with self.session.post(lookup_url, json=alb_payload, headers=lookup_headers) as alb_resp:
+                                if alb_resp.status == 200:
+                                    alb_data = await alb_resp.json()
+                                    if 'albumList' in alb_data and alb_data['albumList']:
+                                        album_main_obj = alb_data['albumList'][0]
+                        except:
+                            pass
+
                     if track_data_obj:
                         title = track_data_obj.get('title', asin)
                         artist = track_data_obj.get('artist', {}).get('name', 'Unknown Artist')
                         
                         album_obj = track_data_obj.get('album', {})
-                        if isinstance(album_obj, dict):
-                            album = album_obj.get('title', 'Unknown Album')
-                            image = album_obj.get('image', '')
-                            albumartist = album_obj.get('primaryArtistName', artist)
-                            tracktotal = album_obj.get('trackCount', 1)
-                            genre = album_obj.get('productDetails', {}).get('primaryGenreName', '')
-                            copyright = album_obj.get('productDetails', {}).get('copyright', '')
+                        if not isinstance(album_obj, dict):
+                            album_obj = {}
                             
-                            date_ms = album_obj.get('originalReleaseDate') or album_obj.get('merchantReleaseDate')
-                            if date_ms:
-                                from datetime import datetime, timedelta
-                                release_date = (datetime(1970, 1, 1) + timedelta(seconds=date_ms / 1000)).strftime('%Y-%m-%d')
+                        album = album_main_obj.get('title') or album_obj.get('title', 'Unknown Album')
+                        
+                        # PRIORITY IMAGE: Ambil dari album_main_obj karena menggunakan Master ID
+                        image = album_main_obj.get('image') or album_obj.get('image', '')
+                        
+                        albumartist = album_main_obj.get('primaryArtistName') or album_obj.get('primaryArtistName', artist)
+                        tracktotal = album_main_obj.get('trackCount') or album_obj.get('trackCount', 1)
+                        
+                        # GENRE & COPYRIGHT (Hanya tersedia di album_main_obj)
+                        prod_details = album_main_obj.get('productDetails', {})
+                        genre = prod_details.get('primaryGenreName', '')
+                        copyright = prod_details.get('copyright', '')
+                        
+                        date_ms = album_main_obj.get('originalReleaseDate') or album_obj.get('originalReleaseDate')
+                        if not date_ms:
+                            date_ms = album_main_obj.get('merchantReleaseDate') or album_obj.get('merchantReleaseDate')
+                            
+                        if date_ms:
+                            from datetime import datetime, timedelta
+                            release_date = (datetime(1970, 1, 1) + timedelta(seconds=date_ms / 1000)).strftime('%Y-%m-%d')
 
                         tracknumber = track_data_obj.get('trackNum', 1)
                         discnumber = track_data_obj.get('discNum', 1)
                         isrc = track_data_obj.get('isrc', '')
                         composer = ', '.join(track_data_obj.get('songWriters', []))
 
-                        # FIX RESOLUSI COVER: Buang tagging kompresi untuk ukuran Master
+                        # FIX RESOLUSI COVER: Buang tag kompresi dari URL Master
                         if image:
                             image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
             
