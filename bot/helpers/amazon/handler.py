@@ -224,6 +224,15 @@ async def start_album(album_asin: str, user: dict, url: str):
         'total_volumes': max_disc,
         'explicit': 'False' # API Amazon kita saat ini tidak memberikan indikator parental_warning
     }
+
+    # --- FIX: COPY COVER KE DALAM FOLDER AGAR IKUT TER-ZIP ---
+    if album_metadata.get('cover') and os.path.exists(album_metadata['cover']):
+        try:
+            # Salin gambar sebagai cover.jpg ke dalam folder utama album
+            shutil.copy2(album_metadata['cover'], os.path.join(album_folder, "cover.jpg"))
+        except Exception as e:
+            LOGGER.warning(f"Gagal menyalin cover ke folder ZIP: {e}")
+    # ---------------------------------------------------------
     
     # 1. Panggil fungsi pengeposan Art Poster
     poster_msg = await post_art_poster(user, album_metadata)
