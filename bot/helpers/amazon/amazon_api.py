@@ -75,7 +75,6 @@ class AmazonApi:
             dt_id = re.search(r'"deviceType(?:Id)?"\s*:\s*"([^"]+)"', decoded)
             if dt_id: res["deviceTypeId"] = dt_id.group(1)
             
-            # Ekstrak client_id sebagai penyelamat sesi
             cl_id = re.search(r'"aud"\s*:\s*"([^"]+)"', decoded) or re.search(r'"appId"\s*:\s*"([^"]+)"', decoded)
             if cl_id: res["client_id"] = cl_id.group(1)
             return res
@@ -145,7 +144,6 @@ class AmazonApi:
         old_access_token = self.tokens.get("x-amz-access-token")
         
         async with self.refresh_lock:
-            # Cegah tabrakan refresh jika antrian sebelumnya sudah berhasil
             if self.tokens.get("x-amz-access-token") != old_access_token:
                 return True
                 
@@ -165,44 +163,81 @@ class AmazonApi:
                         self.tokens["x-amz-access-token"] = data.get("access_token")
                         if "refresh_token" in data: self.tokens["refresh_token"] = data.get("refresh_token")
                         
-                        # --- PENGAMANAN PERMANEN KE DATABASE MANAGER ---
                         try:
                             from bot.helpers.amazon.manager import amazon_manager
-                            
-                            # 1. Sinkronisasi ke Global Clients
                             if hasattr(amazon_manager, 'clients'):
                                 for c in amazon_manager.clients:
-                                    if c.tokens.get('customerId') == self.tokens.get('customerId'):
-                                        c.tokens.update(self.tokens)
-                                        
-                            # 2. Sinkronisasi ke Private Clients
+                                    if c.tokens.get('customerId') == self.tokens.get('customerId'): c.tokens.update(self.tokens)
                             if hasattr(amazon_manager, 'user_clients'):
                                 for uid, c in amazon_manager.user_clients.items():
-                                    if c.tokens.get('customerId') == self.tokens.get('customerId'):
-                                        c.tokens.update(self.tokens)
-                                        
-                            # 3. Paksa simpan ke file JSON / Database 
-                            # (Mencoba berbagai nama fungsi simpan yang umum digunakan)
+                                    if c.tokens.get('customerId') == self.tokens.get('customerId'): c.tokens.update(self.tokens)
                             for save_func in ['save_data', 'save_config', 'save_database', 'save']:
                                 if hasattr(amazon_manager, save_func):
                                     getattr(amazon_manager, save_func)()
                                     break
-                                    
-                            LOGGER.info("Amazon API: Token baru sukses diperbarui dan disalin ke Database!")
-                        except Exception as e:
-                            LOGGER.warning(f"Gagal Auto-Sync ke Manager: {e}")
-                            
+                        except: pass
                         return True
                     else:
                         err_txt = await resp.text()
-                        # Jika Amazon membalas invalid_grant, berarti token benar-benar diblokir
                         if resp.status == 400 and ("invalid_grant" in err_txt or "client_id" in err_txt):
                             raise Exception("AUTH_EXPIRED")
                         return False
-                        
             except Exception as e:
                 if str(e) == "AUTH_EXPIRED": raise e
                 return False
+
+    # --- FUNGSI BARU: Pencuri Resolusi Master via Tenzing Search API ---
+    async def fetch_master_cover(self, album_title, album_asin):
+        try:
+            site_region = self.region if self.region != 'uk' else 'gb'
+            url = f"https://music.amazon.com/{site_region}/api/textsearch/search/v1_1/"
+            
+            payload = {
+                "customerIdentity": {
+                    "customerId": self.tokens.get('customerId'),
+                    "deviceId": self.tokens.get('device_id'),
+                    "deviceType": self.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y",
+                    "sessionId": "123-1234567-5555555",
+                },
+                "features": {
+                    "spellCorrection": {"allowCorrection": True},
+                    "upsell": {"allowUpsellForCatalogContent": False}
+                },
+                "musicTerritory": self.region.upper(),
+                "query": album_title,
+                "locale": "en_US",
+                "resultSpecs": [{
+                    "contentRestrictions": {
+                        "allowedParentalControls": {"hasExplicitLanguage": True},
+                        "contentTier": "UNLIMITED"
+                    },
+                    "documentSpecs": [{
+                        "fields": ["artOriginal"],
+                        "type": "catalog_album"
+                    }],
+                    "label": "catalog_album",
+                    "maxResults": 10
+                }]
+            }
+            headers = {
+                "X-Amz-Target": "com.amazon.tenzing.textsearch.v1_1.TenzingTextSearchServiceExternalV1_1.search",
+                "x-amz-access-token": self.tokens.get('x-amz-access-token'),
+                "Content-Encoding": "amz-1.0",
+            }
+            async with self.session.post(url, json=payload, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    results = data.get("results", [])
+                    if results:
+                        for hit in results[0].get("hits", []):
+                            doc = hit.get("document", {})
+                            if doc.get("asin") == album_asin:
+                                if doc.get("artOriginal") and doc["artOriginal"].get("URL"):
+                                    return doc["artOriginal"]["URL"]
+        except Exception as e:
+            LOGGER.debug(f"Search API Cover fallback failed: {e}")
+        return None
+    # -------------------------------------------------------------------
 
     async def get_playback_info(self, asin: str, target_quality: str = "UHD"):
         for attempt in range(2):
@@ -215,7 +250,6 @@ class AmazonApi:
             marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
             music_territory = self.region.upper()
             
-            # --- 1. PENCARIAN METADATA MASTER ---
             lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
             lookup_payload = {
                 "customerId": customer_id,
@@ -257,7 +291,6 @@ class AmazonApi:
                         album_tracks = lookup_data['albumList'][0].get('tracks', [])
                         if album_tracks: track_data_obj = album_tracks[0]
 
-                    # Tarik Data Album Jika Asin adalah Track Tunggal
                     album_main_obj = {}
                     if 'albumList' in lookup_data and lookup_data['albumList']:
                         album_main_obj = lookup_data['albumList'][0]
@@ -297,8 +330,14 @@ class AmazonApi:
                         isrc = track_data_obj.get('isrc', '')
                         composer = ', '.join(track_data_obj.get('songWriters', []))
 
+                        # --- FIX RESOLUSI COVER: Ambil artOriginal via Search API ---
+                        album_asin = album_main_obj.get('asin') or album_obj.get('asin')
+                        if album_asin and album:
+                            master_cover = await self.fetch_master_cover(album, album_asin)
+                            if master_cover:
+                                image = master_cover
+
                         if image:
-                            # Hapus modifier lama dan suntikkan resolusi Master 1400x1400
                             image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
                             image = re.sub(r'\.(jpg|jpeg|png)$', r'._SX1400_QL100_FMjpg.\1', image, flags=re.IGNORECASE)
             
@@ -380,7 +419,6 @@ class AmazonApi:
                 kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
                 if kid_match: best_kid = kid_match.group(1).strip()
                     
-            # PENYELARASAN KUNCI METADATA UNTUK METADATA.PY
             return {
                 'title': title, 'artist': artist, 'album': album, 'albumartist': albumartist,
                 'tracknumber': tracknumber, 'discnumber': discnumber, 'totaltracks': tracktotal,
