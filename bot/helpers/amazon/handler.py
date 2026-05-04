@@ -152,15 +152,6 @@ async def start_album(album_asin: str, user: dict, url: str):
     
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
     
-    lookup_payload = {
-        "asins": [album_asin],
-        "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-        "requestedContent": "MUSIC_SUBSCRIPTION", 
-        "musicTerritory": music_territory, 
-        "deviceId": device_id,
-        "deviceType": device_type_id
-    }
-    
     lookup_headers = {
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
         "x-amz-access-token": access_token,
@@ -169,24 +160,55 @@ async def start_album(album_asin: str, user: dict, url: str):
     }
     
     track_asins = []
-    async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-        if resp.status == 200:
-            data = await resp.json()
-            for album in data.get("albumList", []):
-                # --- FIX UTAMA: Gunakan key "tracks" sesuai struktur asli Amazon ---
-                for track in album.get("tracks", []):
-                    if isinstance(track, dict) and track.get("asin"):
-                        track_asins.append(track["asin"])
-                        
-    # Hilangkan duplikat jika ada
-    track_asins = list(dict.fromkeys(track_asins))
+    
+    # Coba gunakan dua level enum untuk memaksa Amazon membuka katalog
+    enum_options = ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]
+    
+    for req_content in enum_options:
+        lookup_payload = {
+            "asins": [album_asin],
+            "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+            "requestedContent": req_content, 
+            "musicTerritory": music_territory, 
+            "deviceId": device_id,
+            "deviceType": device_type_id
+        }
+        
+        try:
+            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # 1. Cek apakah ini Album standar (Cari di dalam albumList -> tracks)
+                    for album in data.get("albumList", []):
+                        for track in album.get("tracks", []):
+                            if isinstance(track, dict) and track.get("asin"):
+                                track_asins.append(track["asin"])
+                                
+                    # 2. Cek apakah ini Single/Trek Tunggal (Cari langsung di trackList)
+                    if not track_asins:
+                        for track in data.get("trackList", []):
+                            if isinstance(track, dict) and track.get("asin"):
+                                track_asins.append(track["asin"])
+                                
+            # Hilangkan duplikat jika ada
+            track_asins = list(dict.fromkeys(track_asins))
+            
+            # Jika berhasil mendapat data lagu, hentikan pencarian
+            if track_asins:
+                LOGGER.info(f"Amazon: Daftar lagu ditemukan menggunakan parameter '{req_content}'.")
+                break
+                
+        except Exception as e:
+            LOGGER.debug(f"Pencarian dengan enum {req_content} error: {e}")
+            pass
             
     if not track_asins:
-        raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk album {album_asin}. Pastikan link valid.")
+        raise Exception(f"Amazon menolak mengembalikan daftar lagu untuk {album_asin}. Ini biasanya terjadi jika album dibatasi secara geografis di luar wilayah akun Anda ({music_territory}).")
             
-    LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album.")
+    LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album/single ini.")
     if 'bot_msg' in user:
-        await user['bot_msg'].edit_text(f"💿 **Album Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
+        await user['bot_msg'].edit_text(f"💿 **Data Ditemukan!**\nMemulai proses unduhan {len(track_asins)} lagu...")
 
     for t_asin in track_asins:
         try:
