@@ -273,11 +273,10 @@ class AmazonApi:
             }
             
             async with self.session.post(dmls_url, json=dmls_payload, headers=dmls_headers) as resp:
-                # Tangkap 403 Expired Token lagi untuk berjaga-jaga
                 if resp.status == 403 and attempt == 0:
                     LOGGER.warning("Token Expired saat mengambil MPD. Mencoba Refresh Token...")
                     if await self.refresh_access_token():
-                        continue # Ulangi loop
+                        continue 
                     raise Exception("Gagal memperbarui sesi Amazon yang kedaluwarsa.")
                     
                 if resp.status != 200:
@@ -289,7 +288,11 @@ class AmazonApi:
                     raise Exception(f"Amazon menolak memberikan file. Respons: {json.dumps(dmls_data)}")
                     
                 item_resp = dmls_data["contentResponseList"][0]
-                if item_resp.get("status") != "SUCCESS" or "error" in item_resp:
+                
+                # --- FIX: Periksa 'contentResponseStatusCode' selain 'status' ---
+                status_code = item_resp.get("contentResponseStatusCode") or item_resp.get("status")
+                
+                if status_code != "SUCCESS" or "error" in item_resp:
                     err_code = item_resp.get("error", {}).get("code", "UNKNOWN")
                     err_msg = item_resp.get("error", {}).get("message", "Akses ditolak.")
                     
@@ -298,10 +301,10 @@ class AmazonApi:
                         if await self.refresh_access_token():
                             continue
                             
-                    # [FIX] Cetak JSON mentahnya agar kita tahu alasan sebenarnya dari Amazon
                     import json
-                    raw_dump = json.dumps(item_resp)
-                    raise Exception(f"Ditolak Amazon: [{err_code}] {err_msg} | RAW: {raw_dump}")
+                    # Potong panjang teks RAW agar tidak membuat Telegram error (400 MESSAGE_TOO_LONG)
+                    raw_dump = json.dumps(item_resp)[:250] 
+                    raise Exception(f"Ditolak Amazon: [{err_code}] {err_msg} | RAW: {raw_dump}...")
                     
                 mpd_text = item_resp.get("manifest", "")
                 
