@@ -172,9 +172,16 @@ async def start_album(album_asin: str, user: dict, url: str):
     async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
         if resp.status == 200:
             data = await resp.json()
+            
+            # 1. Cek apakah ini Album penuh (Mencari di dalam albumList -> tracks)
             for album in data.get("albumList", []):
-                # --- FIX UTAMA: Gunakan key "tracks" sesuai struktur asli Amazon ---
                 for track in album.get("tracks", []):
+                    if isinstance(track, dict) and track.get("asin"):
+                        track_asins.append(track["asin"])
+            
+            # 2. Cek apakah ini Single (Mencari langsung di trackList jika albumList kosong)
+            if not track_asins:
+                for track in data.get("trackList", []):
                     if isinstance(track, dict) and track.get("asin"):
                         track_asins.append(track["asin"])
                         
