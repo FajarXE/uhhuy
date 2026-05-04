@@ -147,12 +147,19 @@ async def start_album(album_asin: str, user: dict, url: str):
 
     device_id = client.tokens.get('device_id')
     access_token = client.tokens.get('x-amz-access-token')
-    customer_id = client.tokens.get('customerId')
-    
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     music_territory = client.region.upper() 
     
     lookup_url = f"{client.base_url}{client.api_location}/api/muse/legacy/lookup"
+    
+    lookup_payload = {
+        "asins": [album_asin],
+        "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+        "requestedContent": "MUSIC_SUBSCRIPTION", 
+        "musicTerritory": music_territory, 
+        "deviceId": device_id,
+        "deviceType": device_type_id
+    }
     
     lookup_headers = {
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
@@ -162,75 +169,20 @@ async def start_album(album_asin: str, user: dict, url: str):
     }
     
     track_asins = []
-    
-    # 1. API FALLBACK: Coba berbagai enum untuk memaksa Amazon membongkar trackList
-    enum_options = ["FULL_CATALOG", "MUSIC_SUBSCRIPTION", "ALL_STREAMABLE", "PRIME"]
-    
-    for req_content in enum_options:
-        lookup_payload = {
-            "asins": [album_asin],
-            "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-            "requestedContent": req_content, 
-            "musicTerritory": music_territory, 
-            "deviceId": device_id,
-            "deviceType": device_type_id
-        }
-        
-        if customer_id:
-            lookup_payload["customerId"] = customer_id
+    async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
+        if resp.status == 200:
+            data = await resp.json()
+            for album in data.get("albumList", []):
+                # --- FIX UTAMA: Gunakan key "tracks" sesuai struktur asli Amazon ---
+                for track in album.get("tracks", []):
+                    if isinstance(track, dict) and track.get("asin"):
+                        track_asins.append(track["asin"])
+                        
+    # Hilangkan duplikat jika ada
+    track_asins = list(dict.fromkeys(track_asins))
             
-        try:
-            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    for album_item in data.get("albumList", []):
-                        for track in album_item.get("trackList", []):
-                            if track.get("asin"):
-                                track_asins.append(track["asin"])
-                                
-            # Hilangkan duplikat
-            track_asins = list(dict.fromkeys(track_asins))
-            
-            if track_asins:
-                LOGGER.info(f"Amazon: API berhasil mengekspansi album menggunakan parameter '{req_content}'")
-                break
-        except Exception as e:
-            LOGGER.debug(f"Gagal memuat album dengan enum {req_content}: {e}")
-            pass
-            
-    # 2. WEB SCRAPER FALLBACK: Jika API tetap menolak memberikan daftar lagu
     if not track_asins:
-        LOGGER.warning(f"API gagal mengekspansi trackList untuk {album_asin}. Memulai Web Scraper tingkat lanjut...")
-        web_url = f"https://music.amazon.com/albums/{album_asin}"
-        web_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-        
-        try:
-            import requests
-            import re
-            w_resp = await asyncio.to_thread(requests.get, web_url, headers=web_headers, timeout=15)
-            
-            if w_resp.status_code == 200:
-                html_data = w_resp.text
-                
-                # Regex 1: Mencari format strict JSON yang di-*escape*
-                raw_asins = re.findall(r'(?:"asin"|"trackAsin"|\\\"asin\\\"|\\\"trackAsin\\\")\s*:\s*(?:\"|\\\"|\')?(B0[A-Z0-9]{8})', html_data, re.IGNORECASE)
-                
-                # Regex 2: Mencari jejak ASIN dari URL routing/hyperlink UI Web
-                if not raw_asins:
-                    raw_asins = re.findall(r'(?:trackAsin=|/tracks/)(B0[A-Z0-9]{8})', html_data, re.IGNORECASE)
-                    
-                for a in raw_asins:
-                    if a != album_asin and a.startswith('B0') and len(a) == 10 and a not in track_asins:
-                        track_asins.append(a)
-        except Exception as weberr:
-            LOGGER.warning(f"Web scraper fallback gagal beroperasi: {weberr}")
-                
-    if not track_asins:
-        raise Exception("Amazon menolak memberikan daftar lagu. Pastikan tautan album valid, atau ini adalah rilis eksklusif yang dibatasi di wilayah akun Anda.")
+        raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk album {album_asin}. Pastikan link valid.")
             
     LOGGER.info(f"Amazon: Ditemukan {len(track_asins)} lagu dalam album.")
     if 'bot_msg' in user:
