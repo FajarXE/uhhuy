@@ -195,11 +195,14 @@ async def start_album(album_asin: str, user: dict, url: str):
 
     # Penyiapan Folder & Cover
     album_folder = album_tracks[0].get('folderpath', '') if album_tracks else ''
-    
-    # Ambil sampel metadata dari lagu pertama untuk melengkapi data Album
     sample_track = album_tracks[0] if album_tracks else {}
     
-    # Hitung total disc/volume berdasarkan nomor disc tertinggi di semua lagu
+    # --- JARING PENGAMAN: Validasi Fisik Cover ---
+    safe_cover = sample_track.get('cover', '')
+    if safe_cover and not os.path.exists(safe_cover):
+        safe_cover = '' # Bersihkan jadi kosong jika berbentuk URL / Gagal Unduh
+    # ---------------------------------------------
+        
     try:
         max_disc = max(int(t.get('discnumber', 1)) for t in album_tracks)
     except:
@@ -214,15 +217,13 @@ async def start_album(album_asin: str, user: dict, url: str):
         'folderpath': album_folder,
         'tracks': album_tracks,
         'provider': 'Amazon Music',
-        'cover': sample_track.get('cover', ''),
+        'cover': safe_cover,  # <--- MASUKKAN VARIABEL AMAN DI SINI
         'quality': sample_track.get('quality', 'UHD'),
-        
-        # --- FIX: Injeksi Metadata yang Hilang di Art Poster ---
         'release_date': sample_track.get('release_date', 'Unknown'),
         'date': sample_track.get('release_date', 'Unknown')[:4] if sample_track.get('release_date') else 'Unknown',
         'totaltracks': len(album_tracks),
         'total_volumes': max_disc,
-        'explicit': 'False' # API Amazon kita saat ini tidak memberikan indikator parental_warning
+        'explicit': 'False'
     }
 
     # --- FIX: COPY COVER KE DALAM FOLDER AGAR IKUT TER-ZIP ---
