@@ -16,6 +16,15 @@ class AmazonManager:
 
     async def initialize_clients(self):
         LOGGER.info("Amazon: Menginisialisasi klien Global...")
+        
+        # --- FIX 1: BERSIHKAN HANTU MEMORI GLOBAL ---
+        for old_client in self.clients:
+            try:
+                await old_client.close()
+            except: pass
+        self.clients = []
+        # --------------------------------------------
+        
         try:
             all_settings = await database.get_variable()
             self.quality = all_settings.get('AMAZON_QUALITY', 'HD')
@@ -60,6 +69,12 @@ class AmazonManager:
         if user_id in self.user_clients:
             await self.user_clients[user_id].close()
             del self.user_clients[user_id]
+            
+        # --- FIX 2: BERSIHKAN HANTU MEMORI PENGGUNA ---
+        user_data = bot_set.user_data.get(user_id, {})
+        if 'amazon_account' in user_data:
+            user_data['amazon_account'] = None
+        # ----------------------------------------------
             
         await database.save_user_settings(user_id, {'amazon_account': None})
         LOGGER.info(f"Amazon: Private session dihapus untuk user {user_id}")
