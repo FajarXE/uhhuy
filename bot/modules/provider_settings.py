@@ -747,18 +747,21 @@ async def amazon_cb(c, cb:CallbackQuery):
 @Client.on_callback_query(filters.regex(pattern=r"^amzQ"))
 async def amazon_quality_cb(c, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
-        qual_map_display = {
-            "UHD (Hi-Res)": "UHD",
-            "HD (Lossless/FLAC)": "HD",
-            "SD (Standard MP3/AAC)": "SD"
-        }
-        to_set_display = cb.data.split('_')[1]
-        to_set = qual_map_display.get(to_set_display)
-        if not to_set:
-            return await c.answer_callback_query(cb.id, "Kualitas tidak valid.", True)
+        # Ambil langsung key (UHD, HD, atau SD) dari callback data
+        try:
+            to_set = cb.data.split('_')[1]
+        except IndexError:
+            return await c.answer_callback_query(cb.id, "Format callback salah.", True)
+
+        # Validasi apakah value yang dikirim benar
+        if to_set not in ["UHD", "HD", "SD"]:
+            return await c.answer_callback_query(cb.id, f"Kualitas tidak valid: {to_set}", True)
         
+        # Simpan ke manager dan database
         amazon_manager.quality = to_set
         await database.set_variable('AMAZON_QUALITY', to_set)
+        
+        await c.answer_callback_query(cb.id, f"Kualitas Global disetel ke: {to_set}", False)
         await amazon_cb(c, cb)
 
 @Client.on_callback_query(filters.regex(pattern=r"^amzAuth"))
