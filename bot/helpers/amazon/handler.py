@@ -200,13 +200,20 @@ async def start_album(album_asin: str, user: dict, url: str):
     # --- JARING PENGAMAN: Validasi Fisik Cover ---
     safe_cover = sample_track.get('cover', '')
     if safe_cover and not os.path.exists(safe_cover):
-        safe_cover = '' # Bersihkan jadi kosong jika berbentuk URL / Gagal Unduh
+        safe_cover = ''
     # ---------------------------------------------
         
     try:
         max_disc = max(int(t.get('discnumber', 1)) for t in album_tracks)
     except:
         max_disc = 1
+
+    # 1. Update setiap lagu dengan total_volume yang akurat dari kalkulasi album
+    for t in album_tracks:
+        t['totalvolume'] = str(max_disc)
+
+    # 2. Deteksi otomatis label Explicit dari judul Album atau Lagu
+    is_explicit = "[explicit]" in album_title.lower() or any("[explicit]" in str(t.get('title', '')).lower() for t in album_tracks)
 
     album_metadata = {
         'type': 'album',
@@ -217,13 +224,16 @@ async def start_album(album_asin: str, user: dict, url: str):
         'folderpath': album_folder,
         'tracks': album_tracks,
         'provider': 'Amazon Music',
-        'cover': safe_cover,  # <--- MASUKKAN VARIABEL AMAN DI SINI
+        'cover': safe_cover,  
         'quality': sample_track.get('quality', 'UHD'),
         'release_date': sample_track.get('release_date', 'Unknown'),
         'date': sample_track.get('release_date', 'Unknown')[:4] if sample_track.get('release_date') else 'Unknown',
-        'totaltracks': len(album_tracks),
-        'total_volumes': max_disc,
-        'explicit': 'False'
+        'totaltracks': str(len(album_tracks)),
+        
+        # --- FIX: Injeksi Variabel Poster ---
+        'totalvolume': str(max_disc),    
+        'total_volumes': str(max_disc),  
+        'explicit': str(is_explicit)     
     }
 
     # --- FIX: COPY COVER KE DALAM FOLDER AGAR IKUT TER-ZIP ---
@@ -286,14 +296,28 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
     elif 'opus' in codec: ext = 'opus'
     else: ext = 'm4a'
     
+    # --- TAMBAHAN DETEKSI EXPLICIT ---
+    raw_title = manifest_data.get('title', asin)
+    raw_album = manifest_data.get('album', 'Unknown Album')
+    
+    # Deteksi otomatis dari judul atau album
+    is_explicit_track = "[explicit]" in str(raw_title).lower() or "[explicit]" in str(raw_album).lower()
+
     track_meta = {
-        'title': manifest_data.get('title', asin),
+        'title': raw_title,
         'artist': manifest_data.get('artist', 'Unknown Artist'),
-        'album': manifest_data.get('album', 'Unknown Album'),
+        'album': raw_album,
         'albumartist': manifest_data.get('albumartist', 'Unknown Artist'),
         'tracknumber': manifest_data.get('tracknumber', 1),
         'totaltracks': manifest_data.get('totaltracks', 1),
         'discnumber': manifest_data.get('discnumber', 1),
+        
+        # --- FIX: Pemetaan Volume & Explicit untuk file Audio ---
+        'volume': str(manifest_data.get('discnumber', 1)),
+        'totalvolume': '1', 
+        'explicit': is_explicit_track,
+        # --------------------------------------------------------
+        
         'release_date': manifest_data.get('release_date', ''),
         'genre': manifest_data.get('genre', ''),
         'copyright': manifest_data.get('copyright', ''),
