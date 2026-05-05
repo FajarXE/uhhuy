@@ -428,11 +428,33 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
     except:
         pass
 
+    # --- FIX: DETEKSI KUALITAS FISIK SECARA NYATA (HD vs UHD) ---
+    if ext == 'flac':
+        try:
+            from mutagen.flac import FLAC
+            audio = FLAC(final_path)
+            bps = audio.info.bits_per_sample
+            sr = audio.info.sample_rate
+            
+            # Simpan data teknis ini agar ikut tertulis ke dalam tag metadata file
+            track_meta['bit_depth'] = bps
+            track_meta['sample_rate'] = sr
+            
+            # Standar Amazon: 24-bit atau di atas 48kHz = UHD (Hi-Res), Sisanya HD (CD Quality)
+            if bps > 16 or sr > 48000:
+                track_meta['quality'] = 'UHD'
+            else:
+                track_meta['quality'] = 'HD'
+        except Exception as e:
+            LOGGER.debug(f"Gagal membedah info FLAC: {e}")
+    # ------------------------------------------------------------
+
     from bot.helpers.metadata import set_metadata
     await set_metadata(track_meta, user_id)
 
     # 3. Panggil uploader utama (Mendukung Cloud / Local / Telegram)
     if upload:
+        from bot.helpers.uploder import track_upload
         await track_upload(track_meta, user, disable_link=False)
         
     return track_meta
