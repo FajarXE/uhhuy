@@ -359,18 +359,22 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
         LOGGER.debug(f"Pencarian lirik diabaikan/gagal: {e}")
     # ----------------------------------------------------------------
     
-    # --- FIX 2: PENOMORAN FILE (01 - Judul Lagu) ---
+    # --- FIX 2: PENOMORAN FILE & PENGELOMPOKAN FOLDER ALBUM ---
     # Gunakan zfill(2) agar nomor track selalu 2 digit (01, 02, dst)
     track_num = str(track_meta['tracknumber']).zfill(2)
     
     # Bersihkan karakter ilegal dari nama menggunakan sanitize_filepath
     clean_title = sanitize_filepath(track_meta['title'])
-    clean_artist = sanitize_filepath(track_meta['artist'])
+    
+    # --- FIX: Gunakan ALBUM ARTIST untuk nama folder agar tidak terserak! ---
+    raw_album_artist = track_meta.get('albumartist') or track_meta.get('artist') or 'Various Artists'
+    clean_album_artist = sanitize_filepath(raw_album_artist)
+    
     clean_album = sanitize_filepath(track_meta['album'])
     
     # Format Nama File Baru
     file_name = f"{track_num} - {clean_title}"
-    folder_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Amazon Music/{clean_artist}/{clean_album}"
+    folder_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/Amazon Music/{clean_album_artist}/{clean_album}"
     
     os.makedirs(folder_path, exist_ok=True)
     
