@@ -1550,21 +1550,18 @@ async def uset_cb(client, query, datatype=""):
         quality = {
             "UHD": "UHD (Hi-Res)",
             "HD": "HD (Lossless/FLAC)",
-            "SD": "SD (Standard MP3)"
+            "SD": "SD (Standard MP3/AAC)"
         }
         
-        has_client = False
-        if amazon_manager:
-            if getattr(amazon_manager, 'global_clients', []) or getattr(amazon_manager, 'clients', []) or amazon_manager.has_private_session(user_id):
-                has_client = True
+        # Pengecekan manager bersifat opsional di sini agar menu tidak blank
+        if not amazon_manager:
+            return await edit_message(query.message, "Layanan Amazon Music tidak aktif.")
 
-        if not has_client:
-            return await edit_message(query.message, "Layanan Amazon Music tidak aktif (tidak ada klien yang login).")
-
+        # Ambil pengaturan kualitas user saat ini
         main_user_dict = bot_set.user_data.get(user_id, {})
         current = main_user_dict.get("amazon_qual", getattr(amazon_manager, 'quality', 'HD')) 
-        await amazon_manager.setup_quality(user_id, current) 
         
+        # Tandai kualitas yang sedang aktif dengan centang
         if current in quality:
             quality[current] = quality[current] + '✅'
             
