@@ -291,11 +291,22 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
             raise Exception(f"Akses Ditolak: Mewajibkan langganan Amazon Music Unlimited yang aktif atau tidak tersedia. Detail: {err_str}")
         raise e
     
+    # --- PENENTUAN KUALITAS & FORMAT NYATA (ACTUAL QUALITY) ---
     codec = manifest_data.get('codec', 'flac').lower()
-    if 'flac' in codec: ext = 'flac'
-    elif 'opus' in codec: ext = 'opus'
-    else: ext = 'm4a'
     
+    if 'flac' in codec: 
+        ext = 'flac'
+        # Jika FLAC, kualitasnya mengikuti target maksimal user (HD/UHD)
+        actual_q = target_q if target_q in ['HD', 'UHD'] else 'HD'
+    elif 'opus' in codec: 
+        ext = 'opus'
+        # Opus selalu kualitas Standard (SD)
+        actual_q = 'SD'
+    else: 
+        ext = 'm4a'
+        # M4A selalu kualitas Standard (SD)
+        actual_q = 'SD'
+        
     # --- TAMBAHAN DETEKSI EXPLICIT ---
     raw_title = manifest_data.get('title', asin)
     raw_album = manifest_data.get('album', 'Unknown Album')
@@ -312,11 +323,10 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
         'totaltracks': manifest_data.get('totaltracks', 1),
         'discnumber': manifest_data.get('discnumber', 1),
         
-        # --- FIX: Pemetaan Volume & Explicit untuk file Audio ---
+        # --- Pemetaan Volume & Explicit untuk file Audio ---
         'volume': str(manifest_data.get('discnumber', 1)),
         'totalvolume': '1', 
         'explicit': is_explicit_track,
-        # --------------------------------------------------------
         
         'release_date': manifest_data.get('release_date', ''),
         'genre': manifest_data.get('genre', ''),
@@ -325,7 +335,10 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
         'isrc': manifest_data.get('isrc', ''),
         'composer': manifest_data.get('composer', ''),
         'cover': manifest_data.get('cover', ''),  
-        'quality': target_q, 
+        
+        # --- FIX: Gunakan kualitas asli file, bukan kualitas target ---
+        'quality': actual_q, 
+        
         'provider': 'Amazon Music',
         'type': 'track'
     }
