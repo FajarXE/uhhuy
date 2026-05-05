@@ -175,13 +175,16 @@ async def start_album(album_asin: str, user: dict, url: str):
         'type': 'Album'
     }
     
-    # --- FIX: Paksa penomoran sesuai urutan indeks di album ---
+    # --- FIX: Paksa penomoran dan NAMA ALBUM sesuai urutan indeks di album ---
     tasks = []
     total_lagu = len(track_asins)
     for index, t_asin in enumerate(track_asins, start=1):
         # Panggil start_track dengan upload=False agar tidak membuat UI "Download Track" mandiri
-        # Kirimkan indeks asli sebagai forced_track_num
-        tasks.append(start_track(t_asin, user, url, upload=False, forced_track_num=index, forced_total_tracks=total_lagu))
+        # Kirimkan indeks asli dan nama album utama!
+        tasks.append(start_track(
+            t_asin, user, url, upload=False, 
+            forced_track_num=index, forced_total_tracks=total_lagu, forced_album_title=album_title
+        ))
     # ------------------------------------------------------------
         
     # Konfigurasi batas paralel (Sequential vs Concurrent)
@@ -269,7 +272,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     from bot.helpers.uploder import album_upload
     await album_upload(album_metadata, user)
 
-async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None):
+async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None, forced_album_title=None):
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
     
@@ -325,7 +328,7 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
     track_meta = {
         'title': raw_title,
         'artist': manifest_data.get('artist', 'Unknown Artist'),
-        'album': raw_album,
+        'album': forced_album_title if forced_album_title else raw_album,
         'albumartist': manifest_data.get('albumartist', 'Unknown Artist'),
         # --- FIX: Gunakan nomor paksaan dari Album jika tersedia ---
         'tracknumber': forced_track_num if forced_track_num else manifest_data.get('tracknumber', 1),
