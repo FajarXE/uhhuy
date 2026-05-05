@@ -10,6 +10,7 @@ from datetime import datetime
 # Import Mutagen
 from mutagen import File
 from mutagen.oggvorbis import OggVorbis
+from mutagen.oggopus import OggOpus
 from mutagen.wave import WAVE
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
@@ -219,6 +220,7 @@ async def set_metadata(metadata:dict, user_id: int = None):
             elif '.mp3' in ext: handle = MP3(audio_path)
             elif '.flac' in ext: handle = FLAC(audio_path)
             elif '.ogg' in ext: handle = OggVorbis(audio_path)
+            elif '.opus' in ext: handle = OggOpus(audio_path)
             elif ext in ['.m4a', '.mp4', '.m4b']: handle = MP4(audio_path)
                 
     except Exception as e:
@@ -250,7 +252,7 @@ async def set_metadata(metadata:dict, user_id: int = None):
 
     # --- 3. ROUTING KE HANDLER SPESIFIK ---
     try:
-        if isinstance(handle, OggVorbis):
+        if isinstance(handle, OggVorbis, OggOpus)):
             await set_vorbis(metadata, handle, dur_ms)
         elif isinstance(handle, FLAC):
             await set_flac(metadata, handle, dur_ms)
@@ -265,8 +267,10 @@ async def set_metadata(metadata:dict, user_id: int = None):
             ext = os.path.splitext(audio_path)[1].lower()
             if ext in ['.m4a', '.mp4']:
                  await set_m4a(metadata, handle)
+            elif ext in ['.ogg', '.opus']:
+                 await set_vorbis(metadata, handle, dur_ms)
             else:
-                await set_mp3(metadata, handle, dur_ms) 
+                await set_mp3(metadata, handle, dur_ms)  
     except Exception as e:
         LOGGER.error(f"Gagal menulis metadata: {e}")
         import traceback
@@ -713,8 +717,8 @@ async def savePic(handle, metadata):
         handle.clear_pictures()
         handle.add_picture(pic)
 
-    # --- 2. Handler OGG VORBIS (Spotify) ---
-    elif isinstance(handle, OggVorbis): 
+    # --- 2. Handler OGG VORBIS & OPUS (Spotify/Amazon SD) ---
+    elif isinstance(handle, OggVorbis, OggOpus)): 
         try:
             pic = Picture()
             pic.data = data
