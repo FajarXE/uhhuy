@@ -252,7 +252,7 @@ async def set_metadata(metadata:dict, user_id: int = None):
 
     # --- 3. ROUTING KE HANDLER SPESIFIK ---
     try:
-        if isinstance(handle, OggVorbis, OggOpus)):
+        if isinstance(handle, OggVorbis, OggOpus):
             await set_vorbis(metadata, handle, dur_ms)
         elif isinstance(handle, FLAC):
             await set_flac(metadata, handle, dur_ms)
@@ -718,7 +718,7 @@ async def savePic(handle, metadata):
         handle.add_picture(pic)
 
     # --- 2. Handler OGG VORBIS & OPUS (Spotify/Amazon SD) ---
-    elif isinstance(handle, OggVorbis, OggOpus)): 
+    elif isinstance(handle, OggVorbis, OggOpus): 
         try:
             pic = Picture()
             pic.data = data
