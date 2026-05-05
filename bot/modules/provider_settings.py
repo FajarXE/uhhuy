@@ -728,8 +728,8 @@ async def amazon_cb(c, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
         quality = {
             "UHD": "UHD (Hi-Res)",
-            "HD": "HD (Lossless/FLAC)",
-            "SD": "SD (Standard MP3/AAC)"
+            "HD": "HD (Lossless)",
+            "SD": "SD (Opus)"
         }
         if not amazon_manager:
             return await edit_message(cb.message, "Layanan Amazon Music tidak aktif.")
