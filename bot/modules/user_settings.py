@@ -1549,8 +1549,8 @@ async def uset_cb(client, query, datatype=""):
         text = f"Choose Amazon Music Audio Quality bellow:\n(Tergantung pada tier langganan akun)"
         quality = {
             "UHD": "UHD (Hi-Res)",
-            "HD": "HD (Lossless/FLAC)",
-            "SD": "SD (Standard MP3/AAC)"
+            "HD": "HD (Lossless)",
+            "SD": "SD (Opus)"
         }
         
         # Pengecekan manager bersifat opsional di sini agar menu tidak blank
