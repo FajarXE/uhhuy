@@ -1170,38 +1170,38 @@ def amz_button(quality: dict, user_id: int = None):
         "SD": "SD (Standard MP3/AAC)"
     }
     
+    # 1. Bangun tombol pilihan kualitas (UHD, HD, SD)
     for i, (key, value) in enumerate(quality.items()):
+        # Ambil teks bersih untuk label tombol
         clean_text = display_text_map.get(key, key)
+        
+        # Deteksi apakah kualitas ini sedang terpilih (ada emoji ✅)
         is_selected = "✅" in value
         btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
 
-        if clean_text:
-            row.append(InlineKeyboardButton(
-                text=clean_text, 
-                callback_data=f"{prefix}_{key}", 
-                style=btn_style
-            ))
+        row.append(InlineKeyboardButton(
+            text=clean_text, 
+            callback_data=f"{prefix}_{key}", 
+            style=btn_style
+        ))
             
+        # Susun 2 tombol per baris
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
             
-        if usetting:
-            buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)])
-            buttons.append(
-                [
-                    InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
-                ]
-            )
-            return InlineKeyboardMarkup(buttons)
-            
-        # --- TAMBAHKAN BARIS INI UNTUK MENU ADMIN ---
-        buttons.append([InlineKeyboardButton("🔐 GLOBAL ACCOUNTS (Multi-Region)", callback_data="amzAuth", style=ButtonStyle.PRIMARY)])
-        # --------------------------------------------
-        
+    # 2. Tambahkan tombol navigasi tambahan
+    if usetting:
+        # Tampilan untuk menu USER SETTINGS (/usetting)
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)])
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
+    else:
+        # Tampilan untuk menu ADMIN (Providers Panel)
+        buttons.append([InlineKeyboardButton("🔐 GLOBAL ACCOUNTS (Admin)", callback_data="amzAuth", style=ButtonStyle.PRIMARY)])
         main_button, close_button = fetch_base_buttons()
         buttons += main_button + close_button
-        return InlineKeyboardMarkup(buttons)
+        
+    return InlineKeyboardMarkup(buttons)
 
 def amazon_global_auth_buttons(active_clients: list):
     buttons = []
