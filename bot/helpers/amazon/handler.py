@@ -193,15 +193,9 @@ async def start_album(album_asin: str, user: dict, url: str):
             album_tracks.append(res)
         else:
             # Jika 'res' bukan dictionary, berarti itu adalah Exception/Error!
-            from bot.logger import LOGGER
+            # (Baris import LOGGER sudah dihapus dari sini)
             LOGGER.error(f"Amazon [Track {index}] GAGAL DIUNDUH! Penyebab: {res}")
-            
-            # Anda juga bisa memunculkan peringatan di Telegram jika mau
-            # (Opsional) Biarkan jika hanya ingin melihat di konsol log
     # --------------------------------------------------------
-    
-    if not album_tracks:
-        err_text = "❌ **Gagal Mengunduh Album!**\n\n**Penyebab:** Amazon menolak memberikan file audio. Ini sangat sering terjadi karena **Region Lock** (Anda mencoba mengunduh link dari wilayah JP menggunakan akun Non-JP) atau lagu tersebut belum tersedia di paket langganan Anda."
 
     # Penyiapan Folder & Cover
     album_folder = album_tracks[0].get('folderpath', '') if album_tracks else ''
