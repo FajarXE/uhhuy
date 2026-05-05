@@ -253,67 +253,30 @@ class AmazonApi:
             LOGGER.debug(f"Amazon Search API Cover fallback failed: {e}")
         return None
 
-    # --- REVISI: MUSICBRAINZ PINTAR MENGGUNAKAN ISRC ---
-    async def fetch_musicbrainz_cover(self, isrc, artist, album):
-        headers = {"User-Agent": "HarleyBot/1.0 ( music-downloader )"}
-        mbid = None
-        
-        async with aiohttp.ClientSession() as session:
-            # 1. PENCARIAN PRESISI TINGGI MENGGUNAKAN ISRC
-            if isrc:
-                try:
-                    # Endpoint ISRC langsung memetakan kode track ke daftar Release/Album
-                    isrc_url = f"https://musicbrainz.org/ws/2/isrc/{isrc}?fmt=json&inc=releases"
-                    async with session.get(isrc_url, headers=headers, timeout=10) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            recordings = data.get('recordings', [])
-                            if recordings:
-                                for rec in recordings:
-                                    releases = rec.get('releases', [])
-                                    if releases:
-                                        mbid = releases[0].get('id')
-                                        LOGGER.info(f"MusicBrainz ISRC Match Found! MBID: {mbid}")
-                                        break
-                except Exception as e:
-                    LOGGER.debug(f"MusicBrainz ISRC Lookup failed: {e}")
+    # --- PENGAMBIL COVER ITUNES (STUDIO MASTER) ---
+    async def fetch_itunes_cover(self, artist, album):
+        try:
+            # Bersihkan teks agar pencarian iTunes lebih akurat
+            clean_artist = re.sub(r'\(.*?\)', '', artist).strip()
+            clean_album = re.sub(r'\(.*?\)', '', album).strip()
+            term = quote(f"{clean_artist} {clean_album}")
             
-            # 2. JIKA ISRC GAGAL, FALLBACK KE TEXT SEARCH ALBUM
-            if not mbid and artist and album:
-                try:
-                    clean_artist = re.sub(r'\(.*?\)', '', artist).strip()
-                    clean_album = re.sub(r'\(.*?\)', '', album).strip()
-                    query = quote(f'artist:"{clean_artist}" AND release:"{clean_album}"')
-                    search_url = f'https://musicbrainz.org/ws/2/release/?query={query}&fmt=json'
-                    
-                    async with session.get(search_url, headers=headers, timeout=10) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            releases = data.get('releases', [])
-                            if releases:
-                                mbid = releases[0].get('id')
-                                LOGGER.info(f"MusicBrainz Text Match Found! MBID: {mbid}")
-                except Exception as e:
-                    LOGGER.debug(f"MusicBrainz Text Lookup failed: {e}")
-            
-            # 3. RAMPAS GAMBAR RAW DARI COVER ART ARCHIVE
-            if mbid:
-                try:
-                    cover_url = f'https://coverartarchive.org/release/{mbid}'
-                    async with session.get(cover_url, headers=headers, timeout=10) as cover_resp:
-                        if cover_resp.status == 200:
-                            cover_data = await cover_resp.json()
-                            images = cover_data.get('images', [])
-                            for img in images:
-                                # Mengambil URL File Mentah, bukan Thumbnail!
-                                if img.get('front') and img.get('image'):
-                                    LOGGER.info("Sukses merampas file Cover RAW dari MusicBrainz!")
-                                    return img.get('image')
-                except Exception as e:
-                    LOGGER.debug(f"Cover Art Archive failed: {e}")
-                    
+            url = f"https://itunes.apple.com/search?term={term}&entity=album&limit=1"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('resultCount', 0) > 0:
+                            artwork = data['results'][0].get('artworkUrl100')
+                            if artwork:
+                                # Trik 10000x10000bb memaksa CDN Apple memberikan resolusi
+                                # murni yang paling maksimal (tanpa upscale!)
+                                return artwork.replace('100x100bb.jpg', '10000x10000bb.jpg')
+        except Exception as e:
+            from bot.logger import LOGGER
+            LOGGER.debug(f"iTunes cover fallback failed: {e}")
         return None
-    # -------------------------------------------------------------------
+    # -------------------------------------------------------------
 
     async def get_playback_info(self, asin: str, target_quality: str = "UHD"):
         for attempt in range(2):
@@ -409,14 +372,14 @@ class AmazonApi:
                         writers = track_data_obj.get('songWriters')
                         composer = ', '.join(writers) if isinstance(writers, list) else ''
 
-                        # --- STRATEGI PENEMBUSAN COVER MASTER DENGAN ISRC ---
+                        # --- STRATEGI PENEMBUSAN COVER MASTER (ITUNES FIRST) ---
                         album_asin = album_main_obj.get('asin') or album_obj.get('asin')
                         master_cover = None
                         
-                        # 1. Panggil MusicBrainz dengan menyertakan ISRC dari metadata Amazon!
-                        master_cover = await self.fetch_musicbrainz_cover(isrc, albumartist or artist, album)
+                        # 1. PRIORITAS UTAMA: RAMPAS DARI ITUNES API!
+                        master_cover = await self.fetch_itunes_cover(albumartist or artist, album)
                         
-                        # 2. Jika MusicBrainz gagal atau lagu tidak memiliki ISRC, Fallback ke Amazon Search
+                        # 2. Jika gagal di iTunes, baru Fallback ke Tenzing Amazon Search
                         if not master_cover and album_asin and album:
                             master_cover = await self.fetch_master_cover(album, album_asin)
                             
@@ -425,10 +388,10 @@ class AmazonApi:
                             
                         if image:
                             # 3. Proses Akhir Resolusi
-                            if 'coverartarchive.org' in image:
-                                pass # Biarkan URL mentah ini apa adanya
+                            if 'mzstatic.com' in image or 'itunes.apple.com' in image:
+                                pass # Biarkan URL iTunes 10000x10000bb bekerja (Otomatis Max Res)
                             else:
-                                # Hapus modifier untuk memaksa Amazon memberi file Original
+                                # Jika terpaksa pakai Amazon, ambil file mentah (RAW)
                                 image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
             
             # --- 2. PENCARIAN FILE AUDIO (MPD) ---
