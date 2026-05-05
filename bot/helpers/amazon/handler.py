@@ -186,12 +186,22 @@ async def start_album(album_asin: str, user: dict, url: str):
     # Eksekusi paralel yang membungkus UI menjadi "Downloading Album"
     task_results = await run_concurrent_tasks(tasks, update_details, limit=limit_pekerja)
     
-    album_tracks = [res for res in task_results if res]
+    # --- FIX: BONGKAR KEGAGALAN DIAM-DIAM (SILENT FAIL) ---
+    album_tracks = []
+    for index, res in enumerate(task_results, start=1):
+        if isinstance(res, dict):
+            album_tracks.append(res)
+        else:
+            # Jika 'res' bukan dictionary, berarti itu adalah Exception/Error!
+            from bot.logger import LOGGER
+            LOGGER.error(f"Amazon [Track {index}] GAGAL DIUNDUH! Penyebab: {res}")
+            
+            # Anda juga bisa memunculkan peringatan di Telegram jika mau
+            # (Opsional) Biarkan jika hanya ingin melihat di konsol log
+    # --------------------------------------------------------
     
     if not album_tracks:
-        if 'bot_msg' in user:
-            await edit_message(user['bot_msg'], "❌ Gagal: Tidak ada lagu yang berhasil diunduh.")
-        return
+        err_text = "❌ **Gagal Mengunduh Album!**\n\n**Penyebab:** Amazon menolak memberikan file audio. Ini sangat sering terjadi karena **Region Lock** (Anda mencoba mengunduh link dari wilayah JP menggunakan akun Non-JP) atau lagu tersebut belum tersedia di paket langganan Anda."
 
     # Penyiapan Folder & Cover
     album_folder = album_tracks[0].get('folderpath', '') if album_tracks else ''
