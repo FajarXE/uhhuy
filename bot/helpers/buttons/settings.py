@@ -1166,8 +1166,8 @@ def amz_button(quality: dict, user_id: int = None):
     
     display_text_map = {
         "UHD": "UHD (Hi-Res)",
-        "HD": "HD (Lossless/FLAC)",
-        "SD": "SD (Standard MP3/AAC)"
+        "HD": "HD (Lossless)",
+        "SD": "SD (Opus)"
     }
     
     # 1. Bangun tombol pilihan kualitas (UHD, HD, SD)
