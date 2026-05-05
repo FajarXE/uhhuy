@@ -251,10 +251,23 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
     
     try:
         album_data_list = await asyncio.to_thread(client.get_album, album_id)
-        album_data = album_data_list[0].get('album').get('result')
+        
+        # --- TAMBAHAN VALIDASI ---
+        if not album_data_list:
+            raise BugsError(f"Album {album_id} tidak ditemukan. Kemungkinan diblokir region (Geo-block), dihapus, atau butuh verifikasi usia 19+.")
+            
+        album_info = album_data_list[0].get('album')
+        if not album_info or not album_info.get('result'):
+             raise BugsError(f"Data album {album_id} kosong atau tidak valid dari server Bugs.")
+             
+        album_data = album_info.get('result')
         
         tracks_list_data = await asyncio.to_thread(client.get_album_tracks, album_id)
-        tracks_list = tracks_list_data[0].get('album_track').get('list')
+        if not tracks_list_data:
+             raise BugsError(f"Daftar lagu untuk album {album_id} tidak tersedia.")
+             
+        tracks_list = tracks_list_data[0].get('album_track').get('list', [])
+        # --- AKHIR TAMBAHAN VALIDASI ---
         
     except Exception as e:
         LOGGER.error(f"Bugs: Gagal mendapatkan metadata album {album_id}: {e}")
