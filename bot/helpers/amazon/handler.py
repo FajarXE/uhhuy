@@ -175,10 +175,14 @@ async def start_album(album_asin: str, user: dict, url: str):
         'type': 'Album'
     }
     
+    # --- FIX: Paksa penomoran sesuai urutan indeks di album ---
     tasks = []
-    for t_asin in track_asins:
+    total_lagu = len(track_asins)
+    for index, t_asin in enumerate(track_asins, start=1):
         # Panggil start_track dengan upload=False agar tidak membuat UI "Download Track" mandiri
-        tasks.append(start_track(t_asin, user, url, upload=False))
+        # Kirimkan indeks asli sebagai forced_track_num
+        tasks.append(start_track(t_asin, user, url, upload=False, forced_track_num=index, forced_total_tracks=total_lagu))
+    # ------------------------------------------------------------
         
     # Konfigurasi batas paralel (Sequential vs Concurrent)
     limit_pekerja = Config.MAX_WORKERS if getattr(bot_set, 'playlist_conc', True) else 1
@@ -265,7 +269,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     from bot.helpers.uploder import album_upload
     await album_upload(album_metadata, user)
 
-async def start_track(asin: str, user: dict, url: str, upload=True):
+async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None):
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
     
@@ -323,8 +327,9 @@ async def start_track(asin: str, user: dict, url: str, upload=True):
         'artist': manifest_data.get('artist', 'Unknown Artist'),
         'album': raw_album,
         'albumartist': manifest_data.get('albumartist', 'Unknown Artist'),
-        'tracknumber': manifest_data.get('tracknumber', 1),
-        'totaltracks': manifest_data.get('totaltracks', 1),
+        # --- FIX: Gunakan nomor paksaan dari Album jika tersedia ---
+        'tracknumber': forced_track_num if forced_track_num else manifest_data.get('tracknumber', 1),
+        'totaltracks': forced_total_tracks if forced_total_tracks else manifest_data.get('totaltracks', 1),
         'discnumber': manifest_data.get('discnumber', 1),
         
         # --- Pemetaan Volume & Explicit untuk file Audio ---
