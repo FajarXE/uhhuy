@@ -274,7 +274,7 @@ def providers_button():
             ]
         )
 
-    if amazon_manager and (getattr(amazon_manager, 'global_clients', []) or getattr(amazon_manager, 'clients', [])):
+    if amazon_manager:
         inline_keyboard.append(
             [
                 InlineKeyboardButton(
@@ -1186,19 +1186,37 @@ def amz_button(quality: dict, user_id: int = None):
             buttons.append(row)
             row = []
             
-    if usetting:
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)])
-        buttons.append(
-            [
-                InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
-            ]
-        )
-        return InlineKeyboardMarkup(buttons)
+        if usetting:
+            buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)])
+            buttons.append(
+                [
+                    InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
+                ]
+            )
+            return InlineKeyboardMarkup(buttons)
+            
+        # --- TAMBAHKAN BARIS INI UNTUK MENU ADMIN ---
+        buttons.append([InlineKeyboardButton("🔐 GLOBAL ACCOUNTS (Multi-Region)", callback_data="amzAuth", style=ButtonStyle.PRIMARY)])
+        # --------------------------------------------
         
-    main_button, close_button = fetch_base_buttons()
-    buttons += main_button + close_button
+        main_button, close_button = fetch_base_buttons()
+        buttons += main_button + close_button
+        return InlineKeyboardMarkup(buttons)
+
+def amazon_global_auth_buttons(active_clients: list):
+    buttons = []
+    if active_clients:
+        buttons.append([InlineKeyboardButton("🔻 CLICK BELOW TO DELETE 🔻", callback_data="ignore")])
+        for client in active_clients:
+            uid = client.tokens.get('customerId', 'Unknown')
+            region = client.region.upper()
+            btn_text = f"🗑️ {region} - {uid}"
+            buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"amzRemove_{uid}", style=ButtonStyle.DANGER)])
+            
+    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="amzP", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
+        
 def khi_button(quality: dict, user_id: int = None):
     buttons = []
     usetting = user_id is not None
