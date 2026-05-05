@@ -1375,7 +1375,8 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text=f"Khinsider Quality", callback_data=f"uset_khinsider")])
 
     if amazon_manager:
-        if getattr(amazon_manager, 'global_clients', []) or amazon_manager.has_private_session(user_id):
+        # Gunakan 'clients' (bukan 'global_clients') sesuai dengan file manager.py Anda
+        if getattr(amazon_manager, 'clients', []) or amazon_manager.has_private_session(user_id):
             buttons.append([InlineKeyboardButton(text=f"Amazon Quality", callback_data=f"uset_amazon")])
 
     buttons.append([InlineKeyboardButton(text="🔁 Switch Upload Mode", callback_data="uset_upload_mode")])
