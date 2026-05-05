@@ -718,3 +718,155 @@ async def khinsider_qual_cb(c, cb:CallbackQuery):
         khinsider_manager.quality = to_set
         await database.set_variable("KHINSIDER_QUALITY", to_set)
         await khinsider_cb(c, cb)
+
+
+#----------------
+# AMAZON MUSIC (GLOBAL ADMIN)
+#----------------
+@Client.on_callback_query(filters.regex(pattern=r"^amzP"))
+async def amazon_cb(c, cb:CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        quality = {
+            "UHD": "UHD (Hi-Res)",
+            "HD": "HD (Lossless/FLAC)",
+            "SD": "SD (Standard MP3/AAC)"
+        }
+        if not amazon_manager:
+            return await edit_message(cb.message, "Layanan Amazon Music tidak aktif.")
+        
+        current = getattr(amazon_manager, 'quality', 'HD')
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+        
+        await edit_message(
+            cb.message,
+            "**AMAZON MUSIC PANEL (GLOBAL)**\n\nPilih kualitas default bot:",
+            markup=amz_button(quality)
+        )
+
+@Client.on_callback_query(filters.regex(pattern=r"^amzQ"))
+async def amazon_quality_cb(c, cb:CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        qual_map_display = {
+            "UHD (Hi-Res)": "UHD",
+            "HD (Lossless/FLAC)": "HD",
+            "SD (Standard MP3/AAC)": "SD"
+        }
+        to_set_display = cb.data.split('_')[1]
+        to_set = qual_map_display.get(to_set_display)
+        if not to_set:
+            return await c.answer_callback_query(cb.id, "Kualitas tidak valid.", True)
+        
+        amazon_manager.quality = to_set
+        await database.set_variable('AMAZON_QUALITY', to_set)
+        await amazon_cb(c, cb)
+
+@Client.on_callback_query(filters.regex(pattern=r"^amzAuth"))
+async def amazon_auth_cb(c, cb:CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        clients = getattr(amazon_manager, 'clients', [])
+        text = f"🔐 **PENGATURAN AKUN AMAZON (GLOBAL)**\n\n"
+        
+        if not clients:
+            text += "❌ **Tidak ada akun aktif.**\nSilakan tambahkan akun dengan mengirimkan perintah:\n`/amazon_global <region>`\nContoh: `/amazon_global jp`"
+        else:
+            text += f"✅ **{len(clients)} Akun Aktif**\n"
+            for i, client in enumerate(clients):
+                region = client.region.upper()
+                uid = client.tokens.get('customerId', 'Unknown')
+                text += f"**{i+1}. Region:** `{region}` | **ID:** `{uid}`\n"
+            
+            text += "\n👇 **Klik tombol di bawah untuk menghapus akun.**\n*(Gunakan perintah /amazon_global <region> untuk menambah akun baru)*"
+        
+        from bot.helpers.buttons.settings import amazon_global_auth_buttons
+        await edit_message(cb.message, text, markup=amazon_global_auth_buttons(clients))
+
+@Client.on_callback_query(filters.regex(pattern=r"^amzRemove_(.+)"))
+async def amazon_remove_cb(c, cb:CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        target_uid = cb.matches[0].group(1)
+        
+        all_settings = await database.get_variable()
+        accounts_list = all_settings.get("AMAZON_ACCOUNTS_LIST", [])
+        new_list = [acc for acc in accounts_list if acc.get('tokens', {}).get('customerId') != target_uid]
+        
+        await database.set_variable('AMAZON_ACCOUNTS_LIST', new_list)
+        await amazon_manager.initialize_clients()
+        
+        await c.answer_callback_query(cb.id, f"✅ Akun {target_uid} dihapus.", True)
+        await amazon_auth_cb(c, cb)
+
+PENDING_AMAZON_GLOBAL_AUTH = {}
+
+@Client.on_message(filters.command("amazon_global"))
+async def amz_global_auth_cmd(client, message):
+    if not await check_user(message.from_user.id, restricted=True): return
+    
+    args = message.text.split()
+    region = args[1].lower() if len(args) > 1 else "us"
+    valid_regions = ["us", "jp", "uk", "de", "fr", "mx", "br"]
+    if region not in valid_regions:
+        return await message.reply_text(f"❌ Region tidak valid. Pilih salah satu: {', '.join(valid_regions)}")
+        
+    msg = await message.reply_text("🔄 **Meminta kode TV dari Amazon (GLOBAL)...**")
+    from bot.helpers.amazon.amazon_api import AmazonApi
+    amz_api = AmazonApi(region=region)
+    
+    try:
+        public_code, register_code, activation_url = await amz_api.get_tv_device_code()
+        PENDING_AMAZON_GLOBAL_AUTH[message.from_user.id] = {
+            "api": amz_api,
+            "register_code": register_code,
+            "region": region
+        }
+        
+        text = (
+            f"🔐 **AMAZON MUSIC TV LOGIN (GLOBAL - {region.upper()})**\n\n"
+            f"1️⃣ Buka tautan: {activation_url}\n"
+            f"2️⃣ Masukkan kode ini: <code>{public_code}</code>\n"
+            f"3️⃣ Tekan tombol **Allow / Izinkan** di web Amazon\n"
+            f"4️⃣ Jika sudah selesai, tekan tombol di bawah ini."
+        )
+        from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        buttons = [[InlineKeyboardButton("✅ Selesai (Simpan Global)", callback_data="amz_global_verify")]]
+        await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception as e:
+        await amz_api.close()
+        await msg.edit_text(f"❌ **Error:**\n`{str(e)[:400]}`")
+
+@Client.on_callback_query(filters.regex("^amz_global_verify"))
+async def amz_global_verify_cb(client, query):
+    if not await check_user(query.from_user.id, restricted=True): return
+    user_id = query.from_user.id
+    
+    if user_id not in PENDING_AMAZON_GLOBAL_AUTH:
+        return await query.answer("Sesi kadaluarsa. Ketik ulang /amazon_global", show_alert=True)
+        
+    await query.answer("Memverifikasi login Global...", show_alert=False)
+    auth_data = PENDING_AMAZON_GLOBAL_AUTH[user_id]
+    amz_api = auth_data["api"]
+    
+    try:
+        tokens = await amz_api.poll_tv_auth(auth_data["register_code"])
+        if not tokens:
+            return await query.message.reply_text("❌ Verifikasi gagal. Anda belum menekan Allow.")
+            
+        await amz_api.close()
+        account_data = {"region": auth_data["region"], "tokens": tokens}
+        
+        all_settings = await database.get_variable()
+        accounts_list = all_settings.get("AMAZON_ACCOUNTS_LIST", [])
+        
+        if not any(acc.get('tokens', {}).get('customerId') == tokens.get('customerId') for acc in accounts_list):
+            accounts_list.append(account_data)
+            await database.set_variable('AMAZON_ACCOUNTS_LIST', accounts_list)
+            await amazon_manager.initialize_clients() # Refresh Manager
+            await query.message.edit_text(f"✅ **Login Global Berhasil!**\nAkun Region {auth_data['region'].upper()} ditambahkan ke Database Pusat.\n\nKini semua pengguna bot bisa menikmati unduhan melalui akun ini.")
+        else:
+            await query.message.edit_text("⚠️ Akun ini sudah ada di daftar Global bot.")
+            
+        del PENDING_AMAZON_GLOBAL_AUTH[user_id]
+    except Exception as e:
+        if not amz_api.session.closed: await amz_api.close()
+        if user_id in PENDING_AMAZON_GLOBAL_AUTH: del PENDING_AMAZON_GLOBAL_AUTH[user_id]
+        await query.message.reply_text(f"❌ **Error:** {str(e)[:400]}")
