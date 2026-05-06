@@ -106,6 +106,18 @@ async def start_album(album_asin: str, user: dict, url: str):
         lookup_base, api_loc, music_territory = "https://music.amazon.com.mx/", "NA", "MX"
     elif 'amazon.com.br' in domain:
         lookup_base, api_loc, music_territory = "https://music.amazon.com.br/", "NA", "BR"
+    elif 'amazon.com.au' in domain:
+        lookup_base, api_loc, music_territory = "https://music.amazon.com.au/", "FE", "AU"
+    elif 'amazon.ca' in domain:
+        lookup_base, api_loc, music_territory = "https://music.amazon.ca/", "NA", "CA"
+    elif 'amazon.it' in domain:
+        lookup_base, api_loc, music_territory = "https://music.amazon.it/", "EU", "IT"
+    elif 'amazon.es' in domain:
+        lookup_base, api_loc, music_territory = "https://music.amazon.es/", "EU", "ES"
+    elif 'amazon.com.ar' in domain:
+        lookup_base, api_loc, music_territory = "https://music.amazon.com.ar/", "NA", "AR"
+    elif 'amazon.in' in domain:
+        lookup_base, api_loc, music_territory = "https://music.amazon.in/", "EU", "IN"
     elif 'amazon.com' in domain:
         lookup_base, api_loc, music_territory = "https://music.amazon.com/", "NA", "US"
 
