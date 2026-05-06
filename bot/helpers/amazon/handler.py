@@ -112,7 +112,7 @@ async def start_amazon(url: str, user: dict):
 
 async def start_album(album_asin: str, user: dict, url: str):
     # --- FIX: CURI ASIN GLOBAL SEBELUM MEMANGGIL API ---
-    asin = await get_global_asin(url, current_asin=asin)
+    album_asin = await get_global_asin(url, current_asin=album_asin)
     # ---------------------------------------------------
     LOGGER.info(f"Amazon: Mengambil info Album {album_asin}")
     user_id = user.get('user_id')
@@ -299,7 +299,7 @@ async def start_album(album_asin: str, user: dict, url: str):
 
 async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None, forced_album_title=None):
     # --- FIX: CURI ASIN GLOBAL SEBELUM MEMANGGIL API ---
-    asin = await get_global_asin(url, current_asin=asin)
+    track_asin = await get_global_asin(url, current_asin=track_asin)
     # ---------------------------------------------------
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
