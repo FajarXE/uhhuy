@@ -90,36 +90,13 @@ async def start_album(album_asin: str, user: dict, url: str):
     
     domain = urlparse.urlparse(url).netloc.lower()
     
+    # --- FIX: PERCAYAKAN 100% PADA REGION AKUN (JANGAN TERTIPU DOMAIN URL) ---
     lookup_base = client.base_url
     api_loc = client.api_location
     music_territory = client.region.upper()
     
-    if 'amazon.fr' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.fr/", "EU", "FR"
-    elif 'amazon.co.jp' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.co.jp/", "FE", "JP"
-    elif 'amazon.co.uk' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.co.uk/", "EU", "UK"
-    elif 'amazon.de' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.de/", "EU", "DE"
-    elif 'amazon.com.mx' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.com.mx/", "NA", "MX"
-    elif 'amazon.com.br' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.com.br/", "NA", "BR"
-    elif 'amazon.com.au' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.com.au/", "FE", "AU"
-    elif 'amazon.ca' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.ca/", "NA", "CA"
-    elif 'amazon.it' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.it/", "EU", "IT"
-    elif 'amazon.es' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.es/", "EU", "ES"
-    elif 'amazon.com.ar' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.com.ar/", "NA", "AR"
-    elif 'amazon.in' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.in/", "EU", "IN"
-    elif 'amazon.com' in domain:
-        lookup_base, api_loc, music_territory = "https://music.amazon.com/", "NA", "US"
+    # (Seluruh blok 'if amazon.fr in domain' hingga 'elif amazon.com in domain' DIHAPUS)
+    # ------------------------------------------------------------------------
 
     lookup_url = f"{lookup_base}{api_loc}/api/muse/legacy/lookup"
     
