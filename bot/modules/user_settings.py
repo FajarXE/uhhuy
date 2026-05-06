@@ -984,7 +984,7 @@ async def amz_tv_auth_cmd(client, message):
         await msg.edit_text(f"❌ **Gagal mendapatkan kode TV:**\n`{error_msg}`")
 
 
-# --- HANDLER VERIFIKASI LOGIN ---
+# --- HANDLER VERIFIKASI LOGIN (MULTI-ACCOUNT) ---
 @Client.on_callback_query(filters.regex("^amz_auth_verify"))
 async def amz_auth_verify_cb(client, query):
     user_id = query.from_user.id
@@ -1000,87 +1000,143 @@ async def amz_auth_verify_cb(client, query):
     region = auth_data["region"]
     
     try:
-        # 1. Lakukan Polling untuk mengecek apakah user sudah tekan 'Allow'
+        # 1. Polling ke Amazon untuk cek apakah user sudah klik 'Allow'
         tokens = await amz_api.poll_tv_auth(register_code)
         
         if not tokens:
-            # User mungkin belum menekan Allow, jangan tutup sesi dulu agar mereka bisa mencoba lagi
             return await query.message.reply_text("❌ **Verifikasi gagal.** Anda belum memasukkan kode atau menekan Allow di web Amazon.")
 
-        # 2. Jika sukses, segera tutup sesi HTTP untuk mencegah kebocoran koneksi
+        # 2. Segera tutup sesi HTTP API
         await amz_api.close() 
 
         from bot.helpers.database.mongo_async import database
         from bot.helpers.amazon.manager import amazon_manager
         
-        account_data = {
-            "region": region,
-            "tokens": tokens
-        }
+        account_data = {"region": region, "tokens": tokens}
+        customer_id = tokens.get('customerId')
         
-        # 3. Simpan permanen ke database dan aktifkan di memori bot
-        await database.save_user_settings(user_id, {'amazon_account': account_data})
+        # --- LOGIKA MULTI-ACCOUNT: Ambil daftar akun yang sudah ada ---
+        user_data_mem = bot_set.user_data.setdefault(user_id, {})
+        accounts_list = user_data_mem.get('amazon_accounts', [])
         
-        if amazon_manager and hasattr(amazon_manager, 'add_user_account'):
-            await amazon_manager.add_user_account(user_id, account_data)
+        # Migrasi data jika pengguna masih menggunakan format akun tunggal lama
+        if not accounts_list and user_data_mem.get('amazon_account'):
+            accounts_list = [user_data_mem['amazon_account']]
             
-        await query.message.edit_text(
-            f"✅ **Login Berhasil!**\n"
-            f"Sesi Private Amazon Music (Region: {region.upper()}) Anda telah disimpan. "
-            f"Bot sekarang akan menggunakan akun Anda untuk mengunduh lagu."
-        )
-        
-        # Bersihkan antrean memori
+        # 3. Cek Duplikasi: Jangan masukkan jika Customer ID sudah terdaftar
+        if not any(acc.get('tokens', {}).get('customerId') == customer_id for acc in accounts_list):
+            accounts_list.append(account_data)
+            
+            # Update memori bot
+            user_data_mem['amazon_accounts'] = accounts_list
+            user_data_mem['amazon_account'] = None  # Nonaktifkan format lama
+            
+            # Simpan permanen ke Database
+            await database.save_user_settings(user_id, {
+                'amazon_accounts': accounts_list,
+                'amazon_account': None
+            })
+            
+            # Daftarkan ke Manager agar bisa langsung dipakai unduh
+            if amazon_manager and hasattr(amazon_manager, 'add_user_account'):
+                await amazon_manager.add_user_account(user_id, account_data)
+                
+            await query.message.edit_text(
+                f"✅ **Login Berhasil!**\n"
+                f"Sesi Private Amazon Music (Region: {region.upper()}) telah ditambahkan ke daftar akun Anda.\n\n"
+                f"Bot akan menggunakan akun-akun Anda secara bergantian untuk setiap unduhan."
+            )
+        else:
+            await query.message.edit_text("⚠️ **Akun ini sudah ada** di daftar Sesi Private Anda.")
+            
+        # Bersihkan antrean login
         del PENDING_AMAZON_AUTH[user_id]
         
     except Exception as e:
-        # [FIX] Tutup sesi jika terjadi error tak terduga (misal: koneksi terputus/DB error)
         if 'amz_api' in locals() and not amz_api.session.closed:
             await amz_api.close()
-            
         if user_id in PENDING_AMAZON_AUTH:
             del PENDING_AMAZON_AUTH[user_id]
-            
         await query.message.reply_text(f"❌ **Terjadi kesalahan saat menyimpan sesi:** {str(e)[:400]}")
 
-# 2. CALLBACK MENU AUTH
+
+# 2. CALLBACK MENU AUTH (MULTI-ACCOUNT)
 @Client.on_callback_query(filters.regex("^uamz_auth"))
 async def uset_amz_auth_handler(client, query):
     if not await check_user(msg=query.message):
         return
     
     user_id = query.from_user.id
-    has_session = amazon_manager.has_private_session(user_id)
     
-    text = "🔐 **AMAZON MUSIC PRIVATE SESSION**\n\n"
+    # Ambil list akun dari memori
+    user_data_mem = bot_set.user_data.get(user_id, {})
+    accounts_list = user_data_mem.get('amazon_accounts', [])
     
-    if has_session:
-        text += f"✅ **Status: LOGGED IN**\n"
-        text += "Bot menggunakan akun Amazon pribadi Anda untuk melewati restriksi Region.\n"
+    # Fallback migrasi jika user masih memakai format akun lama
+    if not accounts_list and user_data_mem.get('amazon_account'):
+        accounts_list = [user_data_mem['amazon_account']]
+        user_data_mem['amazon_accounts'] = accounts_list
+        
+    text = "🔐 **AMAZON MUSIC PRIVATE SESSION (MULTI-ACCOUNT)**\n\n"
+    
+    if accounts_list:
+        text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
+        text += "Bot akan menggunakan akun-akun ini secara bergantian (Load Balancing).\n\n"
+        
+        # Tampilkan detail setiap akun
+        for i, acc in enumerate(accounts_list):
+            region = acc.get('region', '??').upper()
+            uid = acc.get('tokens', {}).get('customerId', 'Unknown')
+            text += f"**{i+1}. Region:** `{region}` | **ID:** `{uid}`\n"
+            
+        text += "\n👇 **Klik tombol di bawah untuk menghapus akun tertentu.**"
     else:
         text += "❌ **Status: NOT LOGGED IN**\n"
         text += "Bot menggunakan akun Global (Shared) untuk Anda jika tersedia.\n"
 
-    await edit_message(query.message, text, markup=amazon_user_auth_buttons(has_session))
+    # Panggil tombol menu dengan menyertakan accounts_list
+    await edit_message(query.message, text, markup=amazon_user_auth_buttons(accounts_list))
 
-# 3. CALLBACK LOGOUT
-@Client.on_callback_query(filters.regex("^uamz_logout"))
-async def uset_amz_logout_handler(client, query):
-    if not await check_user(msg=query.message):
-        return
-        
-    user_id = query.from_user.id
-    if amazon_manager.has_private_session(user_id):
-        # Asumsikan manager memiliki fungsi remove_user_account
-        try:
-            await amazon_manager.remove_user_account(user_id)
-        except:
-            pass
-        await query.answer("✅ Sesi Amazon Music dihapus. Kembali ke mode Global.", True)
-    else:
-        await query.answer("Anda belum login.", True)
+
+# 3. CALLBACK DELETE SPECIFIC ACCOUNT (MENGGANTIKAN LOGOUT)
+@Client.on_callback_query(filters.regex(r"^uamz_rm_(.+)"))
+async def uset_amz_remove_specific(client, query):
+    if not await check_user(msg=query.message): return
     
+    user_id = query.from_user.id
+    target_uid = query.matches[0].group(1) # Mengambil target ID dari callback
+    
+    user_data_mem = bot_set.user_data.get(user_id, {})
+    accounts_list = user_data_mem.get('amazon_accounts', [])
+    
+    # Fallback migrasi
+    if not accounts_list and user_data_mem.get('amazon_account'):
+        accounts_list = [user_data_mem['amazon_account']]
+        
+    # Buat list baru yang TIDAK berisi akun yang ingin dihapus
+    new_list = [acc for acc in accounts_list if acc.get('tokens', {}).get('customerId') != target_uid]
+    
+    # Update memori bot
+    user_data_mem['amazon_accounts'] = new_list
+    user_data_mem['amazon_account'] = None
+    
+    # Update Database permanen
+    await database.save_user_settings(user_id, {
+        'amazon_accounts': new_list,
+        'amazon_account': None
+    })
+    
+    # Update ke Manager (agar file manager.py berhenti menggunakan sesi tersebut)
+    try:
+        if hasattr(amazon_manager, 'remove_specific_user_account'):
+            await amazon_manager.remove_specific_user_account(user_id, target_uid)
+    except: pass
+    
+    await query.answer(f"✅ Akun berhasil dihapus.", True)
+    
+    # Refresh menu
     await uset_amz_auth_handler(client, query)
+
 
 # 4. CALLBACK INSTRUKSI
 @Client.on_callback_query(filters.regex("^uamz_instr"))
