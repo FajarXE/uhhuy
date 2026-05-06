@@ -45,11 +45,16 @@ def get_status_text(page=1, limit=5):
     for k, v in list(GLOBAL_TASKS.items()):
         action = str(v.get('action', '')).lower()
         
-        if 'zipping' in action or 'processing' in action or 'connecting' in action or 'fetching' in action:
-            v['timestamp'] = current_time
-            continue
+        # --- FIX: Cabut kekebalan abadi (immortality) dari Ghost Task ---
+        # Zipping kita beri batas waktu 15 menit (900 detik) jika ukuran file raksasa.
+        # Fetching/Processing/Connecting normal maksimal 2 menit (120 detik).
+        if 'zipping' in action:
+            time_limit = 900 
+        else:
+            time_limit = 120 
             
-        if current_time - v.get('timestamp', current_time) > 120:
+        # Jika task diam lebih lama dari time_limit, anggap mati dan buang!
+        if current_time - v.get('timestamp', current_time) > time_limit:
             stale.append(k)
             
     for k in stale:
