@@ -298,9 +298,6 @@ async def start_album(album_asin: str, user: dict, url: str):
     await album_upload(album_metadata, user)
 
 async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None, forced_album_title=None):
-    # --- FIX: CURI ASIN GLOBAL SEBELUM MEMANGGIL API ---
-    track_asin = await get_global_asin(url, current_asin=track_asin)
-    # ---------------------------------------------------
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
     
