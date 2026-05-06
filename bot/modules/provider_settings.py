@@ -807,7 +807,7 @@ async def amz_global_auth_cmd(client, message):
     
     args = message.text.split()
     region = args[1].lower() if len(args) > 1 else "us"
-    valid_regions = ["us", "jp", "uk", "de", "fr", "mx", "br"]
+    valid_regions = ["us", "jp", "uk", "de", "fr", "mx", "br", "au", "nz", "ca", "it", "es", "ar", "in"]
     if region not in valid_regions:
         return await message.reply_text(f"❌ Region tidak valid. Pilih salah satu: {', '.join(valid_regions)}")
         
