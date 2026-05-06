@@ -1146,14 +1146,18 @@ def hra_button(user_id: int = None):
 # AMAZON MUSIC BUTTONS (PRIVATE ACCOUNT)
 # ==========================================
 
-def amazon_user_auth_buttons(is_logged_in: bool):
+def amazon_user_auth_buttons(accounts_list: list):
     buttons = []
     
-    if is_logged_in:
-        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uamz_logout", style=ButtonStyle.DANGER)])
-    else:
-        # Menggunakan alur TV Code
-        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT (TV CODE)", callback_data="uamz_instr", style=ButtonStyle.SUCCESS)])
+    if accounts_list:
+        buttons.append([InlineKeyboardButton("🔻 CLICK BELOW TO DELETE 🔻", callback_data="ignore")])
+        for acc in accounts_list:
+            region = acc.get('region', '??').upper()
+            uid = acc.get('tokens', {}).get('customerId', 'Unknown')
+            btn_text = f"🗑️ {region} - {uid}"
+            buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"uamz_rm_{uid}", style=ButtonStyle.DANGER)])
+            
+    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT (TV CODE)", callback_data="uamz_instr", style=ButtonStyle.SUCCESS)])
         
     buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_amazon", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
