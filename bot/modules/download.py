@@ -387,14 +387,14 @@ async def run_download_task(link: str, user: dict):
             task_successful = True
                 
         except asyncio.CancelledError:
-            from bot.logger import LOGGER
+            # HAPUS BARIS INI: from bot.logger import LOGGER
             LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan.")
             try: await edit_message(user['bot_msg'], "🛑 Tugas dibatalkan.")
             except: pass
             await asyncio.sleep(5) 
                 
         except Exception as e:
-            from bot.logger import LOGGER
+            # HAPUS BARIS INI: from bot.logger import LOGGER
             import traceback
             error_str = str(e)
             is_handled_error = False
@@ -1002,11 +1002,11 @@ async def start_link(link: str, user: dict) -> None:
             
         try:
             await start_amazon(link, user)
-            from bot.logger import LOGGER
+            # HAPUS BARIS INI: from bot.logger import LOGGER
             LOGGER.info("Amazon Music: Unduhan berhasil.")
             return
         except Exception as e:
-            from bot.logger import LOGGER
+            # HAPUS BARIS INI: from bot.logger import LOGGER
             LOGGER.error(f"Amazon Music Gagal: {e}")
             raise e
 
