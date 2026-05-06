@@ -116,7 +116,9 @@ async def start_album(album_asin: str, user: dict, url: str):
     # ---------------------------------------------------
     LOGGER.info(f"Amazon: Mengambil info Album {album_asin}")
     user_id = user.get('user_id')
-    client = user.get('amazon_api') or amazon_manager.get_client(user_id)
+    # --- FIX: Paksa Manager membaca URL agar tidak salah region ---
+    client = user.get('amazon_api') or amazon_manager.get_client(user_id, url=url)
+    # -------------------------------------------------------------
     
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
@@ -299,7 +301,9 @@ async def start_album(album_asin: str, user: dict, url: str):
 
 async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None, forced_album_title=None):
     user_id = user.get('user_id')
-    client = user.get('amazon_api') or amazon_manager.get_client(user_id)
+    # --- FIX: Paksa Manager membaca URL agar tidak salah region ---
+    client = user.get('amazon_api') or amazon_manager.get_client(user_id, url=url)
+    # -------------------------------------------------------------
     
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
