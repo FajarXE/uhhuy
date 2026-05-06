@@ -434,6 +434,12 @@ def build_codec_choices_from_mpd(mpd_text):
 REGION_FROM_DOMAIN = {
     "music.amazon.com.mx": "mx",
     "music.amazon.com.br": "br",
+    "music.amazon.com.ar": "ar",
+    "music.amazon.com.au": "au",
+    "music.amazon.ca": "ca",
+    "music.amazon.it": "it",
+    "music.amazon.es": "es",
+    "music.amazon.in": "in",
     "music.amazon.com": "us",
     "music.amazon.fr": "fr",
     "music.amazon.co.jp": "jp",
@@ -449,16 +455,30 @@ BASE_URLS = {
     "jp": "https://music.amazon.co.jp/",
     "uk": "https://music.amazon.co.uk/",
     "de": "https://music.amazon.de/",
+    "au": "https://music.amazon.com.au/",
+    "nz": "https://music.amazon.com.au/",
+    "ca": "https://music.amazon.ca/",
+    "it": "https://music.amazon.it/",
+    "es": "https://music.amazon.es/",
+    "ar": "https://music.amazon.com.ar/",
+    "in": "https://music.amazon.in/",
 }
 
 API_LOCATION_BY_REGION = {
     "mx": "NA",
     "br": "NA",
     "us": "NA",
+    "ca": "NA",
+    "ar": "NA",
     "fr": "EU",
     "de": "EU",
     "uk": "EU",
+    "it": "EU",
+    "es": "EU",
+    "in": "EU",
     "jp": "FE",
+    "au": "FE",
+    "nz": "FE",
 }
 
 TVMESK_BY_LOCATION = {
