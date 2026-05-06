@@ -27,14 +27,28 @@ class AmazonApi:
             "jp": "https://music.amazon.co.jp/",
             "uk": "https://music.amazon.co.uk/",
             "de": "https://music.amazon.de/",
+            "au": "https://music.amazon.com.au/",
+            "nz": "https://music.amazon.com.au/",
+            "ca": "https://music.amazon.ca/",
+            "it": "https://music.amazon.it/",
+            "es": "https://music.amazon.es/",
+            "ar": "https://music.amazon.com.ar/",
+            "in": "https://music.amazon.in/",
         }
         
         self.marketplaces = {
             "mx": "ART4WZ8MWBX2Y", "br": "A2Q3Y263D00KWC", "fr": "A13V1IB3VIYZZH",
-            "us": "ATVPDKIKX0DER", "jp": "A1VC38T7YXB528", "uk": "A1F83G8C2ARO7P", "de": "A1PA6795UKMFR9"
+            "us": "ATVPDKIKX0DER", "jp": "A1VC38T7YXB528", "uk": "A1F83G8C2ARO7P", "de": "A1PA6795UKMFR9",
+            "au": "A15PK738MTQHSO", "nz": "A15PK738MTQHSO",
+            "ca": "A2EUQ1WTGCTBG2", "it": "APJ6JZADPQ8N9", "es": "A1RKKUPIHCS9HS",
+            "ar": "ATVPDKIKX0DER", "in": "A21TJRUUN4KGV"
         }
         
-        api_locations = {"NA": ["br", "mx", "us"], "EU": ["fr", "de", "uk"], "FE": ["jp"]}
+        api_locations = {
+            "NA": ["br", "mx", "us", "ca", "ar"], 
+            "EU": ["fr", "de", "uk", "it", "es", "in"], 
+            "FE": ["jp", "au", "nz"]
+        }
         api_urls = {"NA": "na.tvmesk.skill.music.a2z.com", "EU": "eu.tvmesk.skill.music.a2z.com", "FE": "fe.tvmesk.skill.music.a2z.com"}
         
         self.base_url = self.base_urls.get(self.region, self.base_urls["us"])
