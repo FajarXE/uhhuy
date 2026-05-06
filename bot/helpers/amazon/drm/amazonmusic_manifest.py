@@ -513,12 +513,17 @@ if not album_url:
 
 parsed_url = urlparse(album_url)
 domain = parsed_url.netloc.lower()
+url_path = parsed_url.path.lower()
 region = None
 
-for known_domain, known_region in REGION_FROM_DOMAIN.items():
-    if domain == known_domain or domain.endswith("." + known_domain):
-        region = known_region
-        break
+# --- FIX: Deteksi sub-jalur khusus Argentina (/en-ar, /es-ar) ---
+if domain == "music.amazon.com" and "-ar" in url_path:
+    region = "ar"
+else:
+    for known_domain, known_region in REGION_FROM_DOMAIN.items():
+        if domain == known_domain or domain.endswith("." + known_domain):
+            region = known_region
+            break
 
 if not region:
     log.error("Region not detected")
