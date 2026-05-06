@@ -46,6 +46,39 @@ def parse_license_and_get_keys(cdm, session_id, license_b64):
     cdm.close(session_id)
     return keys
 
+async def get_global_asin(url: str, current_asin: str) -> str:
+    """Mengunjungi tautan secara anonim untuk mengekstrak ASIN Global (Shared Catalog)."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            # Kunjungi web tanpa cookie/token apapun (Mode Incognito)
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    import re
+                    
+                    # 1. Cari ASIN Global di URL Canonical / OpenGraph
+                    matches = re.findall(r'(?:albums|tracks|playlists)/(B0[A-Z0-9]{8})', html)
+                    if matches:
+                        LOGGER.info(f"Amazon Scraper: Menemukan ASIN Global dari URL -> {matches[0]}")
+                        return matches[0]
+                        
+                    # 2. Fallback: Cari ASIN Global di dalam state JSON halaman
+                    matches_json = re.findall(r'"asin":"(B0[A-Z0-9]{8})"', html)
+                    if matches_json:
+                        LOGGER.info(f"Amazon Scraper: Menemukan ASIN Global dari JSON -> {matches_json[0]}")
+                        return matches_json[0]
+    except Exception as e:
+        LOGGER.debug(f"Amazon Scraper Gagal (Abaikan): {e}")
+        pass
+        
+    # Jika gagal mencuri (misal karena diblokir WAF/Captcha), kembalikan ASIN aslinya
+    return current_asin
+
 async def amazon_convert_only(input_path, final_path):
     cmd = ['ffmpeg', '-y', '-i', input_path, '-map', '0:a:0', '-c:a', 'copy', final_path]
     LOGGER.info(f"Amazon FFmpeg CMD: {' '.join(cmd)}")
@@ -78,6 +111,9 @@ async def start_amazon(url: str, user: dict):
         await start_track(asin, user, url)
 
 async def start_album(album_asin: str, user: dict, url: str):
+    # --- FIX: CURI ASIN GLOBAL SEBELUM MEMANGGIL API ---
+    asin = await get_global_asin(url, current_asin=asin)
+    # ---------------------------------------------------
     LOGGER.info(f"Amazon: Mengambil info Album {album_asin}")
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
@@ -262,6 +298,9 @@ async def start_album(album_asin: str, user: dict, url: str):
     await album_upload(album_metadata, user)
 
 async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None, forced_album_title=None):
+    # --- FIX: CURI ASIN GLOBAL SEBELUM MEMANGGIL API ---
+    asin = await get_global_asin(url, current_asin=asin)
+    # ---------------------------------------------------
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id)
     
