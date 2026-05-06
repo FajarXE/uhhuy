@@ -106,7 +106,11 @@ class AmazonManager:
         """Mengambil client cerdas dengan Filter Region berdasarkan URL."""
         target_region = None
         if url:
-            domain = urllib.parse.urlparse(url).netloc.lower()
+            # Pisahkan domain dan jalurnya
+            parsed_url = urllib.parse.urlparse(url)
+            domain = parsed_url.netloc.lower()
+            url_path = parsed_url.path.lower()
+            
             if 'amazon.co.jp' in domain: target_region = 'jp'
             elif 'amazon.co.uk' in domain: target_region = 'uk'
             elif 'amazon.de' in domain: target_region = 'de'
@@ -118,6 +122,8 @@ class AmazonManager:
             elif 'amazon.es' in domain: target_region = 'es'
             elif 'amazon.in' in domain: target_region = 'in'
             elif 'amazon.fr' in domain: target_region = 'fr'
+            # Cek domain .ar ATAU jika ada unsur '-ar' (seperti /en-ar atau /es-ar) di jalurnya
+            elif 'amazon.com.ar' in domain or '-ar' in url_path: target_region = 'ar'
             elif 'amazon.com' in domain: target_region = 'us'
 
         # 1. Cek Akun Pribadi
