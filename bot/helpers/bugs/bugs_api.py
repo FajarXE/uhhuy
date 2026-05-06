@@ -8,7 +8,7 @@ from urllib3 import Retry
 
 
 class BugsApi:
-    def __init__(self):
+    def __init__(self, proxy=None):
         # device id from the Bugs android app
         self.device_id = None
 
@@ -18,6 +18,14 @@ class BugsApi:
         self.expires = None
 
         self.s = requests.Session()
+        
+        # --- TAMBAHAN PROXY ---
+        if proxy:
+            self.s.proxies = {
+                "http": proxy,
+                "https": proxy
+            }
+        # ----------------------
 
         # Konfigurasi Retry yang lebih agresif untuk menangani putus koneksi sesaat
         retries = Retry(total=5,
