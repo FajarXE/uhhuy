@@ -11,12 +11,21 @@ class AmazonManager:
     def __init__(self):
         self.clients = []
         self._client_cycler = None
-        self.user_clients = {}  # Kini menampung List klien per pengguna
+        self.user_clients = {}  # Kini menampung List klien per pengguna (Multi-Akun)
         self.user_cyclers = {}  # Mesin pemutar (Cycler) per pengguna
         self.quality = "HD" 
 
     async def initialize_clients(self):
         LOGGER.info("Amazon: Menginisialisasi klien Global...")
+        
+        # --- FIX 1: BERSIHKAN HANTU MEMORI GLOBAL ---
+        for old_client in self.clients:
+            try:
+                await old_client.close()
+            except: pass
+        self.clients = []
+        # --------------------------------------------
+        
         try:
             all_settings = await database.get_variable()
             self.quality = all_settings.get('AMAZON_QUALITY', 'HD')
@@ -31,6 +40,7 @@ class AmazonManager:
         for auth_data in accounts_list:
             client = AmazonApi(region=auth_data.get('region', 'jp'))
             try:
+                # Menggunakan load_tokens agar customerId terekstrak otomatis
                 client.load_tokens(auth_data.get('tokens', {}))
                 self.clients.append(client)
             except Exception as e:
@@ -48,6 +58,7 @@ class AmazonManager:
         client = AmazonApi(region=region)
         client.load_tokens(tokens)
         
+        # Jika belum ada list untuk user ini, buat list kosong
         if user_id not in self.user_clients:
             self.user_clients[user_id] = []
             
@@ -56,7 +67,7 @@ class AmazonManager:
         LOGGER.info(f"Amazon: Private session ditambahkan untuk user {user_id}")
 
     async def remove_specific_user_account(self, user_id: int, target_uid: str):
-        """Menghapus SATU sesi private milik user"""
+        """Menghapus SATU sesi private milik user berdasarkan Customer ID"""
         if user_id in self.user_clients:
             new_clients = []
             for c in self.user_clients[user_id]:
@@ -75,7 +86,7 @@ class AmazonManager:
         LOGGER.info(f"Amazon: Akun {target_uid} dihapus untuk user {user_id}")
 
     async def remove_user_account(self, user_id: int):
-        """Menghapus SEMUA sesi private user"""
+        """Menghapus SEMUA sesi private user (Logout All)"""
         if user_id in self.user_clients:
             for c in self.user_clients[user_id]:
                 try: await c.close()
@@ -83,11 +94,19 @@ class AmazonManager:
             del self.user_clients[user_id]
             if user_id in self.user_cyclers: del self.user_cyclers[user_id]
             
+        # --- FIX 2: BERSIHKAN HANTU MEMORI PENGGUNA ---
+        user_data = bot_set.user_data.get(user_id, {})
+        if 'amazon_account' in user_data:
+            user_data['amazon_account'] = None
+        if 'amazon_accounts' in user_data:
+            user_data['amazon_accounts'] = []
+        # ----------------------------------------------
+            
         await database.save_user_settings(user_id, {'amazon_accounts': [], 'amazon_account': None})
         LOGGER.info(f"Amazon: Semua private session dihapus untuk user {user_id}")
 
     def has_private_session(self, user_id):
-        """Mengecek apakah user punya akun pribadi"""
+        """Mengecek apakah user punya setidaknya 1 akun pribadi"""
         if user_id in self.user_clients and self.user_clients[user_id]:
             return True
         user_data = bot_set.user_data.get(user_id, {})
@@ -96,17 +115,17 @@ class AmazonManager:
         return False
 
     def get_client(self, user_id=None):
-        """Mengambil client untuk unduhan. Prioritaskan akun pribadi user."""
+        """Mengambil client untuk unduhan. Prioritaskan akun pribadi user dengan Load Balancing."""
         # 1. Cek Akun Pribadi (Siklus Multi-Akun)
         if user_id:
             if user_id in self.user_cyclers and self.user_clients.get(user_id):
                 return next(self.user_cyclers[user_id])
             else:
-                # Auto-Restore sesi dari database
+                # Auto-Restore sesi dari database jika memori kosong setelah restart
                 user_data = bot_set.user_data.get(user_id, {})
                 acc_list = user_data.get('amazon_accounts', [])
                 
-                # Migrasi otomatis dari format lama ke list baru
+                # Migrasi otomatis dari format lama (single account) ke list baru
                 if not acc_list and user_data.get('amazon_account'):
                     acc_list = [user_data.get('amazon_account')]
                     
