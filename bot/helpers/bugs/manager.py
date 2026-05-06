@@ -117,7 +117,9 @@ class BugsLoginManager:
     async def _login_task(self, account: dict):
         """Tugas login untuk satu akun Bugs (menggunakan asyncio.to_thread)."""
         
-        client = BugsApi()
+        # Ambil proxy dari dictionary jika ada, lalu lempar ke klien API
+        proxy = account.get('proxy')
+        client = BugsApi(proxy=proxy)
         
         try:
             # Atur device_id yang diperlukan SEBELUM otentikasi
