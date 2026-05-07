@@ -332,7 +332,10 @@ class AmazonApi:
                         if await self.refresh_access_token(): continue
                     except Exception as e:
                         if str(e) == "AUTH_EXPIRED": raise Exception("Sesi kedaluwarsa permanen. Silakan login kembali.")
-                    raise Exception("Gagal memperbarui token metadata.")
+                    
+                    # --- FIX: Tampilkan error asli dari Amazon ---
+                    raise Exception(f"Akses API Ditolak (HTTP {resp.status}): {resp_text}")
+                    # --------------------------------------------
                 
                 if resp.status == 200:
                     lookup_data = json.loads(resp_text)
@@ -416,8 +419,14 @@ class AmazonApi:
                 "appInfo": {"musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {asin})"},
                 "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
                 "musicDashVersionList": ["SIREN_KATANA"],
-                "contentProtectionList": ["TRACK_PSSH"],
+                
+                # --- FIX: Izin Lisensi PSSH Khusus Atmos ---
+                "contentProtectionList": ["GROUP_PSSH", "TRACK_PSSH"],
+                
                 "customerInfo": {"marketplaceId": marketplace_id, "territoryId": music_territory, "customerId": customer_id},
+                
+                # --- FIX: Paksa Amazon Mencarikan ASIN versi Spasial (Atmos/360RA) ---
+                "try3dAsinSubstitution": True, 
                 "tryAsinSubstitution": True
             }
             dmls_headers = {
@@ -436,7 +445,9 @@ class AmazonApi:
                         if await self.refresh_access_token(): continue
                     except Exception as e:
                         if str(e) == "AUTH_EXPIRED": raise Exception("Sesi kedaluwarsa permanen.")
-                    raise Exception("Gagal refresh saat mengambil MPD.")
+                    
+                    # --- FIX: Tampilkan error asli ---
+                    raise Exception(f"Gagal mengambil MPD (HTTP {resp.status}): {resp_text}")
                     
                 if resp.status != 200: raise Exception(f"Gagal MPD ({resp.status}): {resp_text}")
                 
@@ -447,7 +458,7 @@ class AmazonApi:
                 mpd_text = item_resp.get("manifest", "")
 
             # --- 3. FILTERING KUALITAS & FISIK ---
-            target_rank = {"SD": 2, "HD": 3, "UHD": 4}.get(target_quality.upper(), 4)
+            target_rank = {"SD": 2, "HD": 3, "UHD": 4, "EC-3": 5, "AC-4": 6, "MHA1": 7, "MHM1": 8}.get(target_quality.upper(), 4)
             valid_reps = []
             
             adp_sets = re.findall(r"<AdaptationSet\b([\s\S]*?)</AdaptationSet>", mpd_text, re.IGNORECASE)
@@ -469,12 +480,28 @@ class AmazonApi:
                         
                         if "mp4a" in rep_codec or "opus" in rep_codec: rep_rank = 2 
                         elif "flac" in rep_codec: rep_rank = 4 if (sr > 48000 or bw > 1200000) else 3
+                        # Pemisahan Identitas Mutlak
+                        elif "ec-3" in rep_codec: rep_rank = 5
+                        elif "ac-4" in rep_codec: rep_rank = 6
+                        elif "mha1" in rep_codec: rep_rank = 7
+                        elif "mhm1" in rep_codec: rep_rank = 8
                         else: rep_rank = 3
                             
                         valid_reps.append({"url": rep_url, "bw": bw, "codec": rep_codec, "kid": adp_kid, "rank": rep_rank})
             
             best_bw, best_url, best_codec, best_kid = 0, "", "flac", ""
-            filtered_reps = [r for r in valid_reps if r["rank"] <= target_rank]
+            
+            # --- FIX: Pemilihan Format Spesifik Mutlak ---
+            if target_rank >= 5:
+                # Jika mencari format Spasial tertentu, cari HANYA rank tersebut. 
+                # Jika track tidak memilikinya, fallback ke FLAC/UHD (Rank <= 4)
+                filtered_reps = [r for r in valid_reps if r["rank"] == target_rank]
+                if not filtered_reps:
+                    filtered_reps = [r for r in valid_reps if r["rank"] <= 4]
+            else:
+                # Murni format UHD/HD/SD (Blokir total format Spasial)
+                filtered_reps = [r for r in valid_reps if r["rank"] <= target_rank]
+            
             if not filtered_reps: filtered_reps = valid_reps
                 
             if filtered_reps:
