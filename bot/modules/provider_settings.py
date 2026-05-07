@@ -733,7 +733,8 @@ async def amazon_cb(c, cb:CallbackQuery):
             "MHM1": "3D (mhm1)",
             "UHD": "UHD (Hi-Res)",
             "HD": "HD (Lossless)",
-            "SD": "SD (Opus)"
+            "SD": "SD (Opus)",
+            "LD": "LD (Low Def)"
         }
         if not amazon_manager:
             return await edit_message(cb.message, "Layanan Amazon Music tidak aktif.")
@@ -758,7 +759,7 @@ async def amazon_quality_cb(c, cb:CallbackQuery):
             return await c.answer_callback_query(cb.id, "Format callback salah.", True)
 
         # Validasi apakah value yang dikirim benar
-        if to_set not in ["AC-4", "EC-3", "MHA1", "MHM1", "UHD", "HD", "SD"]:
+        if to_set not in ["AC-4", "EC-3", "MHA1", "MHM1", "UHD", "HD", "SD", "LD"]:
             return await c.answer_callback_query(cb.id, f"Kualitas tidak valid: {to_set}", True)
         
         # Simpan ke manager dan database
