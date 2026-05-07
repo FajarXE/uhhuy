@@ -727,6 +727,10 @@ async def khinsider_qual_cb(c, cb:CallbackQuery):
 async def amazon_cb(c, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
         quality = {
+            "AC-4": "AC-4 (Dolby Atmos)",
+            "EC-3": "EC-3 (Dolby Digital Plus)",
+            "MHA1": "3D (mha1)",
+            "MHM1": "3D (mhm1)",
             "UHD": "UHD (Hi-Res)",
             "HD": "HD (Lossless)",
             "SD": "SD (Opus)"
@@ -754,7 +758,7 @@ async def amazon_quality_cb(c, cb:CallbackQuery):
             return await c.answer_callback_query(cb.id, "Format callback salah.", True)
 
         # Validasi apakah value yang dikirim benar
-        if to_set not in ["UHD", "HD", "SD"]:
+        if to_set not in ["AC-4", "EC-3", "MHA1", "MHM1", "UHD", "HD", "SD"]:
             return await c.answer_callback_query(cb.id, f"Kualitas tidak valid: {to_set}", True)
         
         # Simpan ke manager dan database
