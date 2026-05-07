@@ -458,7 +458,7 @@ class AmazonApi:
                 mpd_text = item_resp.get("manifest", "")
 
             # --- 3. FILTERING KUALITAS & FISIK ---
-            target_rank = {"SD": 2, "HD": 3, "UHD": 4, "EC-3": 5, "AC-4": 6, "MHA1": 7, "MHM1": 8}.get(target_quality.upper(), 4)
+            target_rank = {"LD": 1, "SD": 2, "HD": 3, "UHD": 4, "EC-3": 5, "AC-4": 6, "MHA1": 7, "MHM1": 8}.get(target_quality.upper(), 4)
             valid_reps = []
             
             adp_sets = re.findall(r"<AdaptationSet\b([\s\S]*?)</AdaptationSet>", mpd_text, re.IGNORECASE)
@@ -478,7 +478,10 @@ class AmazonApi:
                         rep_codec = html.unescape(codec_match.group(1).strip()).lower() if codec_match else "flac"
                         sr = int(sr_match.group(1)) if sr_match else 44100
                         
-                        if "mp4a" in rep_codec or "opus" in rep_codec: rep_rank = 2 
+                        # --- FIX: Pemisahan SD (Rank 2) dan LD (Rank 1) ---
+                        if "mp4a" in rep_codec or "opus" in rep_codec: 
+                            rep_rank = 1 if bw <= 128000 else 2 
+                        # --------------------------------------------------
                         elif "flac" in rep_codec: rep_rank = 4 if (sr > 48000 or bw > 1200000) else 3
                         # Pemisahan Identitas Mutlak
                         elif "ec-3" in rep_codec: rep_rank = 5
