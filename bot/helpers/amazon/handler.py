@@ -80,7 +80,25 @@ async def get_global_asin(url: str, current_asin: str) -> str:
     return current_asin
 
 async def amazon_convert_only(input_path, final_path):
-    cmd = ['ffmpeg', '-y', '-i', input_path, '-map', '0:a:0', '-c:a', 'copy', final_path]
+    import shutil
+    import os
+    
+    # --- 1. JALAN PINTAS UNTUK ATMOS / 360RA (.m4a) ---
+    if final_path.lower().endswith('.m4a'):
+        LOGGER.info(f"Amazon Bypass FFmpeg: Memindahkan langsung kontainer asli untuk {final_path}")
+        shutil.move(input_path, final_path)
+        return
+    # --------------------------------------------------
+
+    # --- 2. PENANGANAN FALLBACK FLAC & SD ---
+    # Perhatikan bagian ini! Kita WAJIB memasukkan "final_path" di ujung array `cmd`
+    if final_path.lower().endswith('.flac'):
+        # Jika Amazon mengembalikan FLAC, paksa FFmpeg untuk merakit ulang (-c:a flac)
+        cmd = ['ffmpeg', '-y', '-i', input_path, '-map', '0:a:0', '-c:a', 'flac', final_path]
+    else:
+        # Untuk format standar lainnya
+        cmd = ['ffmpeg', '-y', '-i', input_path, '-map', '0:a:0', '-c:a', 'copy', final_path]
+    
     LOGGER.info(f"Amazon FFmpeg CMD: {' '.join(cmd)}")
     
     proc = await asyncio.create_subprocess_exec(
@@ -92,6 +110,12 @@ async def amazon_convert_only(input_path, final_path):
     
     if proc.returncode != 0:
         LOGGER.error(f"FFmpeg gagal: {stderr.decode()}")
+        # PENTING: Hapus file mentah (.dec.mp4) jika FFmpeg gagal 
+        # agar tidak menjadi sampah ganda yang menyusup ke dalam file ZIP!
+        try:
+            os.remove(input_path)
+        except:
+            pass
         raise Exception("Gagal mengekstrak audio dari kontainer (FFmpeg Error).")
 
 async def start_amazon(url: str, user: dict):
@@ -315,16 +339,18 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
         user_data = bot_set.user_data.get(user_id, {})
         user_quality = user_data.get('amazon_qual', 'HD')
         
-        if "FLAC" in user_quality.upper() or "HIRES" in user_quality.upper() or "MAX" in user_quality.upper() or "UHD" in user_quality.upper():
-            target_q = "UHD"
-        elif "HD" in user_quality.upper():
-            target_q = "HD"
-        else:
-            target_q = "SD" 
+        # Pengecekan Kualitas Secara Presisi
+        if "AC-4" in user_quality.upper(): target_q = "AC-4"
+        elif "EC-3" in user_quality.upper(): target_q = "EC-3"
+        elif "MHA1" in user_quality.upper(): target_q = "MHA1"
+        elif "MHM1" in user_quality.upper(): target_q = "MHM1"
+        elif "FLAC" in user_quality.upper() or "HIRES" in user_quality.upper() or "MAX" in user_quality.upper() or "UHD" in user_quality.upper(): target_q = "UHD"
+        elif "HD" in user_quality.upper(): target_q = "HD"
+        else: target_q = "SD" 
             
         LOGGER.info(f"Amazon: Target batas maksimal kualitas: {target_q}")
         manifest_data = await client.get_playback_info(asin, target_quality=target_q)
-        
+
     except Exception as e:
         err_str = str(e)
         if "Akses ditolak" in err_str or "EXPIRED_TOKEN" in err_str:
@@ -336,15 +362,24 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
     
     if 'flac' in codec: 
         ext = 'flac'
-        # Jika FLAC, kualitasnya mengikuti target maksimal user (HD/UHD)
         actual_q = target_q if target_q in ['HD', 'UHD'] else 'HD'
     elif 'opus' in codec: 
         ext = 'opus'
-        # Opus selalu kualitas Standard (SD)
         actual_q = 'SD'
+    elif 'ec-3' in codec:
+        ext = 'm4a'  
+        actual_q = 'EC-3'
+    elif 'ac-4' in codec:
+        ext = 'm4a'  
+        actual_q = 'AC-4'
+    elif 'mha1' in codec:
+        ext = 'm4a'  
+        actual_q = 'MHA1'
+    elif 'mhm1' in codec:
+        ext = 'm4a'  
+        actual_q = 'MHM1'
     else: 
         ext = 'm4a'
-        # M4A selalu kualitas Standard (SD)
         actual_q = 'SD'
         
     # --- TAMBAHAN DETEKSI EXPLICIT ---
