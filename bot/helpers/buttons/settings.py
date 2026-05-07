@@ -1175,7 +1175,8 @@ def amz_button(quality: dict, user_id: int = None):
         "MHM1": "3D (mhm1)",
         "UHD": "UHD (Hi-Res)",
         "HD": "HD (Lossless)",
-        "SD": "SD (Opus)"
+        "SD": "SD (Opus)",
+        "LD": "LD (Low Def)"
     }
     
     # 1. Bangun tombol pilihan kualitas (UHD, HD, SD)
