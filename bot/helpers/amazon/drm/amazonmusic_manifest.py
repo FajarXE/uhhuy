@@ -240,6 +240,7 @@ def get_track_mpd(session, base_url, api_location, device_type_id, device_id, ma
                                          "SIREN_KATANA"
                                      ],
                                      "contentProtectionList": [
+                                         "GROUP_PSSH",
                                          "TRACK_PSSH"
                                      ],
                                      "customerInfo": {
@@ -417,7 +418,7 @@ def build_codec_choices_from_mpd(mpd_text):
             if bandwidth_int > 0:
                 raw_kbps = bandwidth_int / 1000
                 normalized_kbps = int(round(raw_kbps))
-                if codec_value.lower().startswith("ec-3") or codec_value.lower().startswith("ac-4") or codec_value.lower() == "opus":
+                if codec_value.lower().startswith("ec-3") or codec_value.lower().startswith("ac-4") or codec_value.lower().startswith("mha") or codec_value.lower().startswith("mhm") or codec_value.lower() == "opus":
                     known_bitrates = [48, 64, 96, 128, 160, 192, 224, 256, 320, 384, 448, 512, 576, 640, 768, 1024, 1536]
                     normalized_kbps = min(known_bitrates, key=lambda item: abs(item - raw_kbps))
                 bitrate_label = f"{normalized_kbps} kbps"
