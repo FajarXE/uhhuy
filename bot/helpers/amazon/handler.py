@@ -131,8 +131,155 @@ async def start_amazon(url: str, user: dict):
     
     if '/albums/' in parsed.path or '/album/' in parsed.path:
         await start_album(asin, user, url)
+    # --- TAMBAHKAN RUTE PLAYLIST DI SINI ---
+    elif '/playlists/' in parsed.path or '/playlist/' in parsed.path:
+        await start_playlist(asin, user, url)
+    # ---------------------------------------
     else:
         await start_track(asin, user, url)
+
+async def start_playlist(playlist_asin: str, user: dict, url: str):
+    playlist_asin = await get_global_asin(url, current_asin=playlist_asin)
+    LOGGER.info(f"Amazon: Mengambil info Playlist {playlist_asin}")
+    user_id = user.get('user_id')
+    client = user.get('amazon_api') or amazon_manager.get_client(user_id, url=url)
+    
+    if not client:
+        raise Exception("Tidak ada klien Amazon Music yang aktif.")
+
+    device_id = client.tokens.get('device_id')
+    device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
+    lookup_base = client.base_url
+    api_loc = client.api_location
+    music_territory = client.region.upper()
+
+    lookup_url = f"{lookup_base}{api_loc}/api/muse/legacy/lookup"
+    
+    lookup_headers = {
+        "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
+        "x-amzn-device-type-id": device_type_id,
+        "x-amzn-hardware-device-type-id": device_type_id
+    }
+    
+    track_asins = []
+    playlist_title = "Unknown Playlist"
+    playlist_owner = "Amazon Music"
+    playlist_cover = ""
+    
+    enum_options = ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]
+    
+    for req_content in enum_options:
+        lookup_payload = {
+            "asins": [playlist_asin],
+            "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+            "requestedContent": req_content, 
+            "musicTerritory": music_territory, 
+            "deviceId": device_id,
+            "deviceType": device_type_id
+        }
+        
+        try:
+            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # Targetkan playlistList, bukan albumList
+                    for pl in data.get("playlistList", []):
+                        playlist_title = pl.get("title", playlist_title)
+                        playlist_owner = pl.get("author", pl.get("owner", playlist_owner))
+                        playlist_cover = pl.get("image", playlist_cover)
+                        
+                        for track in pl.get("tracks", []):
+                            if isinstance(track, dict) and track.get("asin"):
+                                track_asins.append(track["asin"])
+                                
+            track_asins = list(dict.fromkeys(track_asins))
+            
+            if track_asins:
+                LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu Playlist dari Region {music_territory} ({req_content})")
+                break
+        except Exception as e:
+            continue
+            
+    if not track_asins:
+        raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk playlist {playlist_asin}. Pastikan link valid.")
+
+    if 'bot_msg' in user:
+        await edit_message(user['bot_msg'], f"💽 **Playlist Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
+
+    update_details = {
+        'text': lang.s.DOWNLOAD_PROGRESS, 
+        'msg': user.get('bot_msg'), 
+        'title': playlist_title, 
+        'type': 'Playlist'
+    }
+    
+    tasks = []
+    total_lagu = len(track_asins)
+    for index, t_asin in enumerate(track_asins, start=1):
+        # Paksa nama album menjadi nama Playlist, dan artis album menjadi pembuat Playlist
+        tasks.append(start_track(
+            t_asin, user, url, upload=False, 
+            forced_track_num=index, forced_total_tracks=total_lagu, 
+            forced_album_title=playlist_title, forced_album_artist=playlist_owner
+        ))
+        
+    limit_pekerja = Config.MAX_WORKERS if getattr(bot_set, 'playlist_conc', True) else 1
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=limit_pekerja)
+    
+    playlist_tracks = []
+    for index, res in enumerate(task_results, start=1):
+        if isinstance(res, dict):
+            playlist_tracks.append(res)
+        else:
+            LOGGER.error(f"Amazon [Playlist Track {index}] GAGAL DIUNDUH! Penyebab: {res}")
+
+    if not playlist_tracks:
+         raise Exception("Semua lagu dalam playlist gagal diunduh.")
+
+    playlist_folder = playlist_tracks[0].get('folderpath', '') if playlist_tracks else ''
+    sample_track = playlist_tracks[0] if playlist_tracks else {}
+    
+    safe_cover = playlist_tracks[0].get('cover', '')
+    if safe_cover and not os.path.exists(safe_cover):
+        safe_cover = ''
+        
+    is_explicit = any("[explicit]" in str(t.get('title', '')).lower() for t in playlist_tracks)
+
+    playlist_metadata = {
+        'type': 'playlist',
+        'title': playlist_title,
+        'album': playlist_title,
+        'artist': playlist_owner,
+        'albumartist': playlist_owner,
+        'folderpath': playlist_folder,
+        'tracks': playlist_tracks,
+        'provider': 'Amazon Music',
+        'cover': safe_cover,  
+        'quality': sample_track.get('quality', 'UHD'),
+        'release_date': sample_track.get('release_date', 'Unknown'),
+        'date': sample_track.get('release_date', 'Unknown')[:4] if sample_track.get('release_date') else 'Unknown',
+        'totaltracks': str(len(playlist_tracks)),
+        'totalvolume': '1',    
+        'total_volumes': '1',  
+        'explicit': str(is_explicit)     
+    }
+
+    if playlist_metadata.get('cover') and os.path.exists(playlist_metadata['cover']):
+        try:
+            shutil.copy2(playlist_metadata['cover'], os.path.join(playlist_folder, "cover.jpg"))
+        except:
+            pass
+    
+    poster_msg = await post_art_poster(user, playlist_metadata)
+    
+    if poster_msg:
+        playlist_metadata['poster_msg'] = poster_msg
+    else:
+        playlist_metadata['poster_msg'] = user.get('bot_msg')
+        
+    from bot.helpers.uploder import playlist_upload
+    await playlist_upload(playlist_metadata, user)
 
 async def start_album(album_asin: str, user: dict, url: str):
     # --- FIX: CURI ASIN GLOBAL SEBELUM MEMANGGIL API ---
@@ -323,7 +470,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     from bot.helpers.uploder import album_upload
     await album_upload(album_metadata, user)
 
-async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None, forced_album_title=None):
+async def start_track(asin: str, user: dict, url: str, upload=True, forced_track_num=None, forced_total_tracks=None, forced_album_title=None, forced_album_artist=None):
     user_id = user.get('user_id')
     # --- FIX: Paksa Manager membaca URL agar tidak salah region ---
     client = user.get('amazon_api') or amazon_manager.get_client(user_id, url=url)
@@ -346,6 +493,7 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
         elif "MHM1" in user_quality.upper(): target_q = "MHM1"
         elif "FLAC" in user_quality.upper() or "HIRES" in user_quality.upper() or "MAX" in user_quality.upper() or "UHD" in user_quality.upper(): target_q = "UHD"
         elif "HD" in user_quality.upper(): target_q = "HD"
+        elif "LD" in user_quality.upper(): target_q = "LD"
         else: target_q = "SD" 
             
         LOGGER.info(f"Amazon: Target batas maksimal kualitas: {target_q}")
@@ -365,7 +513,7 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
         actual_q = target_q if target_q in ['HD', 'UHD'] else 'HD'
     elif 'opus' in codec: 
         ext = 'opus'
-        actual_q = 'SD'
+        actual_q = target_q if target_q in ['SD', 'LD'] else 'SD'
     elif 'ec-3' in codec:
         ext = 'm4a'  
         actual_q = 'EC-3'
@@ -380,7 +528,7 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
         actual_q = 'MHM1'
     else: 
         ext = 'm4a'
-        actual_q = 'SD'
+        actual_q = target_q if target_q in ['SD', 'LD'] else 'SD'
         
     # --- TAMBAHAN DETEKSI EXPLICIT ---
     raw_title = manifest_data.get('title', asin)
@@ -393,7 +541,7 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
         'title': raw_title,
         'artist': manifest_data.get('artist', 'Unknown Artist'),
         'album': forced_album_title if forced_album_title else raw_album,
-        'albumartist': manifest_data.get('albumartist', 'Unknown Artist'),
+        'albumartist': forced_album_artist if forced_album_artist else manifest_data.get('albumartist', 'Unknown Artist'),
         # --- FIX: Gunakan nomor paksaan dari Album jika tersedia ---
         'tracknumber': forced_track_num if forced_track_num else manifest_data.get('tracknumber', 1),
         'totaltracks': forced_total_tracks if forced_total_tracks else manifest_data.get('totaltracks', 1),
