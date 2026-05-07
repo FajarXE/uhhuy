@@ -1604,6 +1604,10 @@ async def uset_cb(client, query, datatype=""):
     if data[1] == "amazon" or datatype == "amazon":
         text = f"Choose Amazon Music Audio Quality bellow:\n(Tergantung pada tier langganan akun)"
         quality = {
+            "AC-4": "AC-4 (Dolby Atmos)",
+            "EC-3": "EC-3 (Dolby Digital Plus)",
+            "MHA1": "3D (mha1)",
+            "MHM1": "3D (mhm1)",
             "UHD": "UHD (Hi-Res)",
             "HD": "HD (Lossless)",
             "SD": "SD (Opus)"
