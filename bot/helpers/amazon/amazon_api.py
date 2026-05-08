@@ -480,7 +480,7 @@ class AmazonApi:
                         
                         # --- FIX: Pemisahan SD (Rank 2) dan LD (Rank 1) ---
                         if "mp4a" in rep_codec or "opus" in rep_codec: 
-                            rep_rank = 1 if bw <= 128000 else 2 
+                            rep_rank = 1 if bw <= 165000 else 2 
                         # --------------------------------------------------
                         elif "flac" in rep_codec: rep_rank = 4 if (sr > 48000 or bw > 1200000) else 3
                         # Pemisahan Identitas Mutlak
