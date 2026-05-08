@@ -146,13 +146,17 @@ class AmazonManager:
 
             clients = self.user_clients.get(user_id, [])
             if clients:
-                # --- SMART REGION MATCHING ---
+                # --- SMART REGION MATCHING (PRIVATE) ---
                 if target_region:
-                    matching_clients = [c for c in clients if c.region.lower() == target_region or (target_region == 'nz' and c.region.lower() in ['au', 'nz'])]
+                    # FIX FATAL: URL AU dan NZ sama-sama memakai .com.au (target 'au').
+                    # Jika targetnya 'au', bot HARUS mengizinkan akun 'au' maupun 'nz'!
+                    matching_clients = [
+                        c for c in clients 
+                        if c.region.lower() == target_region or (target_region == 'au' and c.region.lower() in ['au', 'nz'])
+                    ]
                     if matching_clients:
-                        return random.choice(matching_clients) # Load Balance hanya untuk akun di Region yang sama!
+                        return random.choice(matching_clients) # Load Balance
                 
-                # Fallback jika URL aneh / tidak terdeteksi
                 return next(self.user_cyclers[user_id])
         
         # 2. Fallback ke Akun Global
@@ -160,7 +164,11 @@ class AmazonManager:
             return None
             
         if target_region:
-            matching_global = [c for c in self.clients if c.region.lower() == target_region or (target_region == 'nz' and c.region.lower() in ['au', 'nz'])]
+            # Terapkan logika AU/NZ yang sama untuk akun Global
+            matching_global = [
+                c for c in self.clients 
+                if c.region.lower() == target_region or (target_region == 'au' and c.region.lower() in ['au', 'nz'])
+            ]
             if matching_global:
                 return random.choice(matching_global)
                 
