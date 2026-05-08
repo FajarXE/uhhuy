@@ -729,12 +729,12 @@ async def amazon_cb(c, cb:CallbackQuery):
         quality = {
             "AC-4": "AC-4 (Dolby Atmos)",
             "EC-3": "EC-3 (Dolby Digital Plus)",
-            "MHA1": "3D (mha1)",
-            "MHM1": "3D (mhm1)",
+            "MHA1": "MPEG-H 3D (mha1)",
+            "MHM1": "MPEG-H 3D (mhm1)",
             "UHD": "UHD (Hi-Res)",
             "HD": "HD (Lossless)",
-            "SD": "SD (Opus)",
-            "LD": "LD (Low Def)"
+            "SD": "SD (Opus - High)",
+            "LD": "LD (Opus - Med/Low)"
         }
         if not amazon_manager:
             return await edit_message(cb.message, "Layanan Amazon Music tidak aktif.")
