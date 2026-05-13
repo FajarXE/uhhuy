@@ -77,6 +77,13 @@ try:
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor khinsider_manager.")
     khinsider_manager = None
+
+# --- TAMBAHAN BARU: Genie Manager ---
+try:
+    from ..helpers.genie.manager import genie_manager
+except ImportError:
+    LOGGER.warning("ProviderSettings: Gagal mengimpor genie_manager.")
+    genie_manager = None
 # --- BATAS TAMBAHAN ---
 
 
@@ -878,3 +885,27 @@ async def amz_global_verify_cb(client, query):
         if not amz_api.session.closed: await amz_api.close()
         if user_id in PENDING_AMAZON_GLOBAL_AUTH: del PENDING_AMAZON_GLOBAL_AUTH[user_id]
         await query.message.reply_text(f"❌ **Error:** {str(e)[:400]}")
+
+#----------------
+# GENIE
+#----------------
+@Client.on_callback_query(filters.regex(pattern=r"^gnP"))
+async def genie_cb(c, cb:CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        quality = {"flac24": "FLAC 24-bit", "flac16": "FLAC 16-bit", "mp3": "MP3 320kbps"}
+        if not genie_manager:
+            return await edit_message(cb.message, "Layanan Genie tidak aktif.")
+        
+        current = getattr(genie_manager, 'quality', 'flac24')
+        if current in quality:
+            quality[current] += '✅'
+        
+        await edit_message(cb.message, "**GENIE PANEL (GLOBAL)**\n\nPilih kualitas default bot:", markup=gn_button(quality))
+
+@Client.on_callback_query(filters.regex(pattern=r"^gnQ_"))
+async def genie_quality_cb(c, cb:CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        to_set = cb.data.split('_')[1]
+        genie_manager.quality = to_set
+        await database.set_variable('GENIE_QUALITY', to_set)
+        await genie_cb(c, cb)
