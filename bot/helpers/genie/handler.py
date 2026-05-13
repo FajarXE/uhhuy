@@ -4,6 +4,7 @@ import os
 import re
 import asyncio
 import aiohttp
+import requests
 from urllib.parse import unquote
 
 from config import Config
@@ -31,21 +32,38 @@ QUALITY_MAP = {
 }
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
-    """Pengganti fungsi get_url dari geniez.py menggunakan aiohttp"""
+    """Membungkus requests ke dalam thread agar proxy terbaca otomatis tanpa memblokir uvloop"""
     wait_time = 2
+    loop = asyncio.get_event_loop()
+    
     for attempt in range(max_retries):
         try:
-            async with session.get(url, headers=HEADERS) as response:
-                if response.status == 200:
-                    # TAMBAHKAN content_type=None DI SINI
-                    # Agar aiohttp tidak rewel saat API Genie merespons dengan text/html
-                    return await response.json(content_type=None)
+            def _do_request():
+                # requests akan otomatis menggunakan SOCKS5 proxy dari environment system
+                resp = requests.get(url, headers=HEADERS, timeout=15)
+                text = resp.text.strip()
+                
+                if resp.status_code != 200:
+                    raise ValueError(f"HTTP {resp.status_code}")
+                    
+                # Validasi awal untuk mencegah error 'Expecting value'
+                if not text.startswith('{') and not text.startswith('['):
+                    raise ValueError(f"Diblokir oleh Genie (Respons bukan JSON): {text[:100]}")
+                    
+                import json
+                return json.loads(text)
+            
+            # Eksekusi fungsi sinkron di background agar bot tidak freeze
+            return await loop.run_in_executor(None, _do_request)
+            
         except Exception as e:
+            from bot.logger import LOGGER
             LOGGER.warning(f"Genie Request failed: {e}. Retrying... ({attempt + 1}/{max_retries})")
         
         await asyncio.sleep(wait_time)
         wait_time *= 2
-    raise Exception("Max retries exceeded untuk request API Genie.")
+        
+    raise Exception("Max retries exceeded. Pastikan Proxy SOCKS5 Anda aktif untuk melewati region-lock Korea.")
 
 def parse_code(url: str) -> str:
     """Mengekstrak ID dari URL"""
