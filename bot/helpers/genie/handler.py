@@ -37,7 +37,9 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
         try:
             async with session.get(url, headers=HEADERS) as response:
                 if response.status == 200:
-                    return await response.json()
+                    # TAMBAHKAN content_type=None DI SINI
+                    # Agar aiohttp tidak rewel saat API Genie merespons dengan text/html
+                    return await response.json(content_type=None)
         except Exception as e:
             LOGGER.warning(f"Genie Request failed: {e}. Retrying... ({attempt + 1}/{max_retries})")
         
