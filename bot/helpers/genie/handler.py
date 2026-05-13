@@ -32,6 +32,13 @@ QUALITY_MAP = {
     "mp3": "320k"
 }
 
+# --- FIX 1: FORMAT TAMPILAN KUALITAS UNTUK POSTER ---
+QUALITY_MAP_DISPLAY = {
+    "flac24": "FLAC-24",
+    "flac16": "FLAC-16",
+    "mp3": "MP3 320kbps"
+}
+
 import requests
 import json
 import asyncio
@@ -114,7 +121,7 @@ async def process_track(session, track_id, quality_pref, download_dir, details):
         'artist': artist,
         'album': album_name,
         'provider': 'Genie',
-        'quality': quality_pref.upper(),
+        'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()),
         'filepath': filepath,
         'type': 'track',
         'extension': ext
