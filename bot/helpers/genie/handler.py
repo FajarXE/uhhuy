@@ -198,7 +198,7 @@ async def start_genie(link: str, user: dict):
                 
                 # --- FIX: LABEL 'Download album track' SEPERTI BUGS ---
                 track_details = details.copy() if details else {}
-                track_details['action'] = 'Download album track'
+                track_details['action'] = 'Download Album'
                 track_details['title'] = f"[{index}/{len(song_list)}] {unquote(song['song_name'])}"
                 # ------------------------------------------------------
                 
