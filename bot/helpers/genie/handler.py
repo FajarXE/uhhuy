@@ -92,18 +92,20 @@ async def process_track(session, track_id, quality_pref, download_dir, details):
     try:
         track_data = data["DataSet"]["DATA"][0]
     except (KeyError, IndexError):
-        raise Exception("Gagal mendapatkan data streaming untuk track ini. Mungkin region lock atau butuh autentikasi.")
+        raise Exception("Gagal mendapatkan data streaming untuk track ini.")
 
     stream_url = unquote(track_data["STREAMING_MP3_URL"])
-    title = track_data.get("SONG_TTS", f"Track_{track_id}")
-    artist = track_data.get("ARTIST_NAME", "Unknown Artist")
-    album_name = track_data.get("ALBUM_NAME", "Unknown Album")
+    
+    # --- FIX: Tambahkan unquote untuk membersihkan %28 dan %29 ---
+    title = unquote(track_data.get("SONG_TTS", f"Track_{track_id}"))
+    artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
+    album_name = unquote(track_data.get("ALBUM_NAME", "Unknown Album"))
+    # -----------------------------------------------------------
     
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
     filename = f"{artist} - {title}.{ext}".replace("/", "_")
     filepath = os.path.join(download_dir, filename)
 
-    # Siapkan Metadata untuk bot uploder
     metadata = {
         'title': title,
         'artist': artist,
@@ -115,7 +117,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details):
         'extension': ext
     }
 
-    # Teruskan request headers ke Aria2
     aria_details = details.copy() if details else {}
     aria_details['headers'] = HEADERS
 
@@ -156,33 +157,43 @@ async def start_genie(link: str, user: dict):
             metadata = await process_track(session, code, quality_pref, download_dir, details)
             await track_upload(metadata, user)
 
-        # LOGIKA ALBUM
+                # LOGIKA ALBUM
         elif "axnm" in link:
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 **Fetching Genie Album...**")
+            
+            # --- FIX: Ubah Label di Radar UI menjadi Download Album ---
+            if details: 
+                details['action'] = 'Download Album'
                 
             api_url = f"https://info.genie.co.kr/info/album?axnm={code}"
             album_data = await fetch_json(session, api_url)
             
-            album_name = album_data['album_info']['album_name']
-            album_artist = album_data['album_info']['artist_name']
+            # --- FIX: Bersihkan nama dari %28 dll ---
+            album_name = unquote(album_data['album_info']['album_name'])
+            album_artist = unquote(album_data['album_info']['artist_name'])
             
             album_dir_name = f"{album_artist} - {album_name}".replace("/", "_")
             album_dir = os.path.join(download_dir, album_dir_name)
             os.makedirs(album_dir, exist_ok=True)
             
-            # Unduh Cover Art Album
+            # --- FIX: Penanganan Cover Art Tanpa Protokol HTTP ---
             cover_url = unquote(album_data['album_info'].get("album_img_path600", ""))
+            if cover_url.startswith("//"):
+                cover_url = "https:" + cover_url
+            
             cover_path = os.path.join(album_dir, "cover.jpg")
             if cover_url:
-                await aria2_download(cover_url, cover_path, details)
+                # Eksekusi unduhan cover secara diam-diam (None) agar tidak menimpa status UI
+                await aria2_download(cover_url, cover_path, None)
+            # -----------------------------------------------------
             
             tracks_metadata = []
             song_list = album_data.get('album_song_list', [])
             
             for index, song in enumerate(song_list, start=1):
                 track_id = song['song_id']
-                if details: details['title'] = f"[{index}/{len(song_list)}] {song['song_name']}"
+                if details: details['title'] = f"[{index}/{len(song_list)}] {unquote(song['song_name'])}"
                 
                 try:
                     meta = await process_track(session, track_id, quality_pref, album_dir, details)
