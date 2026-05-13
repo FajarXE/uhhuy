@@ -160,19 +160,15 @@ async def start_genie(link: str, user: dict):
             metadata = await process_track(session, code, quality_pref, download_dir, details)
             await track_upload(metadata, user)
 
-                # LOGIKA ALBUM
+        # LOGIKA ALBUM
         elif "axnm" in link:
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 **Fetching Genie Album...**")
-            
-            # --- FIX: Ubah Label di Radar UI menjadi Download Album ---
-            if details: 
-                details['action'] = 'Download Album'
                 
             api_url = f"https://info.genie.co.kr/info/album?axnm={code}"
             album_data = await fetch_json(session, api_url)
             
-            # --- FIX: Bersihkan nama dari %28 dll ---
+            # --- FIX: Membersihkan URL Encoding (%28, dll) ---
             album_name = unquote(album_data['album_info']['album_name'])
             album_artist = unquote(album_data['album_info']['artist_name'])
             
@@ -180,26 +176,34 @@ async def start_genie(link: str, user: dict):
             album_dir = os.path.join(download_dir, album_dir_name)
             os.makedirs(album_dir, exist_ok=True)
             
-            # --- FIX: Penanganan Cover Art Tanpa Protokol HTTP ---
+            # --- FIX: PENANGANAN ART POSTER AGAR MUNCUL DI RADAR UI ---
             cover_url = unquote(album_data['album_info'].get("album_img_path600", ""))
             if cover_url.startswith("//"):
                 cover_url = "https:" + cover_url
             
             cover_path = os.path.join(album_dir, "cover.jpg")
             if cover_url:
-                # Eksekusi unduhan cover secara diam-diam (None) agar tidak menimpa status UI
-                await aria2_download(cover_url, cover_path, None)
-            # -----------------------------------------------------
+                # Kita atur action-nya menjadi 'Art Poster' layaknya modul lain
+                cover_details = details.copy() if details else {}
+                cover_details['action'] = 'Art Poster'
+                cover_details['title'] = "cover.jpg"
+                await aria2_download(cover_url, cover_path, cover_details)
+            # -----------------------------------------------------------
             
             tracks_metadata = []
             song_list = album_data.get('album_song_list', [])
             
             for index, song in enumerate(song_list, start=1):
                 track_id = song['song_id']
-                if details: details['title'] = f"[{index}/{len(song_list)}] {unquote(song['song_name'])}"
+                
+                # --- FIX: LABEL 'Download album track' SEPERTI BUGS ---
+                track_details = details.copy() if details else {}
+                track_details['action'] = 'Download album track'
+                track_details['title'] = f"[{index}/{len(song_list)}] {unquote(song['song_name'])}"
+                # ------------------------------------------------------
                 
                 try:
-                    meta = await process_track(session, track_id, quality_pref, album_dir, details)
+                    meta = await process_track(session, track_id, quality_pref, album_dir, track_details)
                     tracks_metadata.append(meta)
                 except Exception as e:
                     LOGGER.warning(f"Melewati Track ID {track_id}: {e}")
