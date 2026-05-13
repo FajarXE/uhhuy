@@ -142,6 +142,12 @@ try:
 except ImportError:
     amazon_manager = None
 
+# 19. Genie
+try:
+    from bot.helpers.genie.manager import genie_manager
+except ImportError:
+    genie_manager = None
+
 
 # --- IMPOR HANDLER LAYANAN ---
 
@@ -258,6 +264,15 @@ except Exception as e:
     LOGGER.error(f"Gagal memuat modul Amazon Handler: {e}")
     async def start_amazon(*args, **kwargs):
         raise NotImplementedError(f"Modul Amazon Music gagal dimuat karena: {e}")
+
+# Genie
+try:
+    from ..helpers.genie.handler import start_genie
+except ImportError as e:
+    from bot.logger import LOGGER
+    LOGGER.error(f"Gagal memuat modul Genie Handler: {e}")
+    async def start_genie(*args, **kwargs):
+        raise NotImplementedError(f"Modul Genie gagal dimuat.")
 
 
 from ..helpers.message import send_message, check_user, fetch_user_details, edit_message
@@ -534,6 +549,8 @@ async def start_link(link: str, user: dict) -> None:
     khinsider = ["https://downloads.khinsider.com", "downloads.khinsider.com", "http://downloads.khinsider.com"]
 
     amazon = ["https://music.amazon.com", "https://music.amazon.co.jp", "https://music.amazon.co.uk", "https://music.amazon.fr", "https://music.amazon.com.mx", "https://music.amazon.com.br", "https://music.amazon.de", "https://music.amazon.com.au", "https://music.amazon.ca", "https://music.amazon.it", "https://music.amazon.es", "https://music.amazon.com.ar", "https://music.amazon.com/es-ar", "https://music.amazon.com/en-ar", "https://music.amazon.in", "music.amazon"]
+
+    genie = ["https://www.genie.co.kr", "genie.co.kr", "https://app.genie.co.kr"]
     
     # Blok TIDAL
     if link.startswith(tuple(tidal)):
@@ -1008,6 +1025,20 @@ async def start_link(link: str, user: dict) -> None:
         except Exception as e:
             # HAPUS BARIS INI: from bot.logger import LOGGER
             LOGGER.error(f"Amazon Music Gagal: {e}")
+            raise e
+
+    # Blok GENIE
+    elif any(d in link for d in genie):
+        user['provider'] = 'Genie'
+        if not genie_manager:
+            raise Exception("Modul Genie tidak dimuat (Folder/file helper hilang).")
+        
+        try:
+            await start_genie(link, user)
+            LOGGER.info("Genie: Unduhan berhasil.")
+            return
+        except Exception as e:
+            LOGGER.error(f"Genie Gagal: {e}")
             raise e
 
     else:
