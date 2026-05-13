@@ -168,7 +168,7 @@ async def start_genie(link: str, user: dict):
             api_url = f"https://info.genie.co.kr/info/album?axnm={code}"
             album_data = await fetch_json(session, api_url)
             
-            # --- FIX: Membersihkan URL Encoding (%28, dll) ---
+            # Membersihkan URL Encoding (%28, %29, dll)
             album_name = unquote(album_data['album_info']['album_name'])
             album_artist = unquote(album_data['album_info']['artist_name'])
             
@@ -176,18 +176,22 @@ async def start_genie(link: str, user: dict):
             album_dir = os.path.join(download_dir, album_dir_name)
             os.makedirs(album_dir, exist_ok=True)
             
-            # --- FIX: PENANGANAN ART POSTER AGAR MUNCUL DI RADAR UI ---
+            # --- FIX: PENGUNDUHAN COVER MENGGUNAKAN AIOHTTP LANGSUNG ---
             cover_url = unquote(album_data['album_info'].get("album_img_path600", ""))
             if cover_url.startswith("//"):
                 cover_url = "https:" + cover_url
             
             cover_path = os.path.join(album_dir, "cover.jpg")
             if cover_url:
-                # Kita atur action-nya menjadi 'Art Poster' layaknya modul lain
-                cover_details = details.copy() if details else {}
-                cover_details['action'] = 'Art Poster'
-                cover_details['title'] = "cover.jpg"
-                await aria2_download(cover_url, cover_path, cover_details)
+                try:
+                    # Mengunduh langsung secara native agar 100% tersimpan
+                    async with session.get(cover_url, headers=HEADERS) as resp:
+                        if resp.status == 200:
+                            content = await resp.read()
+                            with open(cover_path, 'wb') as f:
+                                f.write(content)
+                except Exception as e:
+                    LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
             # -----------------------------------------------------------
             
             tracks_metadata = []
@@ -196,11 +200,11 @@ async def start_genie(link: str, user: dict):
             for index, song in enumerate(song_list, start=1):
                 track_id = song['song_id']
                 
-                # --- FIX: LABEL 'Download album track' SEPERTI BUGS ---
+                # --- FIX: LABEL ACTION DIPAKSA MENJADI 'Download Album' ---
                 track_details = details.copy() if details else {}
                 track_details['action'] = 'Download Album'
                 track_details['title'] = f"[{index}/{len(song_list)}] {unquote(song['song_name'])}"
-                # ------------------------------------------------------
+                # ----------------------------------------------------------
                 
                 try:
                     meta = await process_track(session, track_id, quality_pref, album_dir, track_details)
