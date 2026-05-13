@@ -109,6 +109,12 @@ try:
 except ImportError:
     amazon_manager = _DummyManager()
 
+# Impor Manajer Genie
+try:
+    from bot.helpers.genie.manager import genie_manager
+except ImportError:
+    genie_manager = _DummyManager()
+
 
 def fetch_base_buttons():
     # Style: PRIMARY (Biru) untuk Main Menu
@@ -280,6 +286,16 @@ def providers_button():
                 InlineKeyboardButton(
                     text="AMAZON MUSIC", 
                     callback_data='amzP'
+                )
+            ]
+        )
+
+    if genie_manager:
+        inline_keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="GENIE", 
+                    callback_data='gnP'
                 )
             ]
         )
@@ -1259,6 +1275,38 @@ def khi_button(quality: dict, user_id: int = None):
     return InlineKeyboardMarkup(buttons)
 
 
+def gn_button(quality: dict, user_id: int = None):
+    buttons = []
+    usetting = user_id is not None
+    prefix = "gnQ" if not usetting else "ugns"
+    row = []
+    
+    display_text_map = {
+        "flac24": "FLAC 24-bit",
+        "flac16": "FLAC 16-bit",
+        "mp3": "MP3 320kbps"
+    }
+    
+    for i, (key, value) in enumerate(quality.items()):
+        clean_text = display_text_map.get(key, key)
+        is_selected = "✅" in value
+        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
+
+        row.append(InlineKeyboardButton(text=clean_text, callback_data=f"{prefix}_{key}", style=btn_style))
+            
+        if (i + 1) % 2 == 0 or i == len(quality) - 1:
+            buttons.append(row)
+            row = []
+            
+    if usetting:
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
+        return InlineKeyboardMarkup(buttons)
+        
+    main_button, close_button = fetch_base_buttons()
+    buttons += main_button + close_button
+    return InlineKeyboardMarkup(buttons)
+
+
 def lyrics_button(user_settings: dict, user_id):
     buttons = []
     
@@ -1387,6 +1435,9 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
         # Gunakan 'clients' (bukan 'global_clients') sesuai dengan file manager.py Anda
         if getattr(amazon_manager, 'clients', []) or amazon_manager.has_private_session(user_id):
             buttons.append([InlineKeyboardButton(text=f"Amazon Music Quality", callback_data=f"uset_amazon")])
+
+    if genie_manager:
+        buttons.append([InlineKeyboardButton(text=f"Genie Quality", callback_data=f"uset_genie")])
 
     buttons.append([InlineKeyboardButton(text="🔁 Switch Upload Mode", callback_data="uset_upload_mode")])
 
