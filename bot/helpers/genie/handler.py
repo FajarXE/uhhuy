@@ -6,6 +6,7 @@ import asyncio
 import aiohttp
 import requests
 from urllib.parse import unquote
+from config import Config
 
 from config import Config
 from bot.logger import LOGGER
@@ -37,32 +38,34 @@ import asyncio
 import aiohttp
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
-    """Membungkus requests ke dalam thread dengan Proxy Hong Kong"""
+    """Membungkus requests ke dalam thread dengan Proxy Opsional"""
     wait_time = 2
     loop = asyncio.get_event_loop()
     
-    # Proxy Hong Kong yang Anda berikan
-    PROXY_STRING = "socks5h://hongkong:hongkong@85.121.244.35:1080" 
+    # Mengambil proxy dari config.py
+    PROXY_STRING = getattr(Config, 'GENIE_PROXY', None) 
     
+    # Jika proxy ada, buat dictionary. Jika tidak, atur sebagai None
     proxy_dict = {
         "http": PROXY_STRING,
         "https": PROXY_STRING
-    }
+    } if PROXY_STRING else None
     
     for attempt in range(max_retries):
         try:
             def _do_request():
-                # Mengirim request dengan proxy yang ditentukan
+                # Parameter proxies akan menerima dict atau None dengan aman
                 resp = requests.get(url, headers=HEADERS, timeout=15, proxies=proxy_dict)
                 text = resp.text.strip()
                 
                 if resp.status_code != 200:
                     raise ValueError(f"HTTP {resp.status_code}")
                     
-                # Validasi jika yang dikembalikan adalah halaman blokir HTML
+                # Validasi jika IP diblokir (Respons bukan JSON)
                 if not text.startswith('{') and not text.startswith('['):
                     raise ValueError(f"Diblokir oleh Genie (Respons bukan JSON): {text[:100]}")
                     
+                import json
                 return json.loads(text)
             
             # Mengeksekusi request di background agar mesin uvloop tidak freeze
@@ -75,7 +78,7 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
         await asyncio.sleep(wait_time)
         wait_time *= 2
         
-    raise Exception("Max retries exceeded. Gagal melewati region-lock dengan proxy tersebut.")
+    raise Exception("Max retries exceeded. Gagal memuat data dari Genie.")
 
 def parse_code(url: str) -> str:
     """Mengekstrak ID dari URL"""
