@@ -31,14 +31,18 @@ QUALITY_MAP = {
     "mp3": "320k"
 }
 
+import requests
+import json
+import asyncio
+import aiohttp
+
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
-    """Membungkus requests ke dalam thread dengan Proxy Eksplisit SOCKS5"""
+    """Membungkus requests ke dalam thread dengan Proxy Hong Kong"""
     wait_time = 2
     loop = asyncio.get_event_loop()
     
-    # Masukkan string proxy SOCKS5 Anda di sini
-    # Gunakan skema socks5h:// agar DNS direquest melalui proxy (mencegah DNS leak)
-    PROXY_STRING = "socks5h://USER:PASS@IP:PORT" 
+    # Proxy Hong Kong yang Anda berikan
+    PROXY_STRING = "socks5h://hongkong:hongkong@85.121.244.35:1080" 
     
     proxy_dict = {
         "http": PROXY_STRING,
@@ -48,21 +52,20 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     for attempt in range(max_retries):
         try:
             def _do_request():
-                # Memaksa requests menggunakan proxy secara eksplisit
+                # Mengirim request dengan proxy yang ditentukan
                 resp = requests.get(url, headers=HEADERS, timeout=15, proxies=proxy_dict)
                 text = resp.text.strip()
                 
                 if resp.status_code != 200:
                     raise ValueError(f"HTTP {resp.status_code}")
                     
-                # Validasi blokir
+                # Validasi jika yang dikembalikan adalah halaman blokir HTML
                 if not text.startswith('{') and not text.startswith('['):
                     raise ValueError(f"Diblokir oleh Genie (Respons bukan JSON): {text[:100]}")
                     
-                import json
                 return json.loads(text)
             
-            # Eksekusi fungsi sinkron di background agar mesin turbo uvloop tidak freeze
+            # Mengeksekusi request di background agar mesin uvloop tidak freeze
             return await loop.run_in_executor(None, _do_request)
             
         except Exception as e:
@@ -72,7 +75,7 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
         await asyncio.sleep(wait_time)
         wait_time *= 2
         
-    raise Exception("Max retries exceeded. Gagal melewati region-lock. Pastikan kredensial proxy SOCKS5 aktif.")
+    raise Exception("Max retries exceeded. Gagal melewati region-lock dengan proxy tersebut.")
 
 def parse_code(url: str) -> str:
     """Mengekstrak ID dari URL"""
