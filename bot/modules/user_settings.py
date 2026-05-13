@@ -83,6 +83,11 @@ try:
 except ImportError:
     logging.warning("UserSettings: Gagal mengimpor amazon_manager.")
     amazon_manager = None
+try:
+    from ..helpers.genie.manager import genie_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor genie_manager.")
+    genie_manager = None
 
 # --- IMPORT BUTTONS ---
 # Pastikan Anda sudah menambahkan 'beatport_user_auth_buttons' di bot/helpers/buttons/settings.py
@@ -90,7 +95,7 @@ from ..helpers.buttons.settings import (
     usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
     bs_button, sc_button, id_button, bugs_button, lyrics_button, mv_button,
-    lp_button, khi_button, beatport_user_auth_buttons, beatsource_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons
+    lp_button, khi_button, beatport_user_auth_buttons, beatsource_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button
 )
 from ..helpers.database.mongo_async import database
 from ..helpers.utils import fetch_zip_settings
@@ -1628,6 +1633,32 @@ async def uset_cb(client, query, datatype=""):
             
         return await edit_message(query.message, text, markup=amz_button(quality, user_id))
 
+    # --- GENIE MENU ---
+    if data[1] == "genie" or datatype == "genie":
+        text = f"Choose Genie Audio Quality bellow:"
+        quality = {
+            "flac24": "FLAC 24-bit",
+            "flac16": "FLAC 16-bit",
+            "mp3": "MP3 320kbps"
+        }
+        
+        if not genie_manager:
+            return await edit_message(query.message, "Layanan Genie tidak aktif.")
+
+        # Ambil pengaturan kualitas user saat ini
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("genie_qual", getattr(genie_manager, 'quality', 'flac24')) 
+        
+        # Simpan state sementara ke manager
+        if hasattr(genie_manager, 'setup_quality'):
+            await genie_manager.setup_quality(user_id, current)
+        
+        # Tandai kualitas yang sedang aktif dengan centang
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+            
+        return await edit_message(query.message, text, markup=gn_button(quality, user_id))
+
 
 # --- HANDLER SETTING TIDAL SPECIFIC ---
 @Client.on_callback_query(filters.regex("^utdqs"))
@@ -2151,6 +2182,32 @@ async def uset_amazon(client, query):
     await uset_cb(client, query, "amazon")
 
 
+# --- HANDLER GENIE SPECIFIC ---
+@Client.on_callback_query(filters.regex("^ugns_"))
+async def uset_genie_handler(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # Data format: ugns_flac24, ugns_flac16, ugns_mp3
+    to_set = query.data.split('_')[1]
+    user_id = query.from_user.id
+    
+    if not genie_manager:
+        await query.answer("Layanan Genie tidak aktif!", show_alert=True)
+        return
+    
+    # Simpan pengaturan ke Manager, Memory, dan Database
+    if hasattr(genie_manager, 'setup_quality'):
+        await genie_manager.setup_quality(user_id, to_set)
+        
+    bot_set.user_data.setdefault(user_id, {})['genie_qual'] = to_set 
+    await database.save_user_settings(user_id, {'genie_qual': to_set})
+    
+    # Refresh menu
+    await uset_cb(client, query, "genie")
+
+
 # --- HANDLER CALLBACK BARU UNTUK LIRIK ---
 @Client.on_callback_query(filters.regex("^uset_ly"))
 async def uset_lyrics_handler(client, query):
@@ -2412,11 +2469,23 @@ async def debug(c, m):
         dt_amz += "Tidak ada klien Amazon Music yang aktif."
     # =========================================
 
+    # =========================================
+    # TAMBAHKAN GENIE DEBUG DI SINI
+    # =========================================
+    dt_gn = "\n\nGENIE:\n"
+    if genie_manager:
+        dt_gn += f"Klien Genie aktif.\n"
+        dt_gn += f"Kualitas Default: {getattr(genie_manager, 'quality', 'flac24')}\n"
+        dt_gn += f"Cache User (Global): {len([u for u in bot_set.user_data if 'genie_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_gn += "Tidak ada klien Genie yang aktif."
+    # =========================================
+
     # ZIP SETTINGS DEBUG
     zips = f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
     
     # Combine all debug texts (Pastikan dt_amz ditambahkan ke dalam final_debug_text)
-    final_debug_text = dt_qb + dt_bp + dt_bs + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + zips
+    final_debug_text = dt_qb + dt_bp + dt_bs + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + zips
     
     # Reply safely
     await m.reply(final_debug_text, True)
