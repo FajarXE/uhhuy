@@ -32,28 +32,37 @@ QUALITY_MAP = {
 }
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
-    """Membungkus requests ke dalam thread agar proxy terbaca otomatis tanpa memblokir uvloop"""
+    """Membungkus requests ke dalam thread dengan Proxy Eksplisit SOCKS5"""
     wait_time = 2
     loop = asyncio.get_event_loop()
+    
+    # Masukkan string proxy SOCKS5 Anda di sini
+    # Gunakan skema socks5h:// agar DNS direquest melalui proxy (mencegah DNS leak)
+    PROXY_STRING = "socks5h://USER:PASS@IP:PORT" 
+    
+    proxy_dict = {
+        "http": PROXY_STRING,
+        "https": PROXY_STRING
+    }
     
     for attempt in range(max_retries):
         try:
             def _do_request():
-                # requests akan otomatis menggunakan SOCKS5 proxy dari environment system
-                resp = requests.get(url, headers=HEADERS, timeout=15)
+                # Memaksa requests menggunakan proxy secara eksplisit
+                resp = requests.get(url, headers=HEADERS, timeout=15, proxies=proxy_dict)
                 text = resp.text.strip()
                 
                 if resp.status_code != 200:
                     raise ValueError(f"HTTP {resp.status_code}")
                     
-                # Validasi awal untuk mencegah error 'Expecting value'
+                # Validasi blokir
                 if not text.startswith('{') and not text.startswith('['):
                     raise ValueError(f"Diblokir oleh Genie (Respons bukan JSON): {text[:100]}")
                     
                 import json
                 return json.loads(text)
             
-            # Eksekusi fungsi sinkron di background agar bot tidak freeze
+            # Eksekusi fungsi sinkron di background agar mesin turbo uvloop tidak freeze
             return await loop.run_in_executor(None, _do_request)
             
         except Exception as e:
@@ -63,7 +72,7 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
         await asyncio.sleep(wait_time)
         wait_time *= 2
         
-    raise Exception("Max retries exceeded. Pastikan Proxy SOCKS5 Anda aktif untuk melewati region-lock Korea.")
+    raise Exception("Max retries exceeded. Gagal melewati region-lock. Pastikan kredensial proxy SOCKS5 aktif.")
 
 def parse_code(url: str) -> str:
     """Mengekstrak ID dari URL"""
