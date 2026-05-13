@@ -1271,7 +1271,7 @@ async def uset_upload_mode_handler(client, query):
 
 
 # --- HANDLER UTAMA TOMBOL MENU (PROVIDER SETTINGS) ---
-@Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider|amazon)"))
+@Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider|amazon|genie)"))
 async def uset_cb(client, query, datatype=""):
     if not await check_user(msg=query.message):
         return
