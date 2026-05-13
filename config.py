@@ -448,6 +448,17 @@ class Config:
         logging.warning("Tidak ada kredensial Amazon Music (AMAZON_REFRESH_TOKEN_1, dll) di .env")
 #--------------------
 # --- BATAS TAMBAHAN ---
+
+#--------------------    
+# GENIE
+#--------------------
+    GENIE_PROXY = getenv("GENIE_PROXY", None)
+    if GENIE_PROXY:
+        logging.info(f"Ditemukan Proxy untuk Genie: {GENIE_PROXY}")
+    else:
+        logging.info("Tidak ada proxy untuk Genie. Menggunakan koneksi langsung (Raw IP).")
+#--------------------
+# --- BATAS TAMBAHAN ---
     
 #--------------------
 # RENDER MANAGEMENT
