@@ -11,7 +11,7 @@ from config import Config
 from config import Config
 from bot.logger import LOGGER
 from bot.settings import bot_set
-from bot.helpers.utils import format_string
+from bot.helpers.utils import format_string, post_art_poster, run_concurrent_tasks
 from bot.helpers.message import send_message, edit_message
 from bot.helpers.aria2_helper import aria2_download
 from bot.helpers.uploder import track_upload, album_upload
@@ -168,7 +168,6 @@ async def start_genie(link: str, user: dict):
             api_url = f"https://info.genie.co.kr/info/album?axnm={code}"
             album_data = await fetch_json(session, api_url)
             
-            # Membersihkan URL Encoding (%28, %29, dll)
             album_name = unquote(album_data['album_info']['album_name'])
             album_artist = unquote(album_data['album_info']['artist_name'])
             
@@ -176,7 +175,7 @@ async def start_genie(link: str, user: dict):
             album_dir = os.path.join(download_dir, album_dir_name)
             os.makedirs(album_dir, exist_ok=True)
             
-            # --- FIX: PENGUNDUHAN COVER MENGGUNAKAN AIOHTTP LANGSUNG ---
+            # --- PENANGANAN COVER ART ---
             cover_url = unquote(album_data['album_info'].get("album_img_path600", ""))
             if cover_url.startswith("//"):
                 cover_url = "https:" + cover_url
@@ -184,7 +183,6 @@ async def start_genie(link: str, user: dict):
             cover_path = os.path.join(album_dir, "cover.jpg")
             if cover_url:
                 try:
-                    # Mengunduh langsung secara native agar 100% tersimpan
                     async with session.get(cover_url, headers=HEADERS) as resp:
                         if resp.status == 200:
                             content = await resp.read()
@@ -192,29 +190,8 @@ async def start_genie(link: str, user: dict):
                                 f.write(content)
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
-            # -----------------------------------------------------------
             
-            tracks_metadata = []
-            song_list = album_data.get('album_song_list', [])
-            
-            for index, song in enumerate(song_list, start=1):
-                track_id = song['song_id']
-                
-                # --- FIX: LABEL ACTION DIPAKSA MENJADI 'Download Album' ---
-                track_details = details.copy() if details else {}
-                track_details['action'] = 'Download Album'
-                track_details['title'] = f"[{index}/{len(song_list)}] {unquote(song['song_name'])}"
-                # ----------------------------------------------------------
-                
-                try:
-                    meta = await process_track(session, track_id, quality_pref, album_dir, track_details)
-                    tracks_metadata.append(meta)
-                except Exception as e:
-                    LOGGER.warning(f"Melewati Track ID {track_id}: {e}")
-
-            if not tracks_metadata:
-                raise Exception("Semua lagu dalam album gagal diunduh.")
-
+            # --- SIAPKAN METADATA AWAL ---
             album_metadata = {
                 'title': album_name,
                 'artist': album_artist,
@@ -222,9 +199,38 @@ async def start_genie(link: str, user: dict):
                 'quality': quality_pref.upper(),
                 'type': 'album',
                 'folderpath': album_dir,
-                'tracks': tracks_metadata,
+                'tracks': [], # Akan diisi setelah task selesai
                 'cover': cover_path if os.path.exists(cover_path) else None
             }
+            
+            # FIX 1: POSTING ART POSTER KE TELEGRAM SEBELUM UNDUH LAGU (SEPERTI QOBUZ)
+            album_metadata['poster_msg'] = await post_art_poster(user, album_metadata)
+            
+            tasks = []
+            song_list = album_data.get('album_song_list', [])
+            for index, song in enumerate(song_list, start=1):
+                track_id = song['song_id']
+                # FIX 2: Kirim details=None agar Aria2 unduh diam-diam tanpa membajak UI
+                tasks.append(process_track(session, track_id, quality_pref, album_dir, None))
+
+            # FIX 3: GUNAKAN RADAR BATCH AGAR TEKS STATIS "Download Album"
+            update_details = {
+                'text': "Downloading...",
+                'msg': user['bot_msg'],
+                'title': album_name,
+                'type': 'Album',
+                'action': 'Download' 
+            }
+            
+            # Eksekusi antrean layaknya Qobuz & Bugs
+            task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+            successful_tracks = [res for res in task_results if res]
+
+            if not successful_tracks:
+                raise Exception("Semua lagu dalam album gagal diunduh.")
+
+            album_metadata['tracks'] = successful_tracks
+            album_metadata['totaltracks'] = len(successful_tracks)
             
             await album_upload(album_metadata, user)
 
@@ -241,32 +247,42 @@ async def start_genie(link: str, user: dict):
             pl_dir = os.path.join(download_dir, pl_dir_name)
             os.makedirs(pl_dir, exist_ok=True)
             
-            tracks_metadata = []
-            song_list = pl_data['DATASET']['DATA_SONG']['DATA']
-            
-            for index, song in enumerate(song_list, start=1):
-                track_id = unquote(song['SONG_ID'])
-                if details: details['title'] = f"[{index}/{len(song_list)}] {unquote(song['SONG_NAME'])}"
-                
-                try:
-                    meta = await process_track(session, track_id, quality_pref, pl_dir, details)
-                    tracks_metadata.append(meta)
-                except Exception as e:
-                    LOGGER.warning(f"Melewati Track ID {track_id} di Playlist: {e}")
-
-            if not tracks_metadata:
-                raise Exception("Semua lagu dalam playlist gagal diunduh.")
-
             pl_metadata = {
                 'title': pl_title,
                 'provider': 'Genie',
                 'quality': quality_pref.upper(),
                 'type': 'playlist',
                 'folderpath': pl_dir,
-                'tracks': tracks_metadata
+                'tracks': []
             }
             
-            # bot/helpers/uploder.py menggunakan fungsi album_upload dan playlist_upload secara terpisah
+            # FIX PLAYLIST: POSTING ART POSTER
+            pl_metadata['poster_msg'] = await post_art_poster(user, pl_metadata)
+            
+            tasks = []
+            song_list = pl_data['DATASET']['DATA_SONG']['DATA']
+            for index, song in enumerate(song_list, start=1):
+                track_id = unquote(song['SONG_ID'])
+                tasks.append(process_track(session, track_id, quality_pref, pl_dir, None))
+
+            # FIX PLAYLIST: RADAR BATCH
+            update_details = {
+                'text': "Downloading...",
+                'msg': user['bot_msg'],
+                'title': pl_title,
+                'type': 'Playlist',
+                'action': 'Download' 
+            }
+
+            task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+            successful_tracks = [res for res in task_results if res]
+
+            if not successful_tracks:
+                raise Exception("Semua lagu dalam playlist gagal diunduh.")
+
+            pl_metadata['tracks'] = successful_tracks
+            pl_metadata['totaltracks'] = len(successful_tracks)
+            
             from bot.helpers.uploder import playlist_upload
             await playlist_upload(pl_metadata, user)
 
@@ -274,3 +290,4 @@ async def start_genie(link: str, user: dict):
             raise NotImplementedError("Fitur unduhan Artist Batch untuk Genie belum diterapkan. Harap unduh per-Album.")
         else:
             raise Exception("URL Genie tidak valid atau tidak didukung.")
+        
