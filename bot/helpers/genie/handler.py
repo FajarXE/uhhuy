@@ -65,14 +65,14 @@ def parse_code(url: str) -> str:
     raise ValueError("Invalid URL Genie")
 
 def format_date(raw_date, use_dots=False):
-    """Format string date ke YYYY.MM.DD atau YYYY-MM-DD"""
-    if not raw_date: return "Unknown"
+    """Format string date ke YYYY.MM.DD atau YYYY-MM-DD dengan bersih"""
+    if not raw_date: return ""
     rd = re.sub(r'[^0-9]', '', str(raw_date))
     if len(rd) >= 8:
         if use_dots: return f"{rd[:4]}.{rd[4:6]}.{rd[6:8]}"
         return f"{rd[:4]}-{rd[4:6]}-{rd[6:8]}"
     if len(rd) == 4: return rd
-    return "Unknown"
+    return ""
 
 async def process_track(session, track_id, quality_pref, download_dir, details, extra_meta=None):
     if extra_meta is None: extra_meta = {}
@@ -88,24 +88,21 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
     album_name = unquote(track_data.get("ALBUM_NAME", "Unknown Album"))
     
-    # Ambil Tanggal & Publisher dari Track Data (Fallback jika kosong dari Album)
-    track_date_raw = track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('ISSUE_DATE') or ""
+    # Ambil data Tanggal & Publisher KODE DALAM (Data Asli Streaming Track)
+    track_date_raw = str(track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('ISSUE_DATE') or "")
     track_date_meta = format_date(track_date_raw, use_dots=False)
     
     track_pub = unquote(str(track_data.get('PUBLISHER_NM') or track_data.get('AGENCY_NM') or track_data.get('COPYRIGHT') or ""))
     
-    final_date_meta = extra_meta.get('date', '')
-    if not final_date_meta or final_date_meta == 'Unknown': 
-        final_date_meta = track_date_meta
-        
-    final_pub = extra_meta.get('publisher', '')
-    if not final_pub or final_pub == 'Unknown Label': 
-        final_pub = track_pub if track_pub else "Genie Music"
+    # Gunakan data luar (Album) jika ada, jika tidak, pakai data dalam (Track Stream)
+    final_date_meta = extra_meta.get('date') or track_date_meta
+    final_pub = extra_meta.get('publisher') or track_pub
 
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
     filename = f"{artist} - {title}.{ext}".replace("/", "_")
     filepath = os.path.join(download_dir, filename)
 
+    # Penyusunan Meta Bersih (Tanpa Teks "Unknown")
     metadata = {
         'title': title,
         'artist': artist,
@@ -120,11 +117,11 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'totaltracks': extra_meta.get('totaltracks', '1'),
         'volume': extra_meta.get('volume', '1'),               
         'totalvolume': extra_meta.get('totalvolume', '1'),     
-        'date': final_date_meta,            # YYYY-MM-DD (Aman untuk ID3/FLAC)
-        'release_date': final_date_meta,    # YYYY-MM-DD
+        'date': final_date_meta,            
+        'release_date': final_date_meta,    
         'copyright': final_pub,
         'publisher': final_pub,
-        'label': final_pub,                 # Memaksa MediaInfo untuk membaca Label
+        'label': final_pub,                 
         'organization': final_pub
     }
 
@@ -183,20 +180,18 @@ async def start_genie(link: str, user: dict):
 
             song_list = album_data.get('album_song_list', [])
             
-            # --- PENCARIAN TANGGAL & PUBLISHER (DEEP SCAN) ---
+            # --- PENCARIAN TANGGAL & PUBLISHER KODE LUAR ---
             raw_date = str(album_info_dict.get('album_date') or album_info_dict.get('release_dt') or "")
             if not raw_date and song_list:
                 raw_date = str(song_list[0].get('album_date') or song_list[0].get('release_date') or "")
                 
-            poster_date = format_date(raw_date, use_dots=True)  # YYYY.MM.DD untuk Art Poster
-            meta_date = format_date(raw_date, use_dots=False)   # YYYY-MM-DD untuk File Audio/Mutagen
+            poster_date = format_date(raw_date, use_dots=True)  # Format titik YYYY.MM.DD untuk Art Poster
+            meta_date = format_date(raw_date, use_dots=False)   # Format strip YYYY-MM-DD untuk Mutagen ID3
             
             publisher = unquote(str(album_info_dict.get('publisher_name') or album_info_dict.get('publisher_nm') or album_info_dict.get('agency_name') or album_info_dict.get('agency_nm') or ""))
             if not publisher and song_list:
                 publisher = unquote(str(song_list[0].get('publisher_nm') or song_list[0].get('agency_nm') or ""))
-            if not publisher:
-                publisher = "Genie Music"
-            # -------------------------------------------------
+            # -----------------------------------------------
 
             max_cd = 1
             for s in song_list:
@@ -213,7 +208,8 @@ async def start_genie(link: str, user: dict):
                 'folderpath': album_dir,
                 'tracks': [], 
                 'cover': cover_path if os.path.exists(cover_path) else None,
-                'release_date': poster_date,    # Mengirim format YYYY.MM.DD ke Art Poster
+                'release_date': poster_date,    
+                'date': poster_date,
                 'total_volumes': str(max_cd),   
                 'totalvolumes': str(max_cd),    
                 'totalvolume': str(max_cd),     
@@ -231,8 +227,8 @@ async def start_genie(link: str, user: dict):
                 'albumartist': album_artist,
                 'totaltracks': str(len(song_list)),
                 'totalvolume': str(max_cd),
-                'date': meta_date,              # Mengirim format YYYY-MM-DD ke Mutagen
-                'release_date': meta_date,      # Mengirim format YYYY-MM-DD ke Mutagen
+                'date': meta_date,              
+                'release_date': meta_date,      
                 'copyright': publisher,
                 'publisher': publisher,
                 'label': publisher,
@@ -269,9 +265,9 @@ async def start_genie(link: str, user: dict):
             
             song_list = pl_data['DATASET']['DATA_SONG']['DATA']
             
-            pl_poster_date = "Unknown"
-            pl_meta_date = "Unknown"
-            pl_publisher = "Genie Music"
+            pl_poster_date = ""
+            pl_meta_date = ""
+            pl_publisher = ""
             
             if song_list:
                 first_song = song_list[0]
