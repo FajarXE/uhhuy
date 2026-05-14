@@ -41,7 +41,6 @@ QUALITY_MAP_DISPLAY = {
 }
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
-    """Membungkus requests ke dalam thread dengan Proxy Opsional"""
     wait_time = 2
     loop = asyncio.get_event_loop()
     
@@ -76,7 +75,6 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     raise Exception("Max retries exceeded. Gagal memuat data dari Genie.")
 
 def parse_code(url: str) -> str:
-    """Mengekstrak ID dari URL"""
     match = re.findall(r'\d+', url)
     if match:
         return match[0]
@@ -100,6 +98,23 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
     album_name = unquote(track_data.get("ALBUM_NAME", "Unknown Album"))
     
+    # --- FIX: EKSTRAKSI GANDA UNTUK TANGGAL DAN LABEL (DARI STREAM DATA) ---
+    track_date = str(track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('ISSUE_DATE') or "")
+    if len(track_date) == 8 and track_date.isdigit():
+        track_date = f"{track_date[:4]}-{track_date[4:6]}-{track_date[6:]}"
+        
+    track_pub = unquote(track_data.get('PUBLISHER_NM') or track_data.get('AGENCY_NM') or track_data.get('COPYRIGHT') or "")
+    
+    # Prioritaskan data dari Album. Jika kosong/Unknown, gunakan data dari Track Stream
+    final_date = extra_meta.get('date', '')
+    if not final_date or final_date.lower() == 'unknown':
+        final_date = track_date
+        
+    final_pub = extra_meta.get('copyright', '')
+    if not final_pub or final_pub.lower() == 'unknown label':
+        final_pub = track_pub
+    # ------------------------------------------------------------------------
+
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
     filename = f"{artist} - {title}.{ext}".replace("/", "_")
     filepath = os.path.join(download_dir, filename)
@@ -118,8 +133,8 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'totaltracks': extra_meta.get('totaltracks', '1'),
         'discnumber': extra_meta.get('discnumber', '1'),
         'totalvolume': extra_meta.get('totalvolume', '1'),
-        'date': extra_meta.get('date', ''),
-        'copyright': extra_meta.get('copyright', '')
+        'date': final_date,         # Tanggal Fix
+        'copyright': final_pub      # Label Fix
     }
 
     aria_details = details.copy() if details else {}
@@ -159,7 +174,6 @@ async def start_genie(link: str, user: dict):
         }
 
     async with aiohttp.ClientSession() as session:
-        # LOGIKA TRACK TUNGGAL
         if "xgnm" in link:
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 **Fetching Genie Track...**")
@@ -168,7 +182,6 @@ async def start_genie(link: str, user: dict):
             metadata = await process_track(session, code, quality_pref, download_dir, details, extra_base)
             await track_upload(metadata, user)
 
-        # LOGIKA ALBUM
         elif "axnm" in link:
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 **Fetching Genie Album...**")
@@ -183,7 +196,6 @@ async def start_genie(link: str, user: dict):
             album_dir = os.path.join(download_dir, album_dir_name)
             os.makedirs(album_dir, exist_ok=True)
             
-            # PENANGANAN COVER ART NATIVE AIOHTTP
             cover_url = unquote(album_data['album_info'].get("album_img_path600", ""))
             if cover_url.startswith("//"):
                 cover_url = "https:" + cover_url
@@ -199,26 +211,28 @@ async def start_genie(link: str, user: dict):
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
 
-            # PENYIAPAN TANGGAL RILIS & PUBLISHER
+            # --- FIX: PENCARIAN TANGGAL DAN LABEL SECARA LEBIH LUAS ---
             album_info_dict = album_data.get('album_info', {})
-            raw_date = str(album_info_dict.get('album_date', '') or album_info_dict.get('release_dt', 'Unknown'))
+            
+            raw_date = str(album_info_dict.get('album_date') or album_info_dict.get('release_dt') or album_info_dict.get('release_date') or album_info_dict.get('issue_date') or "")
             raw_date = raw_date.replace('.', '-').replace('/', '-')
-            if len(raw_date) == 8 and raw_date.isdigit(): 
-                release_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+            if len(raw_date) == 8 and raw_date.replace('-', '').isdigit(): 
+                rd = raw_date.replace('-', '')
+                release_date = f"{rd[:4]}-{rd[4:6]}-{rd[6:]}"
             else:
                 release_date = raw_date
                 
-            publisher = unquote(album_info_dict.get('publisher_nm', '') or album_info_dict.get('agency_nm', 'Unknown Label'))
-            song_list = album_data.get('album_song_list', [])
+            publisher = unquote(album_info_dict.get('publisher_name') or album_info_dict.get('publisher_nm') or album_info_dict.get('agency_name') or album_info_dict.get('agency_nm') or album_info_dict.get('planning_nm') or "")
+            # -----------------------------------------------------------
 
-            # KALKULASI TOTAL DISK
+            song_list = album_data.get('album_song_list', [])
             max_cd = 1
             for s in song_list:
                 cd_no = str(s.get('album_cd', '1'))
                 if cd_no.isdigit() and int(cd_no) > max_cd:
                     max_cd = int(cd_no)
             
-            # SIAPKAN METADATA AWAL UNTUK POSTER
+            # --- FIX: KUNCI UNTUK UPLODER DAN POSTER ---
             album_metadata = {
                 'title': album_name,
                 'artist': album_artist,
@@ -229,11 +243,12 @@ async def start_genie(link: str, user: dict):
                 'tracks': [], 
                 'cover': cover_path if os.path.exists(cover_path) else None,
                 'release_date': release_date, 
-                'total_volumes': str(max_cd),         
+                'date': release_date,
+                'totalvolumes': str(max_cd),   # <-- FIX: Diubah agar dikenali utils.py
+                'totalvolume': str(max_cd),    # <-- FIX: Fallback
                 'explicit': 'False'           
             }
             
-            # POSTING ART POSTER KE TELEGRAM SEBELUM UNDUH LAGU
             album_metadata['poster_msg'] = await post_art_poster(user, album_metadata)
 
             extra_meta_base = {
@@ -253,10 +268,8 @@ async def start_genie(link: str, user: dict):
                 cur_extra['tracknumber'] = str(song.get('track_no', index))
                 cur_extra['discnumber'] = str(song.get('album_cd', '1'))
                 
-                # Kirim details=None ke track agar Radar Batch yang mengambil alih UI
                 tasks.append(process_track(session, track_id, quality_pref, album_dir, None, cur_extra))
 
-            # RADAR BATCH AGAR TEKS STATIS "Download Album"
             update_details = {
                 'text': "Downloading...",
                 'msg': user['bot_msg'],
@@ -276,7 +289,6 @@ async def start_genie(link: str, user: dict):
             
             await album_upload(album_metadata, user)
 
-        # LOGIKA PLAYLIST
         elif "plmSeq" in link:
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 **Fetching Genie Playlist...**")
@@ -289,8 +301,6 @@ async def start_genie(link: str, user: dict):
             pl_dir = os.path.join(download_dir, pl_dir_name)
             os.makedirs(pl_dir, exist_ok=True)
             
-            song_list = pl_data['DATASET']['DATA_SONG']['DATA']
-            
             pl_metadata = {
                 'title': pl_title,
                 'provider': 'Genie',
@@ -298,14 +308,16 @@ async def start_genie(link: str, user: dict):
                 'type': 'playlist',
                 'folderpath': pl_dir,
                 'tracks': [],
-                'release_date': 'Unknown',
-                'total_volumes': '1',
+                'release_date': '',
+                'date': '',
+                'totalvolumes': '1',
+                'totalvolume': '1',
                 'explicit': 'False'
             }
             
-            # POSTING ART POSTER UNTUK PLAYLIST
             pl_metadata['poster_msg'] = await post_art_poster(user, pl_metadata)
             
+            song_list = pl_data['DATASET']['DATA_SONG']['DATA']
             tasks = []
             for index, song in enumerate(song_list, start=1):
                 track_id = unquote(song['SONG_ID'])
@@ -313,7 +325,7 @@ async def start_genie(link: str, user: dict):
                     'user_id': user_id,
                     'tracknumber': str(index),
                     'totaltracks': str(len(song_list)),
-                    'date': 'Unknown'
+                    'date': ''
                 }
                 tasks.append(process_track(session, track_id, quality_pref, pl_dir, None, cur_extra))
 
