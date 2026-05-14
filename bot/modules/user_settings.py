@@ -1639,7 +1639,8 @@ async def uset_cb(client, query, datatype=""):
         quality = {
             "flac24": "FLAC 24-bit",
             "flac16": "FLAC 16-bit",
-            "mp3": "MP3 320kbps"
+            "mp3": "MP3 320kbps",
+            "mp3_192": "MP3 192kbps"
         }
         
         if not genie_manager:
