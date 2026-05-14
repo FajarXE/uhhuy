@@ -96,10 +96,12 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     
     title = unquote(track_data.get("SONG_TTS", f"Track_{track_id}"))
     artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
-    album_name = unquote(track_data.get("ALBUM_NAME", "Unknown Album"))
     
-    # --- FIX: EKSTRAKSI GANDA UNTUK TANGGAL DAN LABEL (DARI STREAM DATA) ---
-    track_date = str(track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('ISSUE_DATE') or "")
+    # [FIX 1]: Mengambil data Album dari kunci ALBUM_NM terlebih dahulu
+    album_name = unquote(track_data.get("ALBUM_NM") or track_data.get("ALBUM_NAME") or "Unknown Album")
+    
+    # [FIX 2]: Ekstraksi Ganda untuk Tanggal (Memasukkan RECORD_DATE)
+    track_date = str(track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('ISSUE_DATE') or track_data.get('RECORD_DATE') or "")
     if len(track_date) == 8 and track_date.isdigit():
         track_date = f"{track_date[:4]}-{track_date[4:6]}-{track_date[6:]}"
         
@@ -113,10 +115,16 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     final_pub = extra_meta.get('copyright', '')
     if not final_pub or final_pub.lower() == 'unknown label':
         final_pub = track_pub
-    # ------------------------------------------------------------------------
 
+    # [FIX 3]: Menyisipkan Nomor Track ke Nama File
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
-    filename = f"{artist} - {title}.{ext}".replace("/", "_")
+    track_num_str = str(extra_meta.get('tracknumber', '')).zfill(2)
+    
+    if track_num_str and track_num_str != "00":
+        filename = f"{track_num_str} - {artist} - {title}.{ext}".replace("/", "_")
+    else:
+        filename = f"{artist} - {title}.{ext}".replace("/", "_")
+        
     filepath = os.path.join(download_dir, filename)
 
     metadata = {
@@ -133,8 +141,9 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'totaltracks': extra_meta.get('totaltracks', '1'),
         'discnumber': extra_meta.get('discnumber', '1'),
         'totalvolume': extra_meta.get('totalvolume', '1'),
-        'date': final_date,         # Tanggal Fix
-        'copyright': final_pub      # Label Fix
+        'date': final_date,
+        'copyright': final_pub,
+        'cover': extra_meta.get('cover') # [FIX 4]: Mengambil path cover dari extra_meta
     }
 
     aria_details = details.copy() if details else {}
@@ -211,10 +220,10 @@ async def start_genie(link: str, user: dict):
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
 
-            # --- FIX: PENCARIAN TANGGAL DAN LABEL SECARA LEBIH LUAS ---
+            # [FIX 2]: Pencarian Tanggal secara Luas termasuk record_date
             album_info_dict = album_data.get('album_info', {})
             
-            raw_date = str(album_info_dict.get('album_date') or album_info_dict.get('release_dt') or album_info_dict.get('release_date') or album_info_dict.get('issue_date') or "")
+            raw_date = str(album_info_dict.get('album_date') or album_info_dict.get('release_dt') or album_info_dict.get('release_date') or album_info_dict.get('issue_date') or album_info_dict.get('record_date') or "")
             raw_date = raw_date.replace('.', '-').replace('/', '-')
             if len(raw_date) == 8 and raw_date.replace('-', '').isdigit(): 
                 rd = raw_date.replace('-', '')
@@ -223,8 +232,7 @@ async def start_genie(link: str, user: dict):
                 release_date = raw_date
                 
             publisher = unquote(album_info_dict.get('publisher_name') or album_info_dict.get('publisher_nm') or album_info_dict.get('agency_name') or album_info_dict.get('agency_nm') or album_info_dict.get('planning_nm') or "")
-            # -----------------------------------------------------------
-
+            
             song_list = album_data.get('album_song_list', [])
             max_cd = 1
             for s in song_list:
@@ -232,7 +240,6 @@ async def start_genie(link: str, user: dict):
                 if cd_no.isdigit() and int(cd_no) > max_cd:
                     max_cd = int(cd_no)
             
-            # --- FIX: KUNCI UNTUK UPLODER DAN POSTER ---
             album_metadata = {
                 'title': album_name,
                 'artist': album_artist,
@@ -244,20 +251,22 @@ async def start_genie(link: str, user: dict):
                 'cover': cover_path if os.path.exists(cover_path) else None,
                 'release_date': release_date, 
                 'date': release_date,
-                'totalvolumes': str(max_cd),   # <-- FIX: Diubah agar dikenali utils.py
-                'totalvolume': str(max_cd),    # <-- FIX: Fallback
+                'totalvolumes': str(max_cd),   
+                'totalvolume': str(max_cd),    
                 'explicit': 'False'           
             }
             
             album_metadata['poster_msg'] = await post_art_poster(user, album_metadata)
 
+            # [FIX 4]: Menyisipkan data cover_path ke dalam extra_meta_base
             extra_meta_base = {
                 'user_id': user_id,
                 'albumartist': album_artist,
                 'totaltracks': str(len(song_list)),
                 'totalvolume': str(max_cd),
                 'date': release_date,
-                'copyright': publisher
+                'copyright': publisher,
+                'cover': cover_path if os.path.exists(cover_path) else None 
             }
             
             tasks = []
