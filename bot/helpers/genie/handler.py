@@ -26,19 +26,21 @@ HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 }
 
-# Mapping kualitas berdasarkan API Genie
+# --- [TAMBAHAN: MP3 192kbps] ---
 QUALITY_MAP = {
     "flac24": "24bit",
     "flac16": "16bit",
-    "mp3": "320k"
+    "mp3": "320k",
+    "mp3_192": "192k"
 }
 
-# Format tampilan kualitas untuk UI dan Art Poster
 QUALITY_MAP_DISPLAY = {
     "flac24": "FLAC-24",
     "flac16": "FLAC-16",
-    "mp3": "MP3 320kbps"
+    "mp3": "MP3 320kbps",
+    "mp3_192": "MP3 192kbps"
 }
+# ------------------------------
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     wait_time = 2
@@ -184,22 +186,27 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     if not success:
         raise Exception("Gagal mengunduh file melalui Aria2c.")
 
-    # --- [FIX KUALITAS AKTUAL] ---
-    # Membaca informasi asli langsung dari file audio yang baru saja diunduh
+    # --- [DETEKSI BITRATE KHUSUS UNTUK SETIAP TRACK] ---
     actual_quality = QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper())
     if ext == "mp3":
-        actual_quality = "MP3 320kbps"
+        try:
+            from mutagen.mp3 import MP3
+            audio = MP3(filepath)
+            bps = int(audio.info.bitrate / 1000)
+            actual_quality = f"MP3 {bps}kbps"
+        except Exception:
+            actual_quality = "MP3 320kbps" if quality_pref == 'mp3' else "MP3 192kbps"
     elif ext == "flac":
         try:
             from mutagen.flac import FLAC
             audio = FLAC(filepath)
             bps = audio.info.bits_per_sample
             actual_quality = f"FLAC-{bps}"
-        except Exception as e:
-            LOGGER.debug(f"Gagal membaca bit depth FLAC: {e}")
+        except Exception:
+            pass
             
     metadata['quality'] = actual_quality
-    # -----------------------------
+    # ---------------------------------------------------
         
     try:
         await set_metadata(metadata, extra_meta.get('user_id', 0))
@@ -339,12 +346,11 @@ async def start_genie(link: str, user: dict):
             if not successful_tracks:
                 raise Exception("Semua lagu dalam album gagal diunduh.")
 
-            # --- [FIX POSTER & ZIP ALBUM] ---
-            # Mengganti kualitas album dengan kualitas asli dari lagu pertama yang sukses
-            real_quality = successful_tracks[0].get('quality', album_metadata['quality'])
-            album_metadata['quality'] = real_quality
-            # --------------------------------
-            
+            # --- [PEMBATALAN LOGIKA MIXED] ---
+            # Kita kembalikan label ZIP/Poster sesuai dengan preferensi yang disetel user
+            album_metadata['quality'] = QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper())
+            # ---------------------------------
+
             album_metadata['tracks'] = successful_tracks
             album_metadata['totaltracks'] = len(successful_tracks)
             
@@ -404,10 +410,9 @@ async def start_genie(link: str, user: dict):
             if not successful_tracks:
                 raise Exception("Semua lagu dalam playlist gagal diunduh.")
 
-            # --- [FIX POSTER & ZIP PLAYLIST] ---
-            real_quality = successful_tracks[0].get('quality', pl_metadata['quality'])
-            pl_metadata['quality'] = real_quality
-            # -----------------------------------
+            # --- [PEMBATALAN LOGIKA MIXED] ---
+            pl_metadata['quality'] = QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper())
+            # ---------------------------------
 
             pl_metadata['tracks'] = successful_tracks
             pl_metadata['totaltracks'] = len(successful_tracks)
