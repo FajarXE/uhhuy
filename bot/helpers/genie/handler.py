@@ -97,17 +97,18 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     title = unquote(track_data.get("SONG_TTS", f"Track_{track_id}"))
     artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
     
-    # [FIX 1]: Mengambil data Album dari kunci ALBUM_NM terlebih dahulu
-    album_name = unquote(track_data.get("ALBUM_NM") or track_data.get("ALBUM_NAME") or "Unknown Album")
+    # [FIX 1]: Mengambil data Album dari extra_meta jika ada (dioper dari Album API)
+    album_name = extra_meta.get('album')
+    if not album_name:
+        album_name = unquote(track_data.get("ALBUM_NM") or track_data.get("ALBUM_NAME") or "Unknown Album")
     
-    # [FIX 2]: Ekstraksi Ganda untuk Tanggal (Memasukkan RECORD_DATE)
-    track_date = str(track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('ISSUE_DATE') or track_data.get('RECORD_DATE') or "")
+    # [FIX 2]: Kunci pencarian tanggal sesuai dengan geniez.py
+    track_date = str(track_data.get('ALBUM_RELEASE_DT') or track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('RECORD_DATE') or "")
     if len(track_date) == 8 and track_date.isdigit():
         track_date = f"{track_date[:4]}-{track_date[4:6]}-{track_date[6:]}"
         
     track_pub = unquote(track_data.get('PUBLISHER_NM') or track_data.get('AGENCY_NM') or track_data.get('COPYRIGHT') or "")
     
-    # Prioritaskan data dari Album. Jika kosong/Unknown, gunakan data dari Track Stream
     final_date = extra_meta.get('date', '')
     if not final_date or final_date.lower() == 'unknown':
         final_date = track_date
@@ -116,7 +117,14 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     if not final_pub or final_pub.lower() == 'unknown label':
         final_pub = track_pub
 
-    # [FIX 3]: Menyisipkan Nomor Track ke Nama File
+    # [FIX 3]: Ekstraksi Thumbnail URL untuk Single Track
+    cover_url = extra_meta.get('cover')
+    if not cover_url:
+        raw_cover = unquote(track_data.get("ALBUM_IMG_PATH600") or track_data.get("ALBUM_IMG_PATH") or "")
+        if raw_cover:
+            cover_url = "https:" + raw_cover if raw_cover.startswith("//") else raw_cover
+
+    # Penomoran Track
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
     track_num_str = str(extra_meta.get('tracknumber', '')).zfill(2)
     
@@ -135,6 +143,7 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'provider': 'Genie',
         'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()),
         'filepath': filepath,
+        'tempfolder': download_dir, # <-- WAJIB: Agar auto-download cover berfungsi
         'type': 'track',
         'extension': ext,
         'tracknumber': extra_meta.get('tracknumber', '1'),
@@ -143,7 +152,7 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'totalvolume': extra_meta.get('totalvolume', '1'),
         'date': final_date,
         'copyright': final_pub,
-        'cover': extra_meta.get('cover') # [FIX 4]: Mengambil path cover dari extra_meta
+        'cover': cover_url # <-- Memastikan URL cover diteruskan
     }
 
     aria_details = details.copy() if details else {}
@@ -220,10 +229,9 @@ async def start_genie(link: str, user: dict):
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
 
-            # [FIX 2]: Pencarian Tanggal secara Luas termasuk record_date
+            # [FIX 2]: Menggunakan kunci "album_release_dt" seperti pada geniez.py
             album_info_dict = album_data.get('album_info', {})
-            
-            raw_date = str(album_info_dict.get('album_date') or album_info_dict.get('release_dt') or album_info_dict.get('release_date') or album_info_dict.get('issue_date') or album_info_dict.get('record_date') or "")
+            raw_date = str(album_info_dict.get('album_release_dt') or album_info_dict.get('album_date') or album_info_dict.get('record_date') or "")
             raw_date = raw_date.replace('.', '-').replace('/', '-')
             if len(raw_date) == 8 and raw_date.replace('-', '').isdigit(): 
                 rd = raw_date.replace('-', '')
@@ -231,7 +239,7 @@ async def start_genie(link: str, user: dict):
             else:
                 release_date = raw_date
                 
-            publisher = unquote(album_info_dict.get('publisher_name') or album_info_dict.get('publisher_nm') or album_info_dict.get('agency_name') or album_info_dict.get('agency_nm') or album_info_dict.get('planning_nm') or "")
+            publisher = unquote(album_info_dict.get('publisher_name') or album_info_dict.get('publisher_nm') or album_info_dict.get('agency_name') or "")
             
             song_list = album_data.get('album_song_list', [])
             max_cd = 1
@@ -258,9 +266,10 @@ async def start_genie(link: str, user: dict):
             
             album_metadata['poster_msg'] = await post_art_poster(user, album_metadata)
 
-            # [FIX 4]: Menyisipkan data cover_path ke dalam extra_meta_base
+            # [FIX 1 & 3]: Memasukkan 'album' agar nama album konsisten dan meneruskan cover
             extra_meta_base = {
                 'user_id': user_id,
+                'album': album_name, 
                 'albumartist': album_artist,
                 'totaltracks': str(len(song_list)),
                 'totalvolume': str(max_cd),
