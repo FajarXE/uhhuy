@@ -114,13 +114,11 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     if not final_pub or final_pub.lower() == 'unknown label':
         final_pub = track_pub
 
-    # --- [FIX THUMBNAIL & NAMA ALBUM SINGLE TRACK LENGKAP] ---
     cover_url = extra_meta.get('cover')
     raw_cover = ""
     if not cover_url:
         raw_cover = unquote(track_data.get("ALBUM_IMG_PATH600") or track_data.get("ALBUM_IMG_PATH") or "")
         
-    # Jika cover gagal ATAU nama album kosong/Unknown, tembak API Album secara diam-diam!
     album_id = track_data.get("ALBUM_ID")
     if album_id and (not raw_cover or not album_name or album_name == "Unknown Album"):
         try:
@@ -128,24 +126,18 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
             alb_data = await fetch_json(session, alb_api)
             alb_info = alb_data.get('album_info', {})
             
-            # Curi URL Cover jika masih kosong
             if not raw_cover:
                 raw_cover = unquote(alb_info.get("album_img_path600", ""))
-            
-            # Curi Nama Album jika masih kosong
             if not album_name or album_name == "Unknown Album":
                 album_name = unquote(alb_info.get("album_name", "Unknown Album"))
-                
         except Exception as e:
             LOGGER.debug(f"Pencarian paksa data album gagal: {e}")
             
     if raw_cover and not cover_url:
         cover_url = "https:" + raw_cover if raw_cover.startswith("//") else raw_cover
         
-    # Pengaman terakhir jika tetap tidak ketemu
     if not album_name:
         album_name = "Unknown Album"
-    # --------------------------------------------
 
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
     track_num_str = str(extra_meta.get('tracknumber', '')).zfill(2)
@@ -191,6 +183,23 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     success = await aria2_download(stream_url, filepath, aria_details)
     if not success:
         raise Exception("Gagal mengunduh file melalui Aria2c.")
+
+    # --- [FIX KUALITAS AKTUAL] ---
+    # Membaca informasi asli langsung dari file audio yang baru saja diunduh
+    actual_quality = QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper())
+    if ext == "mp3":
+        actual_quality = "MP3 320kbps"
+    elif ext == "flac":
+        try:
+            from mutagen.flac import FLAC
+            audio = FLAC(filepath)
+            bps = audio.info.bits_per_sample
+            actual_quality = f"FLAC-{bps}"
+        except Exception as e:
+            LOGGER.debug(f"Gagal membaca bit depth FLAC: {e}")
+            
+    metadata['quality'] = actual_quality
+    # -----------------------------
         
     try:
         await set_metadata(metadata, extra_meta.get('user_id', 0))
@@ -330,6 +339,12 @@ async def start_genie(link: str, user: dict):
             if not successful_tracks:
                 raise Exception("Semua lagu dalam album gagal diunduh.")
 
+            # --- [FIX POSTER & ZIP ALBUM] ---
+            # Mengganti kualitas album dengan kualitas asli dari lagu pertama yang sukses
+            real_quality = successful_tracks[0].get('quality', album_metadata['quality'])
+            album_metadata['quality'] = real_quality
+            # --------------------------------
+            
             album_metadata['tracks'] = successful_tracks
             album_metadata['totaltracks'] = len(successful_tracks)
             
@@ -388,6 +403,11 @@ async def start_genie(link: str, user: dict):
 
             if not successful_tracks:
                 raise Exception("Semua lagu dalam playlist gagal diunduh.")
+
+            # --- [FIX POSTER & ZIP PLAYLIST] ---
+            real_quality = successful_tracks[0].get('quality', pl_metadata['quality'])
+            pl_metadata['quality'] = real_quality
+            # -----------------------------------
 
             pl_metadata['tracks'] = successful_tracks
             pl_metadata['totaltracks'] = len(successful_tracks)
