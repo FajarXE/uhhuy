@@ -346,10 +346,20 @@ async def start_genie(link: str, user: dict):
             if not successful_tracks:
                 raise Exception("Semua lagu dalam album gagal diunduh.")
 
-            # --- [PEMBATALAN LOGIKA MIXED] ---
-            # Kita kembalikan label ZIP/Poster sesuai dengan preferensi yang disetel user
-            album_metadata['quality'] = QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper())
-            # ---------------------------------
+            # --- [PERBAIKAN KUALITAS AKTUAL TANPA LABEL MIXED] ---
+            # Mengambil kualitas tertinggi yang ada di dalam album
+            qualities_found = [t.get('quality', '') for t in successful_tracks]
+            if any("FLAC-24" in q for q in qualities_found):
+                album_metadata['quality'] = "FLAC-24"
+            elif any("FLAC-16" in q for q in qualities_found):
+                album_metadata['quality'] = "FLAC-16"
+            elif any("320kbps" in q for q in qualities_found):
+                album_metadata['quality'] = "MP3 320kbps"
+            elif any("192kbps" in q for q in qualities_found):
+                album_metadata['quality'] = "MP3 192kbps"
+            else:
+                album_metadata['quality'] = successful_tracks[0].get('quality', album_metadata['quality'])
+            # -----------------------------------------------------
 
             album_metadata['tracks'] = successful_tracks
             album_metadata['totaltracks'] = len(successful_tracks)
@@ -410,9 +420,19 @@ async def start_genie(link: str, user: dict):
             if not successful_tracks:
                 raise Exception("Semua lagu dalam playlist gagal diunduh.")
 
-            # --- [PEMBATALAN LOGIKA MIXED] ---
-            pl_metadata['quality'] = QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper())
-            # ---------------------------------
+            # --- [PERBAIKAN KUALITAS AKTUAL TANPA LABEL MIXED] ---
+            qualities_found = [t.get('quality', '') for t in successful_tracks]
+            if any("FLAC-24" in q for q in qualities_found):
+                pl_metadata['quality'] = "FLAC-24"
+            elif any("FLAC-16" in q for q in qualities_found):
+                pl_metadata['quality'] = "FLAC-16"
+            elif any("320kbps" in q for q in qualities_found):
+                pl_metadata['quality'] = "MP3 320kbps"
+            elif any("192kbps" in q for q in qualities_found):
+                pl_metadata['quality'] = "MP3 192kbps"
+            else:
+                pl_metadata['quality'] = successful_tracks[0].get('quality', pl_metadata['quality'])
+            # -----------------------------------------------------
 
             pl_metadata['tracks'] = successful_tracks
             pl_metadata['totaltracks'] = len(successful_tracks)
