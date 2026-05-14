@@ -198,16 +198,23 @@ async def start_genie(link: str, user: dict):
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
             
-            # --- SIAPKAN METADATA AWAL ---
+            # --- FIX: AMBIL RELEASE DATE DARI API ---
+            album_info_dict = album_data.get('album_info', {})
+            release_date = album_info_dict.get('album_date', '') or album_info_dict.get('release_dt', 'Unknown')
+            
+            # --- SIAPKAN METADATA AWAL (DENGAN SUNTIKAN INFO TAMBAHAN) ---
             album_metadata = {
                 'title': album_name,
                 'artist': album_artist,
                 'provider': 'Genie',
-                'quality': quality_pref.upper(),
+                'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()), # FIX KUALITAS TAMPILAN
                 'type': 'album',
                 'folderpath': album_dir,
                 'tracks': [], # Akan diisi setelah task selesai
-                'cover': cover_path if os.path.exists(cover_path) else None
+                'cover': cover_path if os.path.exists(cover_path) else None,
+                'release_date': release_date, # SUNTIKAN TANGGAL RILIS
+                'total_volumes': '1',         # SUNTIKAN TOTAL DISK/VOLUME
+                'explicit': 'False'           # SUNTIKAN EXPLICIT
             }
             
             # FIX 1: POSTING ART POSTER KE TELEGRAM SEBELUM UNDUH LAGU (SEPERTI QOBUZ)
@@ -254,13 +261,17 @@ async def start_genie(link: str, user: dict):
             pl_dir = os.path.join(download_dir, pl_dir_name)
             os.makedirs(pl_dir, exist_ok=True)
             
+            # --- FIX: SUNTIKAN INFO TAMBAHAN PLAYLIST ---
             pl_metadata = {
                 'title': pl_title,
                 'provider': 'Genie',
-                'quality': quality_pref.upper(),
+                'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()), # FIX KUALITAS TAMPILAN
                 'type': 'playlist',
                 'folderpath': pl_dir,
-                'tracks': []
+                'tracks': [],
+                'release_date': 'Unknown',
+                'total_volumes': '1',
+                'explicit': 'False'
             }
             
             # FIX PLAYLIST: POSTING ART POSTER
@@ -297,4 +308,3 @@ async def start_genie(link: str, user: dict):
             raise NotImplementedError("Fitur unduhan Artist Batch untuk Genie belum diterapkan. Harap unduh per-Album.")
         else:
             raise Exception("URL Genie tidak valid atau tidak didukung.")
-        
