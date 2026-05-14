@@ -5,16 +5,17 @@ import re
 import asyncio
 import aiohttp
 import requests
+import json
 from urllib.parse import unquote
-from config import Config
 
 from config import Config
 from bot.logger import LOGGER
 from bot.settings import bot_set
-from bot.helpers.utils import format_string, post_art_poster, run_concurrent_tasks
 from bot.helpers.message import send_message, edit_message
+from bot.helpers.utils import format_string, post_art_poster, run_concurrent_tasks
 from bot.helpers.aria2_helper import aria2_download
-from bot.helpers.uploder import track_upload, album_upload
+from bot.helpers.uploder import track_upload, album_upload, playlist_upload
+from bot.helpers.metadata import set_metadata
 
 from .manager import genie_manager
 
@@ -32,27 +33,19 @@ QUALITY_MAP = {
     "mp3": "320k"
 }
 
-# --- FIX 1: FORMAT TAMPILAN KUALITAS UNTUK POSTER ---
+# Format tampilan kualitas untuk UI dan Art Poster
 QUALITY_MAP_DISPLAY = {
     "flac24": "FLAC-24",
     "flac16": "FLAC-16",
     "mp3": "MP3 320kbps"
 }
 
-import requests
-import json
-import asyncio
-import aiohttp
-
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     """Membungkus requests ke dalam thread dengan Proxy Opsional"""
     wait_time = 2
     loop = asyncio.get_event_loop()
     
-    # Mengambil proxy dari config.py
     PROXY_STRING = getattr(Config, 'GENIE_PROXY', None) 
-    
-    # Jika proxy ada, buat dictionary. Jika tidak, atur sebagai None
     proxy_dict = {
         "http": PROXY_STRING,
         "https": PROXY_STRING
@@ -61,25 +54,20 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     for attempt in range(max_retries):
         try:
             def _do_request():
-                # Parameter proxies akan menerima dict atau None dengan aman
                 resp = requests.get(url, headers=HEADERS, timeout=15, proxies=proxy_dict)
                 text = resp.text.strip()
                 
                 if resp.status_code != 200:
                     raise ValueError(f"HTTP {resp.status_code}")
                     
-                # Validasi jika IP diblokir (Respons bukan JSON)
                 if not text.startswith('{') and not text.startswith('['):
                     raise ValueError(f"Diblokir oleh Genie (Respons bukan JSON): {text[:100]}")
                     
-                import json
                 return json.loads(text)
             
-            # Mengeksekusi request di background agar mesin uvloop tidak freeze
             return await loop.run_in_executor(None, _do_request)
             
         except Exception as e:
-            from bot.logger import LOGGER
             LOGGER.warning(f"Genie Request failed: {e}. Retrying... ({attempt + 1}/{max_retries})")
         
         await asyncio.sleep(wait_time)
@@ -94,7 +82,9 @@ def parse_code(url: str) -> str:
         return match[0]
     raise ValueError("Invalid URL Genie")
 
-async def process_track(session, track_id, quality_pref, download_dir, details):
+async def process_track(session, track_id, quality_pref, download_dir, details, extra_meta=None):
+    if extra_meta is None: extra_meta = {}
+    
     bitrate = QUALITY_MAP.get(quality_pref, "24bit")
     api_url = f"https://stm.genie.co.kr/player/j_StmInfo.json?uxtk=3173869132189.992&sign=Y&lpr=&svc=IV&bitrate={bitrate}&stk=Q3RoM0lJWUErZFdZVE1mREN2bi85UT09&itn=Y&dcd=ANDROID_ID%3A06568f5097d60690&xgnm={track_id}&uip=172.16.2.15&dvm=oppo%20r9tm&apvn=40607&ovn=5.1.1&unm=322011981&mts=Y"
     
@@ -106,11 +96,9 @@ async def process_track(session, track_id, quality_pref, download_dir, details):
 
     stream_url = unquote(track_data["STREAMING_MP3_URL"])
     
-    # --- FIX: Tambahkan unquote untuk membersihkan %28 dan %29 ---
     title = unquote(track_data.get("SONG_TTS", f"Track_{track_id}"))
     artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
     album_name = unquote(track_data.get("ALBUM_NAME", "Unknown Album"))
-    # -----------------------------------------------------------
     
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
     filename = f"{artist} - {title}.{ext}".replace("/", "_")
@@ -120,11 +108,18 @@ async def process_track(session, track_id, quality_pref, download_dir, details):
         'title': title,
         'artist': artist,
         'album': album_name,
+        'albumartist': extra_meta.get('albumartist', artist),
         'provider': 'Genie',
         'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()),
         'filepath': filepath,
         'type': 'track',
-        'extension': ext
+        'extension': ext,
+        'tracknumber': extra_meta.get('tracknumber', '1'),
+        'totaltracks': extra_meta.get('totaltracks', '1'),
+        'discnumber': extra_meta.get('discnumber', '1'),
+        'totalvolume': extra_meta.get('totalvolume', '1'),
+        'date': extra_meta.get('date', ''),
+        'copyright': extra_meta.get('copyright', '')
     }
 
     aria_details = details.copy() if details else {}
@@ -133,6 +128,11 @@ async def process_track(session, track_id, quality_pref, download_dir, details):
     success = await aria2_download(stream_url, filepath, aria_details)
     if not success:
         raise Exception("Gagal mengunduh file melalui Aria2c.")
+        
+    try:
+        await set_metadata(metadata, extra_meta.get('user_id', 0))
+    except Exception as e:
+        LOGGER.warning(f"Gagal menulis metadata ke file {filename}: {e}")
         
     return metadata
 
@@ -164,7 +164,8 @@ async def start_genie(link: str, user: dict):
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 **Fetching Genie Track...**")
             
-            metadata = await process_track(session, code, quality_pref, download_dir, details)
+            extra_base = {'user_id': user_id}
+            metadata = await process_track(session, code, quality_pref, download_dir, details, extra_base)
             await track_upload(metadata, user)
 
         # LOGIKA ALBUM
@@ -182,7 +183,7 @@ async def start_genie(link: str, user: dict):
             album_dir = os.path.join(download_dir, album_dir_name)
             os.makedirs(album_dir, exist_ok=True)
             
-            # --- PENANGANAN COVER ART ---
+            # PENANGANAN COVER ART NATIVE AIOHTTP
             cover_url = unquote(album_data['album_info'].get("album_img_path600", ""))
             if cover_url.startswith("//"):
                 cover_url = "https:" + cover_url
@@ -197,37 +198,65 @@ async def start_genie(link: str, user: dict):
                                 f.write(content)
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
-            
-            # --- FIX: AMBIL RELEASE DATE DARI API ---
+
+            # PENYIAPAN TANGGAL RILIS & PUBLISHER
             album_info_dict = album_data.get('album_info', {})
-            release_date = album_info_dict.get('album_date', '') or album_info_dict.get('release_dt', 'Unknown')
+            raw_date = str(album_info_dict.get('album_date', '') or album_info_dict.get('release_dt', 'Unknown'))
+            raw_date = raw_date.replace('.', '-').replace('/', '-')
+            if len(raw_date) == 8 and raw_date.isdigit(): 
+                release_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+            else:
+                release_date = raw_date
+                
+            publisher = unquote(album_info_dict.get('publisher_nm', '') or album_info_dict.get('agency_nm', 'Unknown Label'))
+            song_list = album_data.get('album_song_list', [])
+
+            # KALKULASI TOTAL DISK
+            max_cd = 1
+            for s in song_list:
+                cd_no = str(s.get('album_cd', '1'))
+                if cd_no.isdigit() and int(cd_no) > max_cd:
+                    max_cd = int(cd_no)
             
-            # --- SIAPKAN METADATA AWAL (DENGAN SUNTIKAN INFO TAMBAHAN) ---
+            # SIAPKAN METADATA AWAL UNTUK POSTER
             album_metadata = {
                 'title': album_name,
                 'artist': album_artist,
                 'provider': 'Genie',
-                'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()), # FIX KUALITAS TAMPILAN
+                'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()),
                 'type': 'album',
                 'folderpath': album_dir,
-                'tracks': [], # Akan diisi setelah task selesai
+                'tracks': [], 
                 'cover': cover_path if os.path.exists(cover_path) else None,
-                'release_date': release_date, # SUNTIKAN TANGGAL RILIS
-                'total_volumes': '1',         # SUNTIKAN TOTAL DISK/VOLUME
-                'explicit': 'False'           # SUNTIKAN EXPLICIT
+                'release_date': release_date, 
+                'total_volumes': str(max_cd),         
+                'explicit': 'False'           
             }
             
-            # FIX 1: POSTING ART POSTER KE TELEGRAM SEBELUM UNDUH LAGU (SEPERTI QOBUZ)
+            # POSTING ART POSTER KE TELEGRAM SEBELUM UNDUH LAGU
             album_metadata['poster_msg'] = await post_art_poster(user, album_metadata)
+
+            extra_meta_base = {
+                'user_id': user_id,
+                'albumartist': album_artist,
+                'totaltracks': str(len(song_list)),
+                'totalvolume': str(max_cd),
+                'date': release_date,
+                'copyright': publisher
+            }
             
             tasks = []
-            song_list = album_data.get('album_song_list', [])
             for index, song in enumerate(song_list, start=1):
                 track_id = song['song_id']
-                # FIX 2: Kirim details=None agar Aria2 unduh diam-diam tanpa membajak UI
-                tasks.append(process_track(session, track_id, quality_pref, album_dir, None))
+                
+                cur_extra = extra_meta_base.copy()
+                cur_extra['tracknumber'] = str(song.get('track_no', index))
+                cur_extra['discnumber'] = str(song.get('album_cd', '1'))
+                
+                # Kirim details=None ke track agar Radar Batch yang mengambil alih UI
+                tasks.append(process_track(session, track_id, quality_pref, album_dir, None, cur_extra))
 
-            # FIX 3: GUNAKAN RADAR BATCH AGAR TEKS STATIS "Download Album"
+            # RADAR BATCH AGAR TEKS STATIS "Download Album"
             update_details = {
                 'text': "Downloading...",
                 'msg': user['bot_msg'],
@@ -236,7 +265,6 @@ async def start_genie(link: str, user: dict):
                 'action': 'Download' 
             }
             
-            # Eksekusi antrean layaknya Qobuz & Bugs
             task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
             successful_tracks = [res for res in task_results if res]
 
@@ -261,11 +289,12 @@ async def start_genie(link: str, user: dict):
             pl_dir = os.path.join(download_dir, pl_dir_name)
             os.makedirs(pl_dir, exist_ok=True)
             
-            # --- FIX: SUNTIKAN INFO TAMBAHAN PLAYLIST ---
+            song_list = pl_data['DATASET']['DATA_SONG']['DATA']
+            
             pl_metadata = {
                 'title': pl_title,
                 'provider': 'Genie',
-                'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()), # FIX KUALITAS TAMPILAN
+                'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()),
                 'type': 'playlist',
                 'folderpath': pl_dir,
                 'tracks': [],
@@ -274,16 +303,20 @@ async def start_genie(link: str, user: dict):
                 'explicit': 'False'
             }
             
-            # FIX PLAYLIST: POSTING ART POSTER
+            # POSTING ART POSTER UNTUK PLAYLIST
             pl_metadata['poster_msg'] = await post_art_poster(user, pl_metadata)
             
             tasks = []
-            song_list = pl_data['DATASET']['DATA_SONG']['DATA']
             for index, song in enumerate(song_list, start=1):
                 track_id = unquote(song['SONG_ID'])
-                tasks.append(process_track(session, track_id, quality_pref, pl_dir, None))
+                cur_extra = {
+                    'user_id': user_id,
+                    'tracknumber': str(index),
+                    'totaltracks': str(len(song_list)),
+                    'date': 'Unknown'
+                }
+                tasks.append(process_track(session, track_id, quality_pref, pl_dir, None, cur_extra))
 
-            # FIX PLAYLIST: RADAR BATCH
             update_details = {
                 'text': "Downloading...",
                 'msg': user['bot_msg'],
