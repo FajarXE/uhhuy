@@ -26,7 +26,6 @@ HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 }
 
-# --- [TAMBAHAN: MP3 192kbps] ---
 QUALITY_MAP = {
     "flac24": "24bit",
     "flac16": "16bit",
@@ -40,7 +39,6 @@ QUALITY_MAP_DISPLAY = {
     "mp3": "MP3 320kbps",
     "mp3_192": "MP3 192kbps"
 }
-# ------------------------------
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     wait_time = 2
@@ -186,7 +184,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     if not success:
         raise Exception("Gagal mengunduh file melalui Aria2c.")
 
-    # --- [DETEKSI BITRATE KHUSUS UNTUK SETIAP TRACK] ---
     actual_quality = QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper())
     if ext == "mp3":
         try:
@@ -206,7 +203,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
             pass
             
     metadata['quality'] = actual_quality
-    # ---------------------------------------------------
         
     try:
         await set_metadata(metadata, extra_meta.get('user_id', 0))
@@ -340,14 +336,15 @@ async def start_genie(link: str, user: dict):
                 'action': 'Download' 
             }
             
-            task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+            # --- [FIX LIMIT=4] Diterapkan pada Album ---
+            task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
+            # -------------------------------------------
+            
             successful_tracks = [res for res in task_results if res]
 
             if not successful_tracks:
                 raise Exception("Semua lagu dalam album gagal diunduh.")
 
-            # --- [PERBAIKAN KUALITAS AKTUAL TANPA LABEL MIXED] ---
-            # Mengambil kualitas tertinggi yang ada di dalam album
             qualities_found = [t.get('quality', '') for t in successful_tracks]
             if any("FLAC-24" in q for q in qualities_found):
                 album_metadata['quality'] = "FLAC-24"
@@ -359,7 +356,6 @@ async def start_genie(link: str, user: dict):
                 album_metadata['quality'] = "MP3 192kbps"
             else:
                 album_metadata['quality'] = successful_tracks[0].get('quality', album_metadata['quality'])
-            # -----------------------------------------------------
 
             album_metadata['tracks'] = successful_tracks
             album_metadata['totaltracks'] = len(successful_tracks)
@@ -414,13 +410,15 @@ async def start_genie(link: str, user: dict):
                 'action': 'Download' 
             }
 
-            task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+            # --- [FIX LIMIT=4] Diterapkan pada Playlist ---
+            task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
+            # ----------------------------------------------
+            
             successful_tracks = [res for res in task_results if res]
 
             if not successful_tracks:
                 raise Exception("Semua lagu dalam playlist gagal diunduh.")
 
-            # --- [PERBAIKAN KUALITAS AKTUAL TANPA LABEL MIXED] ---
             qualities_found = [t.get('quality', '') for t in successful_tracks]
             if any("FLAC-24" in q for q in qualities_found):
                 pl_metadata['quality'] = "FLAC-24"
@@ -432,7 +430,6 @@ async def start_genie(link: str, user: dict):
                 pl_metadata['quality'] = "MP3 192kbps"
             else:
                 pl_metadata['quality'] = successful_tracks[0].get('quality', pl_metadata['quality'])
-            # -----------------------------------------------------
 
             pl_metadata['tracks'] = successful_tracks
             pl_metadata['totaltracks'] = len(successful_tracks)
