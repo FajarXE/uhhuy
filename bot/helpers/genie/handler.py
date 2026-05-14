@@ -38,6 +38,14 @@ QUALITY_MAP_DISPLAY = {
     "mp3": "MP3 320kbps"
 }
 
+def get_ci(d, keys):
+    """Mencari dictionary dengan Case-Insensitive"""
+    lower_d = {k.lower(): v for k, v in d.items()}
+    for key in keys:
+        if key.lower() in lower_d and lower_d[key.lower()]:
+            return str(lower_d[key.lower()])
+    return ""
+
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     wait_time = 2
     loop = asyncio.get_event_loop()
@@ -65,14 +73,15 @@ def parse_code(url: str) -> str:
     raise ValueError("Invalid URL Genie")
 
 def format_date(raw_date, use_dots=False):
-    """Format string date ke YYYY.MM.DD atau YYYY-MM-DD dengan bersih"""
-    if not raw_date: return ""
+    """Format string date ke YYYY.MM.DD atau YYYY-MM-DD, dan ambil Tahun jika hanya ada 4 digit"""
+    if not raw_date or str(raw_date).lower() == 'unknown': return "Unknown"
     rd = re.sub(r'[^0-9]', '', str(raw_date))
     if len(rd) >= 8:
         if use_dots: return f"{rd[:4]}.{rd[4:6]}.{rd[6:8]}"
         return f"{rd[:4]}-{rd[4:6]}-{rd[6:8]}"
-    if len(rd) == 4: return rd
-    return ""
+    if len(rd) >= 4: 
+        return rd[:4] # FIX: Mengembalikan 4 digit (Tahun) jika tanggal dan bulan tidak ada
+    return "Unknown"
 
 async def process_track(session, track_id, quality_pref, download_dir, details, extra_meta=None):
     if extra_meta is None: extra_meta = {}
@@ -84,25 +93,28 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     except: raise Exception("Gagal mendapatkan data streaming untuk track ini.")
 
     stream_url = unquote(track_data["STREAMING_MP3_URL"])
-    title = unquote(track_data.get("SONG_TTS", f"Track_{track_id}"))
-    artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
-    album_name = unquote(track_data.get("ALBUM_NAME", "Unknown Album"))
     
-    # Ambil data Tanggal & Publisher KODE DALAM (Data Asli Streaming Track)
+    # FIX: Prioritaskan nama yang dilempar dari outer loop, jika kosong baru cari dari API stream
+    title = extra_meta.get('title') or unquote(get_ci(track_data, ['SONG_TTS', 'SONG_NAME', 'SONG_NM'])) or f"Track_{track_id}"
+    artist = extra_meta.get('artist') or unquote(get_ci(track_data, ['ARTIST_NAME', 'ARTIST_NM'])) or "Unknown Artist"
+    album_name = extra_meta.get('album') or unquote(get_ci(track_data, ['ALBUM_NAME', 'ALBUM_NM'])) or "Unknown Album"
+    
     track_date_raw = str(track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('ISSUE_DATE') or "")
     track_date_meta = format_date(track_date_raw, use_dots=False)
-    
     track_pub = unquote(str(track_data.get('PUBLISHER_NM') or track_data.get('AGENCY_NM') or track_data.get('COPYRIGHT') or ""))
     
-    # Gunakan data luar (Album) jika ada, jika tidak, pakai data dalam (Track Stream)
-    final_date_meta = extra_meta.get('date') or track_date_meta
-    final_pub = extra_meta.get('publisher') or track_pub
+    final_date_meta = extra_meta.get('date', '')
+    if not final_date_meta or final_date_meta.lower() == 'unknown': 
+        final_date_meta = track_date_meta
+        
+    final_pub = extra_meta.get('publisher', '')
+    if not final_pub or final_pub.lower() == 'unknown label': 
+        final_pub = track_pub if track_pub else "Genie Music"
 
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
     filename = f"{artist} - {title}.{ext}".replace("/", "_")
     filepath = os.path.join(download_dir, filename)
 
-    # Penyusunan Meta Bersih (Tanpa Teks "Unknown")
     metadata = {
         'title': title,
         'artist': artist,
@@ -180,18 +192,18 @@ async def start_genie(link: str, user: dict):
 
             song_list = album_data.get('album_song_list', [])
             
-            # --- PENCARIAN TANGGAL & PUBLISHER KODE LUAR ---
             raw_date = str(album_info_dict.get('album_date') or album_info_dict.get('release_dt') or "")
             if not raw_date and song_list:
                 raw_date = str(song_list[0].get('album_date') or song_list[0].get('release_date') or "")
                 
-            poster_date = format_date(raw_date, use_dots=True)  # Format titik YYYY.MM.DD untuk Art Poster
-            meta_date = format_date(raw_date, use_dots=False)   # Format strip YYYY-MM-DD untuk Mutagen ID3
+            poster_date = format_date(raw_date, use_dots=True) 
+            meta_date = format_date(raw_date, use_dots=False)   
             
             publisher = unquote(str(album_info_dict.get('publisher_name') or album_info_dict.get('publisher_nm') or album_info_dict.get('agency_name') or album_info_dict.get('agency_nm') or ""))
             if not publisher and song_list:
                 publisher = unquote(str(song_list[0].get('publisher_nm') or song_list[0].get('agency_nm') or ""))
-            # -----------------------------------------------
+            if not publisher:
+                publisher = "Genie Music"
 
             max_cd = 1
             for s in song_list:
@@ -224,6 +236,7 @@ async def start_genie(link: str, user: dict):
 
             extra_meta_base = {
                 'user_id': user_id,
+                'album': album_name,            # FIX: Kirim judul Album agar Track tidak Unknown
                 'albumartist': album_artist,
                 'totaltracks': str(len(song_list)),
                 'totalvolume': str(max_cd),
@@ -239,6 +252,9 @@ async def start_genie(link: str, user: dict):
             for index, song in enumerate(song_list, start=1):
                 track_id = song['song_id']
                 cur_extra = extra_meta_base.copy()
+                # FIX: Kirim judul track dan artist dari list agar akurat
+                cur_extra['title'] = unquote(song.get('song_name', ''))
+                cur_extra['artist'] = unquote(song.get('artist_name', ''))
                 cur_extra['tracknumber'] = str(song.get('track_no', index))
                 cur_extra['volume'] = str(song.get('album_cd', '1'))
                 tasks.append(process_track(session, track_id, quality_pref, album_dir, None, cur_extra))
@@ -265,9 +281,9 @@ async def start_genie(link: str, user: dict):
             
             song_list = pl_data['DATASET']['DATA_SONG']['DATA']
             
-            pl_poster_date = ""
-            pl_meta_date = ""
-            pl_publisher = ""
+            pl_poster_date = "Unknown"
+            pl_meta_date = "Unknown"
+            pl_publisher = "Genie Music"
             
             if song_list:
                 first_song = song_list[0]
@@ -304,6 +320,9 @@ async def start_genie(link: str, user: dict):
                 track_id = unquote(song['SONG_ID'])
                 cur_extra = {
                     'user_id': user_id,
+                    'album': pl_title,       # FIX: Jadikan judul playlist sebagai Album name
+                    'title': unquote(song.get('SONG_NAME', '')),
+                    'artist': unquote(song.get('ARTIST_NAME', '')),
                     'tracknumber': str(index),
                     'totaltracks': str(len(song_list)),
                     'date': pl_meta_date,
