@@ -892,7 +892,7 @@ async def amz_global_verify_cb(client, query):
 @Client.on_callback_query(filters.regex(pattern=r"^gnP"))
 async def genie_cb(c, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
-        quality = {"flac24": "FLAC 24-bit", "flac16": "FLAC 16-bit", "mp3": "MP3 320kbps"}
+        quality = {"flac24": "FLAC 24-bit", "flac16": "FLAC 16-bit", "mp3": "MP3 320kbps", "mp3_192": "MP3 192kbps"}
         if not genie_manager:
             return await edit_message(cb.message, "Layanan Genie tidak aktif.")
         
