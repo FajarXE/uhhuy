@@ -26,22 +26,21 @@ HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 }
 
-# --- [FIX HTTP 404 / AUTO FALLBACK BITRATE] ---
-# Angka "k" dihapus. Memakai array untuk otomatis mencoba kualitas lain jika API merespons 404.
+# --- [FIX ID TOMBOL MP3 192] ---
 QUALITY_MAP = {
     "flac24": ["24bit", "16bit", "320", "192"],
     "flac16": ["16bit", "24bit", "320", "192"],
     "mp3": ["320", "192", "24bit", "16bit"],
-    "mp3_192": ["192", "320", "24bit", "16bit"]
+    "mp3192": ["192", "320", "24bit", "16bit"] # Diubah tanpa underscore
 }
 
 QUALITY_MAP_DISPLAY = {
     "flac24": "FLAC-24",
     "flac16": "FLAC-16",
     "mp3": "MP3 320kbps",
-    "mp3_192": "MP3 192kbps"
+    "mp3192": "MP3 192kbps" # Diubah tanpa underscore
 }
-# ----------------------------------------------
+# -------------------------------
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     wait_time = 2
@@ -59,7 +58,6 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
                 resp = requests.get(url, headers=HEADERS, timeout=15, proxies=proxy_dict)
                 text = resp.text.strip()
                 
-                # [FIX]: Jangan buang waktu memutar retry jika errornya adalah 404/400 (mutlak ditolak)
                 if resp.status_code in [400, 404]:
                     return {"FATAL_ERROR": resp.status_code}
                     
@@ -79,7 +77,7 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
             
         except Exception as e:
             if "HTTP 404" in str(e) or "HTTP 400" in str(e):
-                raise e # Langsung lempar errornya agar fungsi auto-fallback bisa bekerja
+                raise e 
             LOGGER.warning(f"Genie Request failed: {e}. Retrying... ({attempt + 1}/{max_retries})")
         
         await asyncio.sleep(wait_time)
@@ -96,7 +94,6 @@ def parse_code(url: str) -> str:
 async def process_track(session, track_id, quality_pref, download_dir, details, extra_meta=None):
     if extra_meta is None: extra_meta = {}
     
-    # --- [SISTEM LOOP PENCARI KUALITAS OTOMATIS] ---
     bitrates_to_try = QUALITY_MAP.get(quality_pref, ["24bit"])
     
     data = None
@@ -105,7 +102,7 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         try:
             data = await fetch_json(session, api_url)
             if data and "DataSet" in data and len(data["DataSet"]["DATA"]) > 0:
-                break # Berhenti loop jika sukses mendapat link
+                break 
         except Exception as e:
             if "HTTP 404" in str(e) or "HTTP 400" in str(e):
                 LOGGER.debug(f"Kualitas {bitrate} ditolak API Genie (404/400). Mencoba fallback...")
@@ -115,7 +112,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
                 
     if not data or "DataSet" not in data or len(data["DataSet"]["DATA"]) == 0:
         raise Exception("Gagal mendapatkan data streaming untuk track ini (semua parameter bitrate ditolak/404).")
-    # -----------------------------------------------
 
     track_data = data["DataSet"]["DATA"][0]
     stream_url = unquote(track_data["STREAMING_MP3_URL"])
@@ -192,7 +188,11 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'totalvolume': extra_meta.get('totalvolume', '1'),
         'date': final_date,
         'copyright': final_pub,
-        'cover': cover_url 
+        'cover': cover_url,
+        # --- [FIX KEYERROR METADATA] ---
+        'isrc': '', # Memuaskan metadata.py yang mencari ISRC
+        'upc': ''   # Memuaskan metadata.py yang mencari UPC
+        # -------------------------------
     }
 
     if cover_url and str(cover_url).startswith('http'):
