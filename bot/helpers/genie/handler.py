@@ -15,8 +15,6 @@ from bot.helpers.message import send_message, edit_message
 from bot.helpers.utils import format_string, post_art_poster, run_concurrent_tasks
 from bot.helpers.aria2_helper import aria2_download
 from bot.helpers.uploder import track_upload, album_upload, playlist_upload
-
-# [TAMBAHKAN IMPORT create_cover_file DI SINI]
 from bot.helpers.metadata import set_metadata, create_cover_file 
 
 from .manager import genie_manager
@@ -100,7 +98,7 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     
     album_name = extra_meta.get('album')
     if not album_name:
-        album_name = unquote(track_data.get("ALBUM_NM") or track_data.get("ALBUM_NAME") or "Unknown Album")
+        album_name = unquote(track_data.get("ALBUM_NM") or track_data.get("ALBUM_NAME") or track_data.get("ALBUM_TTS") or "")
     
     track_date = str(track_data.get('ALBUM_RELEASE_DT') or track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('RECORD_DATE') or "")
     if len(track_date) == 8 and track_date.isdigit():
@@ -116,25 +114,37 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     if not final_pub or final_pub.lower() == 'unknown label':
         final_pub = track_pub
 
-    # --- [FIX THUMBNAIL SINGLE TRACK LENGKAP] ---
+    # --- [FIX THUMBNAIL & NAMA ALBUM SINGLE TRACK LENGKAP] ---
     cover_url = extra_meta.get('cover')
+    raw_cover = ""
     if not cover_url:
-        # 1. Coba cari di data streaming
         raw_cover = unquote(track_data.get("ALBUM_IMG_PATH600") or track_data.get("ALBUM_IMG_PATH") or "")
         
-        # 2. Jika gagal, curi ALBUM_ID lalu tembak API Album secara diam-diam
-        if not raw_cover:
-            album_id = track_data.get("ALBUM_ID")
-            if album_id:
-                try:
-                    alb_api = f"https://info.genie.co.kr/info/album?axnm={album_id}"
-                    alb_data = await fetch_json(session, alb_api)
-                    raw_cover = unquote(alb_data.get('album_info', {}).get("album_img_path600", ""))
-                except Exception as e:
-                    LOGGER.debug(f"Pencarian paksa cover gagal: {e}")
-                    
-        if raw_cover:
-            cover_url = "https:" + raw_cover if raw_cover.startswith("//") else raw_cover
+    # Jika cover gagal ATAU nama album kosong/Unknown, tembak API Album secara diam-diam!
+    album_id = track_data.get("ALBUM_ID")
+    if album_id and (not raw_cover or not album_name or album_name == "Unknown Album"):
+        try:
+            alb_api = f"https://info.genie.co.kr/info/album?axnm={album_id}"
+            alb_data = await fetch_json(session, alb_api)
+            alb_info = alb_data.get('album_info', {})
+            
+            # Curi URL Cover jika masih kosong
+            if not raw_cover:
+                raw_cover = unquote(alb_info.get("album_img_path600", ""))
+            
+            # Curi Nama Album jika masih kosong
+            if not album_name or album_name == "Unknown Album":
+                album_name = unquote(alb_info.get("album_name", "Unknown Album"))
+                
+        except Exception as e:
+            LOGGER.debug(f"Pencarian paksa data album gagal: {e}")
+            
+    if raw_cover and not cover_url:
+        cover_url = "https:" + raw_cover if raw_cover.startswith("//") else raw_cover
+        
+    # Pengaman terakhir jika tetap tidak ketemu
+    if not album_name:
+        album_name = "Unknown Album"
     # --------------------------------------------
 
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
@@ -167,9 +177,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'cover': cover_url 
     }
 
-    # --- [MEMAKSA MENGUNDUH GAMBAR SEBELUM DIUNGGAH] ---
-    # Jika cover masih URL, kita download paksa jadi file lokal (.jpg) di sini
-    # Ini agar Telegram tidak melihat meta['cover'] sebagai link kosong.
     if cover_url and str(cover_url).startswith('http'):
         try:
             local_cover_path = await create_cover_file(cover_url, metadata, thumbnail=False)
@@ -177,7 +184,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
                 metadata['cover'] = local_cover_path
         except Exception as e:
             LOGGER.warning(f"Gagal pra-unduh cover Genie: {e}")
-    # ---------------------------------------------------
 
     aria_details = details.copy() if details else {}
     aria_details['headers'] = HEADERS
