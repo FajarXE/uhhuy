@@ -26,12 +26,13 @@ HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 }
 
-# --- [TAMBAHAN: MP3 192kbps] ---
+# --- [FIX HTTP 404 / AUTO FALLBACK BITRATE] ---
+# Angka "k" dihapus. Memakai array untuk otomatis mencoba kualitas lain jika API merespons 404.
 QUALITY_MAP = {
-    "flac24": "24bit",
-    "flac16": "16bit",
-    "mp3": "320k",
-    "mp3_192": "192k"
+    "flac24": ["24bit", "16bit", "320", "192"],
+    "flac16": ["16bit", "24bit", "320", "192"],
+    "mp3": ["320", "192", "24bit", "16bit"],
+    "mp3_192": ["192", "320", "24bit", "16bit"]
 }
 
 QUALITY_MAP_DISPLAY = {
@@ -40,7 +41,7 @@ QUALITY_MAP_DISPLAY = {
     "mp3": "MP3 320kbps",
     "mp3_192": "MP3 192kbps"
 }
-# ------------------------------
+# ----------------------------------------------
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     wait_time = 2
@@ -58,6 +59,10 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
                 resp = requests.get(url, headers=HEADERS, timeout=15, proxies=proxy_dict)
                 text = resp.text.strip()
                 
+                # [FIX]: Jangan buang waktu memutar retry jika errornya adalah 404/400 (mutlak ditolak)
+                if resp.status_code in [400, 404]:
+                    return {"FATAL_ERROR": resp.status_code}
+                    
                 if resp.status_code != 200:
                     raise ValueError(f"HTTP {resp.status_code}")
                     
@@ -66,9 +71,15 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
                     
                 return json.loads(text)
             
-            return await loop.run_in_executor(None, _do_request)
+            result = await loop.run_in_executor(None, _do_request)
+            if isinstance(result, dict) and "FATAL_ERROR" in result:
+                raise ValueError(f"HTTP {result['FATAL_ERROR']}")
+                
+            return result
             
         except Exception as e:
+            if "HTTP 404" in str(e) or "HTTP 400" in str(e):
+                raise e # Langsung lempar errornya agar fungsi auto-fallback bisa bekerja
             LOGGER.warning(f"Genie Request failed: {e}. Retrying... ({attempt + 1}/{max_retries})")
         
         await asyncio.sleep(wait_time)
@@ -85,15 +96,28 @@ def parse_code(url: str) -> str:
 async def process_track(session, track_id, quality_pref, download_dir, details, extra_meta=None):
     if extra_meta is None: extra_meta = {}
     
-    bitrate = QUALITY_MAP.get(quality_pref, "24bit")
-    api_url = f"https://stm.genie.co.kr/player/j_StmInfo.json?uxtk=3173869132189.992&sign=Y&lpr=&svc=IV&bitrate={bitrate}&stk=Q3RoM0lJWUErZFdZVE1mREN2bi85UT09&itn=Y&dcd=ANDROID_ID%3A06568f5097d60690&xgnm={track_id}&uip=172.16.2.15&dvm=oppo%20r9tm&apvn=40607&ovn=5.1.1&unm=322011981&mts=Y"
+    # --- [SISTEM LOOP PENCARI KUALITAS OTOMATIS] ---
+    bitrates_to_try = QUALITY_MAP.get(quality_pref, ["24bit"])
     
-    data = await fetch_json(session, api_url)
-    try:
-        track_data = data["DataSet"]["DATA"][0]
-    except (KeyError, IndexError):
-        raise Exception("Gagal mendapatkan data streaming untuk track ini.")
+    data = None
+    for bitrate in bitrates_to_try:
+        api_url = f"https://stm.genie.co.kr/player/j_StmInfo.json?uxtk=3173869132189.992&sign=Y&lpr=&svc=IV&bitrate={bitrate}&stk=Q3RoM0lJWUErZFdZVE1mREN2bi85UT09&itn=Y&dcd=ANDROID_ID%3A06568f5097d60690&xgnm={track_id}&uip=172.16.2.15&dvm=oppo%20r9tm&apvn=40607&ovn=5.1.1&unm=322011981&mts=Y"
+        try:
+            data = await fetch_json(session, api_url)
+            if data and "DataSet" in data and len(data["DataSet"]["DATA"]) > 0:
+                break # Berhenti loop jika sukses mendapat link
+        except Exception as e:
+            if "HTTP 404" in str(e) or "HTTP 400" in str(e):
+                LOGGER.debug(f"Kualitas {bitrate} ditolak API Genie (404/400). Mencoba fallback...")
+                continue
+            else:
+                raise e
+                
+    if not data or "DataSet" not in data or len(data["DataSet"]["DATA"]) == 0:
+        raise Exception("Gagal mendapatkan data streaming untuk track ini (semua parameter bitrate ditolak/404).")
+    # -----------------------------------------------
 
+    track_data = data["DataSet"]["DATA"][0]
     stream_url = unquote(track_data["STREAMING_MP3_URL"])
     title = unquote(track_data.get("SONG_TTS", f"Track_{track_id}"))
     artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
@@ -186,7 +210,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     if not success:
         raise Exception("Gagal mengunduh file melalui Aria2c.")
 
-    # --- [DETEKSI BITRATE KHUSUS UNTUK SETIAP TRACK] ---
     actual_quality = QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper())
     if ext == "mp3":
         try:
@@ -206,7 +229,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
             pass
             
     metadata['quality'] = actual_quality
-    # ---------------------------------------------------
         
     try:
         await set_metadata(metadata, extra_meta.get('user_id', 0))
@@ -340,14 +362,12 @@ async def start_genie(link: str, user: dict):
                 'action': 'Download' 
             }
             
-            task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+            task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
             successful_tracks = [res for res in task_results if res]
 
             if not successful_tracks:
                 raise Exception("Semua lagu dalam album gagal diunduh.")
 
-            # --- [PERBAIKAN KUALITAS AKTUAL TANPA LABEL MIXED] ---
-            # Mengambil kualitas tertinggi yang ada di dalam album
             qualities_found = [t.get('quality', '') for t in successful_tracks]
             if any("FLAC-24" in q for q in qualities_found):
                 album_metadata['quality'] = "FLAC-24"
@@ -359,7 +379,6 @@ async def start_genie(link: str, user: dict):
                 album_metadata['quality'] = "MP3 192kbps"
             else:
                 album_metadata['quality'] = successful_tracks[0].get('quality', album_metadata['quality'])
-            # -----------------------------------------------------
 
             album_metadata['tracks'] = successful_tracks
             album_metadata['totaltracks'] = len(successful_tracks)
@@ -414,13 +433,12 @@ async def start_genie(link: str, user: dict):
                 'action': 'Download' 
             }
 
-            task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+            task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
             successful_tracks = [res for res in task_results if res]
 
             if not successful_tracks:
                 raise Exception("Semua lagu dalam playlist gagal diunduh.")
 
-            # --- [PERBAIKAN KUALITAS AKTUAL TANPA LABEL MIXED] ---
             qualities_found = [t.get('quality', '') for t in successful_tracks]
             if any("FLAC-24" in q for q in qualities_found):
                 pl_metadata['quality'] = "FLAC-24"
@@ -432,7 +450,6 @@ async def start_genie(link: str, user: dict):
                 pl_metadata['quality'] = "MP3 192kbps"
             else:
                 pl_metadata['quality'] = successful_tracks[0].get('quality', pl_metadata['quality'])
-            # -----------------------------------------------------
 
             pl_metadata['tracks'] = successful_tracks
             pl_metadata['totaltracks'] = len(successful_tracks)
