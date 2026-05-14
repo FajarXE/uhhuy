@@ -1285,7 +1285,7 @@ def gn_button(quality: dict, user_id: int = None):
         "flac24": "FLAC 24-bit",
         "flac16": "FLAC 16-bit",
         "mp3": "MP3 320kbps",
-        "mp3_192": "MP3 192kbps"
+        "mp3192": "MP3 192kbps"
     }
     
     for i, (key, value) in enumerate(quality.items()):
