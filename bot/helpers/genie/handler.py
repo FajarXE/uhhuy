@@ -15,7 +15,9 @@ from bot.helpers.message import send_message, edit_message
 from bot.helpers.utils import format_string, post_art_poster, run_concurrent_tasks
 from bot.helpers.aria2_helper import aria2_download
 from bot.helpers.uploder import track_upload, album_upload, playlist_upload
-from bot.helpers.metadata import set_metadata
+
+# [TAMBAHKAN IMPORT create_cover_file DI SINI]
+from bot.helpers.metadata import set_metadata, create_cover_file 
 
 from .manager import genie_manager
 
@@ -93,16 +95,13 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         raise Exception("Gagal mendapatkan data streaming untuk track ini.")
 
     stream_url = unquote(track_data["STREAMING_MP3_URL"])
-    
     title = unquote(track_data.get("SONG_TTS", f"Track_{track_id}"))
     artist = unquote(track_data.get("ARTIST_NAME", "Unknown Artist"))
     
-    # [FIX 1]: Mengambil data Album dari extra_meta jika ada (dioper dari Album API)
     album_name = extra_meta.get('album')
     if not album_name:
         album_name = unquote(track_data.get("ALBUM_NM") or track_data.get("ALBUM_NAME") or "Unknown Album")
     
-    # [FIX 2]: Kunci pencarian tanggal sesuai dengan geniez.py
     track_date = str(track_data.get('ALBUM_RELEASE_DT') or track_data.get('ALBUM_DATE') or track_data.get('RELEASE_DATE') or track_data.get('RECORD_DATE') or "")
     if len(track_date) == 8 and track_date.isdigit():
         track_date = f"{track_date[:4]}-{track_date[4:6]}-{track_date[6:]}"
@@ -117,14 +116,27 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     if not final_pub or final_pub.lower() == 'unknown label':
         final_pub = track_pub
 
-    # [FIX 3]: Ekstraksi Thumbnail URL untuk Single Track
+    # --- [FIX THUMBNAIL SINGLE TRACK LENGKAP] ---
     cover_url = extra_meta.get('cover')
     if not cover_url:
+        # 1. Coba cari di data streaming
         raw_cover = unquote(track_data.get("ALBUM_IMG_PATH600") or track_data.get("ALBUM_IMG_PATH") or "")
+        
+        # 2. Jika gagal, curi ALBUM_ID lalu tembak API Album secara diam-diam
+        if not raw_cover:
+            album_id = track_data.get("ALBUM_ID")
+            if album_id:
+                try:
+                    alb_api = f"https://info.genie.co.kr/info/album?axnm={album_id}"
+                    alb_data = await fetch_json(session, alb_api)
+                    raw_cover = unquote(alb_data.get('album_info', {}).get("album_img_path600", ""))
+                except Exception as e:
+                    LOGGER.debug(f"Pencarian paksa cover gagal: {e}")
+                    
         if raw_cover:
             cover_url = "https:" + raw_cover if raw_cover.startswith("//") else raw_cover
+    # --------------------------------------------
 
-    # Penomoran Track
     ext = "flac" if ".flac" in stream_url.lower() else "mp3"
     track_num_str = str(extra_meta.get('tracknumber', '')).zfill(2)
     
@@ -143,7 +155,7 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'provider': 'Genie',
         'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()),
         'filepath': filepath,
-        'tempfolder': download_dir, # <-- WAJIB: Agar auto-download cover berfungsi
+        'tempfolder': download_dir,
         'type': 'track',
         'extension': ext,
         'tracknumber': extra_meta.get('tracknumber', '1'),
@@ -152,8 +164,20 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'totalvolume': extra_meta.get('totalvolume', '1'),
         'date': final_date,
         'copyright': final_pub,
-        'cover': cover_url # <-- Memastikan URL cover diteruskan
+        'cover': cover_url 
     }
+
+    # --- [MEMAKSA MENGUNDUH GAMBAR SEBELUM DIUNGGAH] ---
+    # Jika cover masih URL, kita download paksa jadi file lokal (.jpg) di sini
+    # Ini agar Telegram tidak melihat meta['cover'] sebagai link kosong.
+    if cover_url and str(cover_url).startswith('http'):
+        try:
+            local_cover_path = await create_cover_file(cover_url, metadata, thumbnail=False)
+            if local_cover_path and local_cover_path != './project-siesta.png' and os.path.exists(local_cover_path):
+                metadata['cover'] = local_cover_path
+        except Exception as e:
+            LOGGER.warning(f"Gagal pra-unduh cover Genie: {e}")
+    # ---------------------------------------------------
 
     aria_details = details.copy() if details else {}
     aria_details['headers'] = HEADERS
@@ -229,7 +253,6 @@ async def start_genie(link: str, user: dict):
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
 
-            # [FIX 2]: Menggunakan kunci "album_release_dt" seperti pada geniez.py
             album_info_dict = album_data.get('album_info', {})
             raw_date = str(album_info_dict.get('album_release_dt') or album_info_dict.get('album_date') or album_info_dict.get('record_date') or "")
             raw_date = raw_date.replace('.', '-').replace('/', '-')
@@ -266,7 +289,6 @@ async def start_genie(link: str, user: dict):
             
             album_metadata['poster_msg'] = await post_art_poster(user, album_metadata)
 
-            # [FIX 1 & 3]: Memasukkan 'album' agar nama album konsisten dan meneruskan cover
             extra_meta_base = {
                 'user_id': user_id,
                 'album': album_name, 
