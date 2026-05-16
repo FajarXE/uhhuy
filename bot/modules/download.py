@@ -472,11 +472,14 @@ async def run_download_task(link: str, user: dict):
                         try: await edit_message(m, g_text, g_markup, False)
                         except: pass
 
-                if task_successful:
-                    if not utils.GLOBAL_TASKS: 
-                        try: await user['bot_msg'].delete()
-                        except: pass
-                        utils.GLOBAL_UI_MSG.pop(user['chat_id'], None)
+                if task_successful and not utils.GLOBAL_TASKS: 
+                    try: await user['bot_msg'].delete()
+                    except: pass
+                
+                # --- FIX: WAJIB HAPUS DARI RADAR APAPUN YANG TERJADI ---
+                utils.GLOBAL_UI_MSG.pop(user['chat_id'], None)
+                utils.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
+                # -------------------------------------------------------
             except:
                 pass
 
