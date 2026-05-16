@@ -80,7 +80,7 @@ async def status_callback(client: Client, query: CallbackQuery):
         try: await query.answer()
         except Exception: pass
         
-        if data.startswith("status_page_"):
+    if data.startswith("status_page_"):
         page = int(data.split("_")[-1])
         
         # --- [MEMORI HALAMAN] Simpan posisi halaman saat klik Next/Prev ---
