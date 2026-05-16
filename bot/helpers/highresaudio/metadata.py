@@ -130,8 +130,14 @@ async def process_album_metadata(album_url: str, r_id: str, user: dict):
             raw_url = track.get('url')
             if raw_url:
                 new_url = raw_url.replace('cdn.highresaudio.com', 'streaming.highresaudio.com')
-                # Perbaikan URL replace agar lebih aman
-                new_url = new_url.replace('highresaudio.com//', 'highresaudio.com/')
+                
+                # --- [FIX BUG 403] Bersihkan Double Slash untuk semua jenis CDN ---
+                if "://" in new_url:
+                    scheme, rest = new_url.split("://", 1)
+                    rest = rest.replace("//", "/")
+                    new_url = f"{scheme}://{rest}"
+                # ------------------------------------------------------------------
+                
                 track_meta['download_url'] = new_url
             else:
                 track_meta['download_url'] = None
