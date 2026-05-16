@@ -415,6 +415,18 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 
                 # Lempar sinyal ke sistem utama
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+                
+            # --- [FIX BUG LAGU HILANG & FLOODWAIT BATCH MEDIA] ---
+            elif "FloodWait" in str(type(e).__name__):
+                if hasattr(e, 'value'):
+                    from bot.logger import LOGGER
+                    import asyncio
+                    LOGGER.warning(f"⏳ File tertunda limit Telegram ({e.value}s). Menunggu agar tidak ada lagu yang terlewat...")
+                    await asyncio.sleep(e.value)
+                    # Ulangi pengiriman file ini setelah tidur selesai
+                    return await send_message(user, text, type, markup, antiflood, meta, caption, progress, progress_args)
+            # -----------------------------------------------------
+            
             else:
                 from bot.logger import LOGGER
                 LOGGER.error(f"Gagal mengirim {type}: {e}")
