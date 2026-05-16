@@ -80,6 +80,36 @@ async def status_callback(client: Client, query: CallbackQuery):
         try: await query.answer()
         except Exception: pass
         
+        if data.startswith("status_page_"):
+        page = int(data.split("_")[-1])
+        
+        # --- [MEMORI HALAMAN] Simpan posisi halaman saat klik Next/Prev ---
+        GLOBAL_UI_PAGES[chat_id] = page
+        # ------------------------------------------------------------------
+        
+        text, markup = get_status_text(page=page)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+            try: await query.answer()
+            except Exception: pass
+        except FloodWait as e:
+            # --- [FIX SPAM TOMBOL] JANGAN DITIDURKAN, TOLAK KLIKNYA! ---
+            try: await query.answer(f"⏳ Terlalu cepat! Tunggu {e.value} detik.", show_alert=True)
+            except Exception: pass
+            
+            # Kembalikan posisi halaman karena edit ke halaman baru gagal
+            try:
+                if "Next" in query.message.reply_markup.inline_keyboard[0][0].text:
+                    GLOBAL_UI_PAGES[chat_id] = page - 1
+                else:
+                    GLOBAL_UI_PAGES[chat_id] = page + 1
+            except Exception: pass
+        except MessageNotModified:
+            try: await query.answer()
+            except Exception: pass
+        except Exception:
+            pass
+            
     elif data.startswith("status_refresh_"):
         page = int(data.split("_")[-1])
         
@@ -92,10 +122,8 @@ async def status_callback(client: Client, query: CallbackQuery):
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
             await query.answer("Status diperbarui!", show_alert=False)
         except FloodWait as e:
-            await asyncio.sleep(e.value)
-            try: await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
-            except Exception: pass
-            try: await query.answer("Status diperbarui (Tertunda limit)!", show_alert=False)
+            # --- [FIX SPAM TOMBOL] JANGAN DITIDURKAN, TOLAK KLIKNYA! ---
+            try: await query.answer(f"⏳ Terlalu cepat! Tunggu {e.value} detik.", show_alert=True)
             except Exception: pass
         except MessageNotModified:
             try: await query.answer("Status sudah yang terbaru!", show_alert=False)
