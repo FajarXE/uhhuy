@@ -100,16 +100,33 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             "Cookie": cookie_str
         }
         
-        # [PERBAIKAN FATAL] Hanya tambahkan headers jika details benar-benar ada (Mode Single Track).
-        # Jika Mode Album (details = None), biarkan tetap None agar aria2_helper tidak crash (KeyError: 'msg').
-        if details is not None:
-            details['headers'] = headers_dict
+        # --- [FIX BUG HEADER ARIA2] ---
+        # Pastikan details selalu berbentuk dictionary agar headers SELALU disuntikkan,
+        # bahkan saat mengunduh Album (di mana details awalnya None).
+        if details is None:
+            details = {}
+            
+        details['headers'] = headers_dict
+        # ------------------------------
 
         # Langkah 1: Coba kekuatan penuh Aria2 (retries=1 agar cepat beralih jika ditolak server)
         err = await download_file(download_url, track_meta['filepath'], retries=1, details=details)
         
         if err:
             LOGGER.warning(f"HighResAudio: Aria2 gagal/ditolak server. Mengaktifkan AIOHTTP Turbo Fallback...")
+            
+            # --- [FIX CLEANUP GHOST FILE ARIA2] ---
+            # Hapus file .aria2 yang ditinggalkan oleh kegagalan Aria2
+            aria2_file = track_meta['filepath'] + '.aria2'
+            if os.path.exists(aria2_file):
+                try: os.remove(aria2_file)
+                except: pass
+                
+            # Jika file flac parsial hasil kegagalan Aria2 juga ada, hapus agar bersih sebelum ditimpa
+            if os.path.exists(track_meta['filepath']):
+                try: os.remove(track_meta['filepath'])
+                except: pass
+            # --------------------------------------
             
             # Langkah 2: AIOHTTP Turbo Fallback (Menjamin Cookie Tembus 100%)
             async with aiohttp.ClientSession(headers=headers_dict) as session:
