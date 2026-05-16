@@ -296,7 +296,9 @@ async def resolve_shortlink(link: str) -> str:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
-            async with aiohttp.ClientSession(headers=headers) as session:
+            # --- [FIX TIMEOUT] BATASI HANYA 15 DETIK ---
+            timeout = aiohttp.ClientTimeout(total=15.0)
+            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
                 current_url = link
                 # Lakukan Loop Redirect Manual (Max 5 kali)
                 for _ in range(5):
@@ -392,14 +394,24 @@ async def run_download_task(link: str, user: dict):
 
             await edit_message(user['bot_msg'], '🚀 Starting task...')
             
-            # [Catatan: Pastikan fungsi resolve_shortlink dan start_link ada di file Anda]
-            resolved = await resolve_shortlink(link)
-            if resolved != link:
-                 link = resolved
-                 user['link'] = link
+            # 1. Lindungi resolve_shortlink dengan tambahan pengaman
+            try:
+                resolved = await asyncio.wait_for(resolve_shortlink(link), timeout=20.0)
+                if resolved != link:
+                     link = resolved
+                     user['link'] = link
+            except asyncio.TimeoutError:
+                LOGGER.warning(f"Timeout saat me-resolve shortlink: {link}, lanjut pakai link asli.")
 
-            await start_link(link, user)
-            task_successful = True
+            # --- [FIX SEMAPHORE] BATAS WAKTU ABSOLUT (7200 DETIK / 2 JAM) ---
+            try:
+                # Memaksa agar tugas seberat apa pun tidak boleh berjalan lebih dari 2 jam
+                await asyncio.wait_for(start_link(link, user), timeout=7200.0)
+                task_successful = True
+            except asyncio.TimeoutError:
+                # Melemparkan error ke blok 'except Exception as e:' agar diproses dengan rapi
+                raise Exception("Tugas memakan waktu terlalu lama (> 2 Jam) dan diputus paksa oleh sistem agar tidak memblokir antrean.")
+            # ----------------------------------------------------------------
                 
         except asyncio.CancelledError:
             # HAPUS BARIS INI: from bot.logger import LOGGER
