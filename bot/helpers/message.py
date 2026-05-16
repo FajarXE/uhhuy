@@ -453,11 +453,23 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
         pass # Pesan sama, abaikan
     except FloodWait as e:
         if antiflood:
+            # --- FIX: JANGAN TIDUR JIKA TILANG TERLALU LAMA ---
+            if e.value > 60:
+                LOGGER.warning(f"⚠️ FloodWait ekstrim ({e.value}s) diabaikan agar antrean tidak hang.")
+                return None
+            
             import asyncio
+            LOGGER.warning(f"⏳ Menunggu FloodWait {e.value} detik untuk edit pesan...")
             await asyncio.sleep(e.value)
             return await edit_message(msg, text, markup, antiflood)
+            
     except MessageIdInvalid:
-        pass # Pesan sudah hilang
+        # --- FIX: BERSIHKAN PESAN MATI DARI MEMORI RADAR ---
+        from bot.helpers.utils import GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+        chat_id = msg.chat.id
+        GLOBAL_UI_MSG.pop(chat_id, None)
+        GLOBAL_UI_PAGES.pop(chat_id, None)
+        pass # Pesan sudah hilang dan berhasil diamankan
     except RPCError as e:
         # Error umum Telegram
         LOGGER.warning(f"RPCError Edit: {e}")
