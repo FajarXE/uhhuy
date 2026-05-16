@@ -96,6 +96,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         # --- MESIN PENGUNDUH HYBRID (ARIA2 -> AIOHTTP TURBO) ---
         cookie_str = "; ".join([f"{k}={v}" for k, v in client.s.cookies.items()])
         headers_dict = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
             "Referer": f"https://stream-app.highresaudio.com/album/{album_id_referer}",
             "Cookie": cookie_str
         }
