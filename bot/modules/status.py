@@ -68,28 +68,6 @@ async def status_callback(client: Client, query: CallbackQuery):
         text, markup = get_status_text(page=page)
         try:
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            try: await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
-            except Exception: pass
-        except MessageNotModified:
-            pass
-        except Exception:
-            pass
-            
-        try: await query.answer()
-        except Exception: pass
-        
-    if data.startswith("status_page_"):
-        page = int(data.split("_")[-1])
-        
-        # --- [MEMORI HALAMAN] Simpan posisi halaman saat klik Next/Prev ---
-        GLOBAL_UI_PAGES[chat_id] = page
-        # ------------------------------------------------------------------
-        
-        text, markup = get_status_text(page=page)
-        try:
-            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
             try: await query.answer()
             except Exception: pass
         except FloodWait as e:
