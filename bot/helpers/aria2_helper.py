@@ -78,6 +78,15 @@ async def aria2_download(url, filepath, details=None):
             }
             
             while True:
+                # --- [FIX ZOMBIE TASK] CEK SINYAL BATAL GLOBAL ---
+                if details and 'task_id' in details:
+                    from bot.helpers.utils import GLOBAL_CANCEL_DICT
+                    if details['task_id'] in GLOBAL_CANCEL_DICT:
+                        await aria2_cancel(gid) # Hancurkan task di sisi server Aria2
+                        LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
+                        return False
+                # -------------------------------------------------
+
                 async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
                     res = await resp.json()
                     if "error" in res:
