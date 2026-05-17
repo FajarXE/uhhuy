@@ -249,7 +249,16 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
         if isinstance(res, dict):
             playlist_tracks.append(res)
         else:
-            LOGGER.error(f"Amazon [Playlist Track {index}] GAGAL DIUNDUH! Penyebab: {res}")
+            import traceback
+            error_msg = str(res)
+            if not error_msg or error_msg == "None" or error_msg.strip() == "":
+                error_msg = res.__class__.__name__
+                
+            LOGGER.error(f"Amazon [Playlist Track {index}] GAGAL DIUNDUH! Penyebab: {error_msg}")
+            
+            if hasattr(res, '__traceback__'):
+                formatted_tb = "".join(traceback.format_exception(type(res), res, res.__traceback__))
+                LOGGER.debug(f"Traceback lengkap Playlist Track {index}:\n{formatted_tb}")
 
     if not playlist_tracks:
          raise Exception("Semua lagu dalam playlist gagal diunduh.")
@@ -415,8 +424,17 @@ async def start_album(album_asin: str, user: dict, url: str):
             album_tracks.append(res)
         else:
             # Jika 'res' bukan dictionary, berarti itu adalah Exception/Error!
-            # (Baris import LOGGER sudah dihapus dari sini)
-            LOGGER.error(f"Amazon [Track {index}] GAGAL DIUNDUH! Penyebab: {res}")
+            import traceback
+            error_msg = str(res)
+            if not error_msg or error_msg == "None" or error_msg.strip() == "":
+                error_msg = res.__class__.__name__ # Tarik nama asli errornya jika teks kosong
+                
+            LOGGER.error(f"Amazon [Track {index}] GAGAL DIUNDUH! Penyebab: {error_msg}")
+            
+            # (Opsional) Cetak jejak error lengkap ke terminal untuk debugging
+            if hasattr(res, '__traceback__'):
+                formatted_tb = "".join(traceback.format_exception(type(res), res, res.__traceback__))
+                LOGGER.debug(f"Traceback lengkap Track {index}:\n{formatted_tb}")
     # --------------------------------------------------------
 
     # Penyiapan Folder & Cover
