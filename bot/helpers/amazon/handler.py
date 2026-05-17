@@ -667,7 +667,11 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
     if kid:
         LOGGER.info(f"Amazon: Memulai proses DRM untuk KID {kid}")
         prd_path = "bot/helpers/amazon/drm/hisense_smarttv_hu32e5600fhwv_sl3000.prd"
-        cdm, session_id, challenge_b64 = await asyncio.to_thread(generate_challenge, kid, prd_path)
+        
+        # --- [FIX URUTAN VARIABEL] Sesuaikan dengan return dari generate_challenge ---
+        challenge_b64, session_id, cdm = await asyncio.to_thread(generate_challenge, kid, prd_path)
+        # -----------------------------------------------------------------------------
+        
         license_b64 = await client.get_license(challenge_b64, asin)
         keys = await asyncio.to_thread(parse_license_and_get_keys, cdm, session_id, license_b64)
 
