@@ -30,3 +30,4 @@ ecpy
 construct==2.8.8
 platformdirs
 PySocks
+pyplayready
