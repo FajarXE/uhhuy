@@ -356,7 +356,9 @@ async def run_download_task(link: str, user: dict):
             import bot.helpers.utils as utils
             if chat_id in utils.GLOBAL_UI_MSG:
                 try: 
-                    await utils.GLOBAL_UI_MSG[chat_id].delete()
+                    # --- [FIX GHOST PANEL] HAPUS BRUTAL VIA CLIENT ---
+                    from bot.tgclient import aio
+                    await aio.delete_messages(chat_id, utils.GLOBAL_UI_MSG[chat_id].id)
                 except Exception: 
                     pass
             utils.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
@@ -466,20 +468,26 @@ async def run_download_task(link: str, user: dict):
                     
                     utils.GLOBAL_TASKS.pop(final_task_id, None)
                     
+                    # Update radar terakhir kali untuk semua orang
                     for cid, m in list(utils.GLOBAL_UI_MSG.items()):
                         c_page = utils.GLOBAL_UI_PAGES.get(cid, 1)
                         g_text, g_markup = utils.get_status_text(page=c_page)
                         try: await edit_message(m, g_text, g_markup, False)
                         except: pass
 
-                if task_successful and not utils.GLOBAL_TASKS: 
-                    try: await user['bot_msg'].delete()
-                    except: pass
-                
-                # --- FIX: WAJIB HAPUS DARI RADAR APAPUN YANG TERJADI ---
-                utils.GLOBAL_UI_MSG.pop(user['chat_id'], None)
-                utils.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
-                # -------------------------------------------------------
+                    # --- [FIX GHOST PANEL] PASTIKAN PESAN TELEGRAM DIHAPUS ---
+                    try: 
+                        await user['bot_msg'].delete()
+                    except: 
+                        pass
+                    
+                    # Hapus dari memori radar HANYA JIKA pesan radar saat ini adalah pesan tugas ini
+                    # (Mencegah terhapusnya radar dari perintah /task yang baru)
+                    current_radar = utils.GLOBAL_UI_MSG.get(user['chat_id'])
+                    if current_radar and current_radar.id == user['bot_msg'].id:
+                        utils.GLOBAL_UI_MSG.pop(user['chat_id'], None)
+                        utils.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
+                    # ---------------------------------------------------------
             except:
                 pass
 
