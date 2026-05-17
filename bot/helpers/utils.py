@@ -233,7 +233,16 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
                 if batch_id in GLOBAL_CANCEL_DICT:
                     if hasattr(task, 'close'): task.close()
                     return None
-                res = await task
+                
+                # --- [FIX ZOMBIE TRACK] BATAS WAKTU 10 MENIT PER LAGU ---
+                import asyncio
+                res = await asyncio.wait_for(task, timeout=600.0)
+                # --------------------------------------------------------
+                
+        except asyncio.TimeoutError:
+            from bot.logger import LOGGER
+            LOGGER.warning("⚠️ 1 Lagu dilewati karena macet (Timeout > 10 Menit). Playlist dilanjutkan.")
+            res = None
         except Exception:
             res = None
             
@@ -337,10 +346,14 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
 
     updater_task = asyncio.create_task(live_updater())
     
-    results = await asyncio.gather(*pending_tasks, return_exceptions=True)
-    
-    is_running = False
-    await updater_task
+    # --- [FIX ZOMBIE RADAR] PASTIKAN RADAR IKUT MATI SAAT TIMEOUT/GAGAL ---
+    try:
+        results = await asyncio.gather(*pending_tasks, return_exceptions=True)
+    finally:
+        is_running = False
+        if not updater_task.done():
+            updater_task.cancel()
+    # ----------------------------------------------------------------------
     
     if batch_id in GLOBAL_CANCEL_DICT:
         if update_details and 'msg' in update_details:
