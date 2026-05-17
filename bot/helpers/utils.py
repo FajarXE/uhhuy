@@ -243,8 +243,9 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 1
             from bot.logger import LOGGER
             LOGGER.warning("⚠️ 1 Lagu dilewati karena macet (Timeout > 10 Menit). Playlist dilanjutkan.")
             res = None
-        except Exception:
-            res = None
+        except Exception as e:
+            # --- [FIX ERROR EATER] JANGAN KEMBALIKAN NONE, KEMBALIKAN ERRORNYA ---
+            res = e
             
         completed_tasks += 1
         return res
