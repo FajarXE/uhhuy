@@ -403,15 +403,15 @@ async def run_download_task(link: str, user: dict):
             except asyncio.TimeoutError:
                 LOGGER.warning(f"Timeout saat me-resolve shortlink: {link}, lanjut pakai link asli.")
 
-            # --- [FIX SEMAPHORE] BATAS WAKTU ABSOLUT (7200 DETIK / 2 JAM) ---
+            # --- [FIX SEMAPHORE] BATAS WAKTU DIPERPANJANG UNTUK PLAYLIST RAKSASA ---
             try:
-                # Memaksa agar tugas seberat apa pun tidak boleh berjalan lebih dari 2 jam
-                await asyncio.wait_for(start_link(link, user), timeout=7200.0)
+                # Memaksa agar tugas seberat apa pun tidak boleh berjalan lebih dari 6 jam (21600 detik)
+                await asyncio.wait_for(start_link(link, user), timeout=21600.0)
                 task_successful = True
             except asyncio.TimeoutError:
                 # Melemparkan error ke blok 'except Exception as e:' agar diproses dengan rapi
-                raise Exception("Tugas memakan waktu terlalu lama (> 2 Jam) dan diputus paksa oleh sistem agar tidak memblokir antrean.")
-            # ----------------------------------------------------------------
+                raise Exception("Tugas memakan waktu terlalu lama (> 6 Jam) dan diputus paksa oleh sistem agar tidak memblokir antrean.")
+            # -----------------------------------------------------------------------
                 
         except asyncio.CancelledError:
             # HAPUS BARIS INI: from bot.logger import LOGGER
