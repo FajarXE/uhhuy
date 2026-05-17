@@ -46,18 +46,17 @@ def generate_challenge(kid, prd_path):
     session_id = cdm.open()
     
     pssh_obj = PSSH(playready_header)
+    
+    # pypr menghasilkan XML String, jadi WAJIB di-encode("utf-8") dulu sebelum di-base64
     challenge = cdm.get_license_challenge(session_id, pssh_obj.wrm_headers[0])
+    challenge_b64 = base64.b64encode(challenge.encode("utf-8")).decode("utf-8")
     
-    # [FIX] Pastikan challenge langsung di-encode ke base64 (tanpa .encode("utf-8") lagi)
-    challenge_b64 = base64.b64encode(challenge).decode("ascii")
-    
-    # [FIX] Urutan return harus (challenge, session, cdm)
+    # [TETAP PERTAHANKAN URUTAN INI]
     return challenge_b64, session_id, cdm
 
 def parse_license_and_get_keys(cdm, session_id, license_b64):
-    # --- [FIX BYTES ERROR] Hapus .decode("utf-8") agar objek tetap menjadi biner (bytes) ---
-    decoded_data = base64.b64decode(license_b64)
-    # ---------------------------------------------------------------------------------------
+    # pypr meminta lisensi dalam bentuk XML String, jadi WAJIB di-decode("utf-8")
+    decoded_data = base64.b64decode(license_b64).decode("utf-8")
     
     cdm.parse_license(session_id, decoded_data)
     keys = []
