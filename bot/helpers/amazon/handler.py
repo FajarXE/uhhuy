@@ -674,7 +674,49 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
         challenge_b64, session_id, cdm = await asyncio.to_thread(generate_challenge, kid, prd_path)
         # -----------------------------------------------------------------------------
         
-        license_b64 = await client.get_license(challenge_b64, asin)
+        # --- [FIX PLAYREADY 400 BAD REQUEST] BYPASS FUNGSI GET_LICENSE BAWAAN ---
+        import uuid
+        access_token = client.tokens.get("x-amz-access-token") or client.tokens.get("accessToken")
+        device_id = client.tokens.get("device_id") or client.tokens.get("deviceId")
+        # Gunakan Device Type ID default Amazon jika tidak ditemukan di token
+        device_type_id = client.tokens.get("deviceTypeId") or "A1I3OANZGDNGEE"
+        
+        payload = {
+            "deviceToken": {
+                "deviceTypeId": device_type_id,
+                "deviceId": device_id
+            },
+            "appInfo": {
+                "musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({str(uuid.uuid4())} {asin})"
+            },
+            "DrmType": "PLAYREADY", # WAJIB PLAYREADY
+            "licenseChallenge": challenge_b64
+        }
+        
+        headers = {
+            "x-amzn-requestid": str(uuid.uuid4()),
+            "X-Amz-Target": "com.amazon.digitalmusiclocator.DigitalMusicLocatorServiceExternal.getLicenseForPlaybackV2",
+            "x-amz-access-token": access_token,
+            "Content-Encoding": "amz-1.0",
+            "User-Agent": "Harley/3.12.11.183 A1I3OANZGDNGEE/24.10.1"
+        }
+        
+        license_url = f"{client.base_url}{client.api_location}/api/dmls/getLicenseForPlaybackV2"
+        
+        async with client.session.post(license_url, json=payload, headers=headers) as resp:
+            if resp.status != 200:
+                err_txt = await resp.text()
+                raise Exception(f"PlayReady API Ditolak (HTTP {resp.status}): {err_txt}")
+            
+            lic_json = await resp.json()
+            if lic_json.get("__type", "").endswith("DrmLicenseDeniedException"):
+                raise Exception("Lisensi PlayReady Ditolak (Denied) oleh Amazon.")
+                
+            license_b64 = lic_json.get("license")
+            if not license_b64:
+                raise Exception("Amazon tidak mengembalikan token lisensi PlayReady.")
+        # ------------------------------------------------------------------------
+
         keys = await asyncio.to_thread(parse_license_and_get_keys, cdm, session_id, license_b64)
 
         def run_decryption(enc, dec, key_list):
