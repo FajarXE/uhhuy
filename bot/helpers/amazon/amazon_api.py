@@ -59,11 +59,15 @@ class AmazonApi:
             "origin": "https://music.amazon.com",
             "referer": "https://music.amazon.com/",
             "user-agent": "Harley/3.12.11.183 A1I3OANZGDNGEE/24.10.1",
-            "x-amzn-device-type-id": "A1KAXIG6VXSG8Y",
-            "x-amzn-hardware-device-type-id": "A1KAXIG6VXSG8Y",
+            
+            # --- [FIX IDENTITAS] Samakan persis dengan profil Android TV (Nvidia) ---
+            "x-amzn-device-type-id": "A1I3OANZGDNGEE",
+            "x-amzn-hardware-device-type-id": "A1MPSLFC7L5AFK",
             "x-amzn-device-family": "AndroidTV",
             "x-amzn-device-manufacturer": "NVIDIA",
-            "x-amzn-device-model": "A1KAXIG6VXSG8Y",
+            "x-amzn-device-model": "A1I3OANZGDNGEE",
+            # ------------------------------------------------------------------------
+            
             "x-amzn-device-language": "en_US",
             "x-amzn-device-height": "3840",
             "x-amzn-device-width": "2160",
@@ -527,7 +531,10 @@ class AmazonApi:
     async def get_license(self, challenge_b64, track_asin):
         for attempt in range(2):
             url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
-            device_type_id = self.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
+            
+            # --- [FIX PAYLOAD] Paksa gunakan ID Android TV persis seperti CLI ---
+            device_type_id = "A1I3OANZGDNGEE"
+            # --------------------------------------------------------------------
             
             payload = {
                 "deviceToken": {"deviceTypeId": device_type_id, "deviceId": self.tokens.get('device_id')},
@@ -549,11 +556,22 @@ class AmazonApi:
                     try:
                         if await self.refresh_access_token(): continue
                     except: pass
-                    raise Exception("Gagal meminta lisensi DRM.")
+                    raise Exception("Gagal meminta lisensi DRM (Token Expired).")
                     
-                if resp.status != 200: raise Exception(f"License API failed: {resp.status}")
+                if resp.status != 200: 
+                    # --- [FIX ERROR UNMASKING] BONGKAR ALASAN ASLI DARI AMAZON ---
+                    raise Exception(f"License API failed ({resp.status}): {resp_text}")
+                    
                 data = json.loads(resp_text)
-                if "license" not in data: raise Exception("Lisensi ditolak.")
+                
+                # Cek apakah Amazon memblokir perangkat (Blocklisted)
+                if data.get("__type", "").endswith("DrmLicenseDeniedException"):
+                    denial_reason = data.get("denialReason", "UNKNOWN_REASON")
+                    raise Exception(f"Lisensi Ditolak Amazon. Alasan: {denial_reason}")
+                    
+                if "license" not in data: 
+                    raise Exception("Lisensi tidak ditemukan dalam respons.")
+                    
                 return data["license"]
 
     async def close(self):
