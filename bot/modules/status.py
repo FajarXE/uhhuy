@@ -16,7 +16,8 @@ async def task_command(client: Client, message: Message):
     # --- [FIX SPAM PAPAN GLOBAL] HAPUS PESAN LAMA JIKA ADA ---
     if chat_id in GLOBAL_UI_MSG:
         try:
-            await GLOBAL_UI_MSG[chat_id].delete()
+            # Menggunakan delete_messages untuk penghapusan yang lebih pasti dan absolut
+            await client.delete_messages(chat_id, GLOBAL_UI_MSG[chat_id].id)
         except Exception:
             pass
     # ---------------------------------------------------------
