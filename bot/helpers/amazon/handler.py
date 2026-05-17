@@ -55,7 +55,10 @@ def generate_challenge(kid, prd_path):
     return challenge_b64, session_id, cdm
 
 def parse_license_and_get_keys(cdm, session_id, license_b64):
-    decoded_data = base64.b64decode(license_b64).decode("utf-8")
+    # --- [FIX BYTES ERROR] Hapus .decode("utf-8") agar objek tetap menjadi biner (bytes) ---
+    decoded_data = base64.b64decode(license_b64)
+    # ---------------------------------------------------------------------------------------
+    
     cdm.parse_license(session_id, decoded_data)
     keys = []
     for key in cdm.get_keys(session_id):
