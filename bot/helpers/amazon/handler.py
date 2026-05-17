@@ -21,11 +21,25 @@ from bot.helpers.message import edit_message
 # ----------------------------------
 
 def generate_challenge(kid, prd_path):
-    from bot.helpers.amazon.drm.pypr import PlayReadyHeaderBuilder, PSSH, Device, Cdm
+    # --- [FIX IMPORT PATH] Tangani jika user menaruh pypr di luar folder drm ---
+    try:
+        from bot.helpers.amazon.drm.pypr import PlayReadyHeaderBuilder, PSSH, Device, Cdm
+    except ImportError:
+        from bot.helpers.amazon.pypr import PlayReadyHeaderBuilder, PSSH, Device, Cdm
+        
     kid_clean = kid.replace("-", "")
     builder = PlayReadyHeaderBuilder(kid_clean)
     header = builder.build_header(version="4.0", header_spec=None, encryption_scheme="cenc", key_specs=[(kid_clean, kid_clean)])
     playready_header = base64.b64encode(header).decode("ascii")
+    
+    # --- [FIX PRD PATH] Cari file PRD (hisense) di semua kemungkinan lokasi ---
+    import os
+    if not os.path.exists(prd_path):
+        alt_path = prd_path.replace("/drm/", "/").replace("\\drm\\", "\\")
+        if os.path.exists(alt_path):
+            prd_path = alt_path
+        else:
+            raise Exception(f"File PRD Device (hisense) tidak ditemukan! Path dicari: {prd_path}")
     
     device = Device.load(prd_path)
     cdm = Cdm.from_device(device)
@@ -33,9 +47,12 @@ def generate_challenge(kid, prd_path):
     
     pssh_obj = PSSH(playready_header)
     challenge = cdm.get_license_challenge(session_id, pssh_obj.wrm_headers[0])
-    challenge_b64 = base64.b64encode(challenge.encode("utf-8")).decode("utf-8")
     
-    return cdm, session_id, challenge_b64
+    # [FIX] Pastikan challenge langsung di-encode ke base64 (tanpa .encode("utf-8") lagi)
+    challenge_b64 = base64.b64encode(challenge).decode("ascii")
+    
+    # [FIX] Urutan return harus (challenge, session, cdm)
+    return challenge_b64, session_id, cdm
 
 def parse_license_and_get_keys(cdm, session_id, license_b64):
     decoded_data = base64.b64decode(license_b64).decode("utf-8")
