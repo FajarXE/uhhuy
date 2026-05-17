@@ -421,6 +421,13 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 if hasattr(e, 'value'):
                     from bot.logger import LOGGER
                     import asyncio
+                    
+                    # --- [FIX] JANGAN TIDUR JIKA TILANG LEBIH DARI 5 MENIT ---
+                    if e.value > 300:
+                        LOGGER.warning(f"⚠️ FloodWait ekstrim ({e.value}s). Lagu dilewati agar playlist tidak mati!")
+                        return None
+                    # ---------------------------------------------------------
+                    
                     LOGGER.warning(f"⏳ File tertunda limit Telegram ({e.value}s). Menunggu agar tidak ada lagu yang terlewat...")
                     await asyncio.sleep(e.value)
                     # Ulangi pengiriman file ini setelah tidur selesai
