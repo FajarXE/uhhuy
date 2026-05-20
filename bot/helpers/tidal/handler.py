@@ -80,19 +80,54 @@ async def start_video(video_id: str, user: dict, upload=True):
     except Exception as e:
         raise e
     
+    # --- PERSIAPAN TASK PROGRESS ---
+    import hashlib
+    import time # <--- IMPORT TIME UNTUK STOPWATCH
+    from bot.helpers.utils import progress_message
+    
+    details = None
     if upload and 'bot_msg' in user:
-        try: await edit_message(user['bot_msg'], f"🚀 Mengunduh {len(segment_urls)} kepingan video secara PARALEL...")
-        except: pass
+        task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+        details = {
+            'msg': user['bot_msg'],
+            'title': video_meta.get('title', 'Unknown Video'),
+            'type': 'Video',
+            'action': 'Download',
+            'machine': 'Tidal HLS',
+            'task_id': task_id
+        }
         
-    # --- [SPEED UP] UNDUHAN HLS SECARA PARALEL (16 Koneksi Sekaligus) ---
+    # --- UNDUHAN HLS PARALEL DENGAN PROGRESS BAR AMAN (ANTI FLOODWAIT) ---
     sem = asyncio.Semaphore(16)
+    total_segments = len(segment_urls)
+    completed_segments = 0
+    total_bytes = 0
+    last_ui_update = time.time() # Stopwatch untuk mencegah spam edit
     
     async def fetch_segment(index, url):
+        nonlocal completed_segments, total_bytes, last_ui_update
         t_path = f"{raw_ts_path}.{index}"
         async with sem:
             err = await download_file(url, t_path)
             if err:
                 raise Exception(f"Gagal mengunduh bagian video: {err}")
+            
+            if os.path.exists(t_path):
+                total_bytes += os.path.getsize(t_path)
+            completed_segments += 1
+            
+            # UPDATE PROGRESS BAR MAKSIMAL 1 KALI SETIAP 5 DETIK
+            now = time.time()
+            if details and (now - last_ui_update > 5.0 or completed_segments == total_segments):
+                last_ui_update = now
+                # Estimasi ukuran total video (karena HLS tidak memberikan total size di awal)
+                estimasi_total = int((total_bytes / completed_segments) * total_segments) if completed_segments > 0 else 0
+                details['action'] = 'Download'
+                
+                # Jalankan fungsi update UI di background (create_task) 
+                # agar tidak menjeda/menahan kecepatan unduhan file
+                asyncio.create_task(progress_message(total_bytes, estimasi_total, details))
+                
         return t_path
 
     tasks = [fetch_segment(i, url) for i, url in enumerate(segment_urls)]
@@ -113,19 +148,21 @@ async def start_video(video_id: str, user: dict, upload=True):
     try: os.remove(raw_ts_path)
     except OSError: pass
     
-    # --- LOGIKA ZIPPING UNTUK VIDEO ---
+    # --- LOGIKA FAST-ZIPPING UNTUK VIDEO ---
     user_settings = bot_set.user_data.get(user['user_id'], {})
-    is_video_zip = user_settings.get("VIDEO_ZIP", False)
+    is_video_zip = user_settings.get("VIDEO_ZIP")
+    if is_video_zip is None:
+        is_video_zip = user_settings.get("video_zip", False)
     
     if is_video_zip:
         import zipfile
         zip_path = f"{filepath}/{filename}.zip"
         
-        if upload and 'bot_msg' in user:
-            try: await edit_message(user['bot_msg'], "🗜 Mengarsipkan video ke dalam file ZIP...")
-            except: pass
+        if details:
+            details['action'] = 'Zipping'
+            await progress_message(1, 1, details) # Tampilkan animasi Zipping di layar
             
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zipf:
             zipf.write(final_mp4_path, os.path.basename(final_mp4_path))
             
         try: os.remove(final_mp4_path)
@@ -133,11 +170,13 @@ async def start_video(video_id: str, user: dict, upload=True):
         
         video_meta['filepath'] = zip_path
         video_meta['extension'] = 'zip'
-        video_meta['type'] = 'doc' # Kirim sebagai dokumen karena ini file ZIP
+        video_meta['type'] = 'Video'       
+        video_meta['media_type'] = 'doc'   
     else:
         video_meta['filepath'] = final_mp4_path
         video_meta['extension'] = 'mp4'
-        video_meta['type'] = 'video'
+        video_meta['type'] = 'Video'       
+        video_meta['media_type'] = 'video' 
     # ----------------------------------
     
     if upload:
