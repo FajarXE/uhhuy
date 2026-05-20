@@ -1203,6 +1203,10 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     po_zip = curr_settings.get("ART_POSTER")
     if po_zip is None: po_zip = curr_settings.get("art_poster", False)
     
+    # Video
+    v_zip = curr_settings.get("VIDEO_ZIP")
+    if v_zip is None: v_zip = curr_settings.get("video_zip", False)
+    
     # --- END PERBAIKAN ---
 
     # Ambil Pengaturan Cloud Upload
@@ -1220,6 +1224,7 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
 <b>📦 ZIP SETTINGS</b>
 PLAYLIST : {p_zip} | ALBUM : {a_zip}
 ARTIST : {ar_zip} | POSTER : {po_zip}
+VIDEO : {v_zip}
 
 <b>☁️ UPLOAD MODE: {upload_mode}</b>
 Gofile: {t_gf} | Buzz: {t_bh} | Viking: {t_vk}
@@ -2325,6 +2330,20 @@ async def uset_zip(self, query):
         bot_set.user_data[user_id].update(data_saved)
         await database.save_user_settings(user_id, data_saved)
         await query.answer(f"Art poster: {new_val}")
+        return await start_user_setting(self, query.message, True, users_)
+
+    # --- TAMBAHAN: Toggle Video Zip ---
+    if data == "video":
+        current = user_dict.get("VIDEO_ZIP")
+        if current is None:
+            current = user_dict.get("video_zip", False)
+            
+        new_val = not current
+        data_saved = {"VIDEO_ZIP": new_val}
+        
+        bot_set.user_data[user_id].update(data_saved)
+        await database.save_user_settings(user_id, data_saved)
+        await query.answer(f"Video zip: {new_val}")
         return await start_user_setting(self, query.message, True, users_)
 
 
