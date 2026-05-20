@@ -102,6 +102,17 @@ class TidalApi:
     async def get_album_tracks(self, album_id):
         return await self._get('albums/' + str(album_id) + '/tracks')
 
+    async def get_video(self, video_id):
+        return await self._get(f'videos/{video_id}')
+
+    async def get_video_stream_url(self, video_id, session):
+        return await self._get(f'videos/{video_id}/playbackinfo', {
+            'playbackmode': 'STREAM',
+            'assetpresentation': 'FULL',
+            'videoquality': 'HIGH',
+            'prefetch': 'false'
+        }, session)
+
     # --- TAMBAHAN BARU UNTUK PLAYLIST ---
     async def get_playlist(self, playlist_id):
         return await self._get('playlists/' + str(playlist_id))
