@@ -61,7 +61,10 @@ async def aria2_download(url, filepath, details=None):
                 # Mendapatkan Task ID (GID) asli dari Aria2
                 gid = res["result"]
                 ACTIVE_DOWNLOADS[gid] = file_name
-                LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
+                
+                # --- FIX: Sembunyikan log 'Memulai Unduhan' untuk file berakhiran angka (.0, .1) ---
+                if not file_name.split('.')[-1].isdigit():
+                    LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
                 
                 # Menyiapkan data untuk UI Progress Bar
                 if details:
