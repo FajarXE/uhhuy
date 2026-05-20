@@ -136,6 +136,46 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
     if err:
         raise QobuzContentUnavailableError(f"Album tidak tersedia di akun ini ({err}).")
     
+    # --- FITUR BARU: MODE BOOKLET ONLY ---
+    if user.get('booklet_only'):
+        await edit_message(user['bot_msg'], f"🔍 Mencari booklet untuk album: `{album_meta['title']}`...")
+        
+        if album_meta.get('booklet_url'):
+            album_folder = basefolder + f"/{album_meta['title']}" if basefolder else f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{album_meta['artist']}/{album_meta['title']}"
+            album_folder = sanitize_filepath(album_folder)
+            booklet_path = None
+            
+            try:
+                # Pastikan direktori tersedia sebelum mengunduh
+                import os
+                os.makedirs(album_folder, exist_ok=True)
+                
+                temp_path = os.path.join(album_folder, "Booklet.pdf")
+                if not await download_file(album_meta['booklet_url'], temp_path): 
+                    booklet_path = temp_path
+            except Exception as e:
+                await edit_message(user['bot_msg'], f"❌ Gagal mengunduh booklet: {e}")
+                return
+            
+            if booklet_path and os.path.exists(booklet_path):
+                try: 
+                    await user['bot_msg'].reply_document(
+                        document=booklet_path, 
+                        caption=f"📖 **Booklet**: {album_meta['title']}", 
+                        file_name=f"{album_meta['title']} - Booklet.pdf"
+                    )
+                    await edit_message(user['bot_msg'], "✅ Booklet berhasil dikirim! Tugas selesai.")
+                except Exception as e:
+                    await edit_message(user['bot_msg'], f"❌ Gagal mengirim file Telegram: {e}")
+            else:
+                await edit_message(user['bot_msg'], "❌ File booklet gagal diproses/rusak.")
+        else:
+            await edit_message(user['bot_msg'], f"❌ Tidak ada booklet digital yang dirilis untuk album ini.")
+        
+        # RETURN EARLY: Hentikan eksekusi di sini agar lagu tidak diunduh!
+        return
+    # -------------------------------------
+    
     # Coba ambil sampel track
     try: 
         track_meta = await client.get_track_url(album_meta['tracks'][0]['itemid'], user)
@@ -171,7 +211,7 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
     
-    # Booklet
+    # Booklet (Untuk pengunduhan album normal)
     booklet_path = None
     if album_meta.get('booklet_url'):
         try:
