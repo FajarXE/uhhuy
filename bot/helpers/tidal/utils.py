@@ -5,6 +5,9 @@ import os
 import aiofiles
 import asyncio
 import logging
+import json
+import base64
+import urllib.parse
 
 from shutil import copyfileobj
 from xml.etree import ElementTree
@@ -22,11 +25,13 @@ async def parse_url(url):
         (r"/browse/artist/(\d+)", "artist"),
         (r"/browse/album/(\d+)", "album"),
         (r"/browse/playlist/([\w-]+)", "playlist"),
+        (r"/browse/video/(\d+)", "video"),  # <- TAUTAN VIDEO
         (r"/track/(\d+)", "track"),
         (r"/artist/(\d+)", "artist"),
         (r"/playlist/([\w-]+)", "playlist"),
         (r"/album/\d+/track/(\d+)", "track"),
         (r"/album/(\d+)", "album"),
+        (r"/video/(\d+)", "video"),          # <- TAUTAN VIDEO
     ]
     
     for pattern, type_ in patterns:
@@ -35,6 +40,56 @@ async def parse_url(url):
             return match.group(1), type_
     
     return None, None
+
+# Tambahkan fungsi baru di bagian paling bawah file
+async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
+    """Membaca master playlist HLS dan mengekstrak segment TS kualitas tertinggi."""
+    manifest_json = json.loads(base64.b64decode(manifest_b64))
+    master_url = manifest_json['urls'][0]
+    
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(master_url, headers=auth_headers) as resp:
+            master_m3u8 = await resp.text()
+        
+        best_url = None
+        max_bw = 0
+        lines = master_m3u8.splitlines()
+        
+        # Cari resolusi tertinggi
+        for i, line in enumerate(lines):
+            if line.startswith('#EXT-X-STREAM-INF:'):
+                bw_match = re.search(r'BANDWIDTH=(\d+)', line)
+                bw = int(bw_match.group(1)) if bw_match else 0
+                if bw > max_bw and i + 1 < len(lines):
+                    max_bw = bw
+                    best_url = lines[i+1].strip()
+                    # Tangani URL relatif
+                    if not best_url.startswith('http'):
+                        best_url = urllib.parse.urljoin(master_url, best_url)
+                    
+        if not best_url:
+            best_url = master_url
+            
+        async with session.get(best_url, headers=auth_headers) as resp:
+            media_m3u8 = await resp.text()
+            
+        # Ekstrak file TS
+        segment_urls = []
+        for line in media_m3u8.splitlines():
+            line = line.strip()
+            if line and not line.startswith('#'):
+                if not line.startswith('http'):
+                    line = urllib.parse.urljoin(best_url, line)
+                segment_urls.append(line)
+                
+        return segment_urls
+
+async def convert_ts_to_mp4(ts_path: str, output_path: str):
+    """Membungkus ulang (muxing) file .ts hasil gabungan ke .mp4 tanpa re-encode visual."""
+    cmd = f'ffmpeg -y -i "{ts_path}" -c copy -bsf:a aac_adtstoasc "{output_path}"'
+    task = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    await task.wait()
 
 
 async def get_stream_session(track_data: dict, user: dict):
