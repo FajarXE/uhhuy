@@ -55,15 +55,14 @@ async def start_tidal(url:str, user:dict):
         await start_video(item_id, user) # <- TAMBAHAN RUTE VIDEO
 
 
-# 2. Tambahkan fungsi inti start_video (Bisa diletakkan di paling bawah)
 async def start_video(video_id: str, user: dict, upload=True):
     client: TidalApi = user['tidal_api']
     
     try:
         video_data = await client.get_video(video_id)
     except Exception as e:
-        LOGGER.error(f"Gagal mengambil data video: {e}")
-        return None
+        # --- FIX: Lempar error ke atas agar download.py bisa mencoba akun berikutnya ---
+        raise e
         
     video_meta = await get_video_metadata(video_id, video_data, user['r_id'], client, user['user_id'])
     
@@ -80,7 +79,7 @@ async def start_video(video_id: str, user: dict, upload=True):
         stream_data = await client.get_video_stream_url(video_id, session)
         segment_urls = await parse_m3u8_video(stream_data['manifest'], session.auth_headers())
     except Exception as e:
-        LOGGER.error(f"Gagal memuat URL Video streaming: {e}")
+        # --- FIX: Lempar error juga di sini agar sistem fallback bekerja ---
         raise e
     
     # Beri tahu UI bahwa bot sedang mengunduh kepingan (sekali saja)
@@ -93,12 +92,12 @@ async def start_video(video_id: str, user: dict, upload=True):
     for i, url in enumerate(segment_urls):
         t_path = f"{raw_ts_path}.{i}"
         
-        # --- FIX: Hapus details=details di sini agar tidak membanjiri UI Radar ---
         err = await download_file(url, t_path)
         
         if err:
-            LOGGER.error("Terjadi masalah saat mengunduh bagian video.")
-            return None
+            # Jika satu segmen gagal, gagalkan seluruh tugas agar bisa dicoba di akun lain
+            raise Exception(f"Gagal mengunduh bagian video: {err}")
+            
         temp_files.append(t_path)
         
     # Beri tahu UI saat mulai menggabungkan file
