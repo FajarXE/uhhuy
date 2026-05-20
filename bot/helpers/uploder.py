@@ -505,7 +505,6 @@ async def telegram_upload(track, user, batch_mode=False):
         
     details = None
     if 'bot_msg' in user:
-        import hashlib
         task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         details = {
             'msg': user['bot_msg'],
@@ -517,10 +516,13 @@ async def telegram_upload(track, user, batch_mode=False):
         }
         
     try: 
-        # --- PERBAIKAN: Gunakan tipe 'video' jika meta['type'] menyatakan ini adalah video ---
-        media_type = 'video' if meta.get('type') == 'video' else 'audio'
+        # --- PERBAIKAN: Gunakan tipe yang sudah diset di handler ---
+        media_type = meta.get('type', 'audio')
+        if media_type not in ['audio', 'video', 'doc']:
+            media_type = 'audio'  # Fallback
+            
         await send_message(user, filepath, media_type, meta=meta, progress=tg_progress_callback, progress_args=(details,))
-        # -------------------------------------------------------------------------------------
+        # -----------------------------------------------------------
     except Exception as e:
         LOGGER.error(f"[UPLOAD ERROR] send_message failed for {filepath}: {e}")
         raise e
