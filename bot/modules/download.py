@@ -496,19 +496,20 @@ async def run_download_task(link: str, user: dict):
 async def download_track(c, msg:Message):
     if await check_user(msg=msg):
         
-        text_content = ""
-        reply = False
-        
-        if msg.reply_to_message:
-            text_content = msg.reply_to_message.text
-            reply = True
-        else:
-            text_content = msg.text
-            reply = False
+        text_content = msg.reply_to_message.text if msg.reply_to_message else msg.text
 
         link = ""
+        booklet_only = False # <-- Inisialisasi flag
+        
         try:
             parts = text_content.split()
+            
+            # --- DETEKSI FLAG -b ---
+            if "-b" in parts:
+                booklet_only = True
+                parts.remove("-b") # Hapus dari array agar tidak mengganggu parser link
+            # -----------------------
+
             for part in parts:
                 if part.startswith("http://") or part.startswith("https://"):
                     link = part 
@@ -523,7 +524,7 @@ async def download_track(c, msg:Message):
         if not link:
             return await send_message(msg, lang.s.ERR_LINK_RECOGNITION)
         
-        user = await fetch_user_details(msg, reply)
+        user = await fetch_user_details(msg, reply=bool(msg.reply_to_message))
         
         try:
             resolved_link = await resolve_shortlink(link)
@@ -532,6 +533,8 @@ async def download_track(c, msg:Message):
         except Exception: pass 
         
         user['link'] = link
+        user['booklet_only'] = booklet_only # <-- Simpan flag ke dalam user dict
+        
         asyncio.create_task(run_download_task(link, user))
         
 
