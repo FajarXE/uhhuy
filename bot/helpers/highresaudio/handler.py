@@ -194,6 +194,50 @@ async def start_album(album_url: str, user: dict, upload=True):
     album_folder = sanitize_filepath(album_folder)
     album_meta['folderpath'] = album_folder 
 
+    # --- FITUR BARU: MODE BOOKLET ONLY ---
+    if user.get('booklet_only'):
+        await edit_message(user['bot_msg'], f"🔍 Mencari booklet untuk album: `{album_meta['title']}`...")
+        
+        if album_meta.get('booklet_url'):
+            booklet_path = None
+            try:
+                # Pastikan direktori tersedia sebelum mengunduh
+                os.makedirs(album_folder, exist_ok=True)
+                
+                temp_path = os.path.join(album_folder, "Booklet.pdf")
+                dl_client = highresaudio_manager.get_client(user.get('user_id'))
+                
+                if dl_client:
+                    # Gunakan fungsi download_booklet bawaan (via to_thread karena requests itu sync)
+                    await asyncio.to_thread(download_booklet, dl_client, album_meta['booklet_url'], temp_path)
+                    if os.path.exists(temp_path):
+                        booklet_path = temp_path
+                else:
+                    raise Exception("Klien HighResAudio tidak tersedia.")
+                    
+            except Exception as e:
+                await edit_message(user['bot_msg'], f"❌ Gagal mengunduh booklet: {e}")
+                return
+            
+            if booklet_path and os.path.exists(booklet_path):
+                try: 
+                    await user['bot_msg'].reply_document(
+                        document=booklet_path, 
+                        caption=f"📖 **Booklet**: {album_meta['title']}", 
+                        file_name=f"{album_meta['title']} - Booklet.pdf"
+                    )
+                    await edit_message(user['bot_msg'], "✅ Booklet berhasil dikirim! Tugas selesai.")
+                except Exception as e:
+                    await edit_message(user['bot_msg'], f"❌ Gagal mengirim file Telegram: {e}")
+            else:
+                await edit_message(user['bot_msg'], "❌ File booklet gagal diproses/rusak.")
+        else:
+            await edit_message(user['bot_msg'], f"❌ Tidak ada booklet digital yang dirilis untuk album ini.")
+        
+        # RETURN EARLY: Hentikan eksekusi di sini agar lagu tidak diunduh!
+        return
+    # -------------------------------------
+
     if upload:
         album_meta['poster_msg'] = await post_art_poster(user, album_meta)
 
@@ -217,6 +261,7 @@ async def start_album(album_url: str, user: dict, upload=True):
     if not successful_tracks:
         raise Exception(f"Tidak ada lagu HighResAudio yang berhasil diunduh.")
 
+    # Booklet untuk pengunduhan album normal (beserta lagu-lagunya)
     booklet_path = None
     if 'booklet_url' in album_meta:
         LOGGER.info("HighResAudio: Mengunduh booklet...")
@@ -237,7 +282,6 @@ async def start_album(album_url: str, user: dict, upload=True):
     if upload:
         # Jika user memilih TIDAK membuat ZIP, uploader.py hanya akan mengunggah lagu.
         # Jadi, kita harus mengirim Booklet secara terpisah ke Telegram.
-        # (Jika ZIP aktif, Booklet otomatis sudah ikut terbungkus di dalam ZIP-nya!)
         if not album_zip and booklet_path and os.path.exists(booklet_path):
             try:
                 await user['bot_msg'].reply_document(
@@ -249,5 +293,4 @@ async def start_album(album_url: str, user: dict, upload=True):
                 LOGGER.error(f"HighResAudio: Gagal mengunggah booklet: {e}")
         
         # Zipping dan upload album diurus sepenuhnya secara otomatis oleh uploader.py
-        # agar memunculkan Papan Global yang mulus tanpa kedipan!
         await album_upload(album_meta, user)
