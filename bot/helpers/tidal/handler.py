@@ -138,10 +138,6 @@ async def start_video(video_id: str, user: dict, upload=True):
         raise e
     # --------------------------------------------------------------------
         
-    if upload and 'bot_msg' in user:
-        try: await edit_message(user['bot_msg'], "⏳ Menggabungkan dan memproses video (FFmpeg)...")
-        except: pass
-        
     await merge_tracks(temp_files, raw_ts_path)
     await convert_ts_to_mp4(raw_ts_path, final_mp4_path)
     
@@ -190,7 +186,11 @@ async def start_video(video_id: str, user: dict, upload=True):
     # ----------------------------------------
     
     if upload:
-        await track_upload(video_meta, user, False)
+        # --- FIX: BYPASS TRACK_UPLOAD ---
+        # Kita tembak langsung ke telegram_upload agar fungsi lama 
+        # tidak membajak dan memaksa video ini menjadi format ZIP Audio.
+        from bot.helpers.uploder import telegram_upload
+        await telegram_upload(video_meta, user)
 
     return video_meta
         
