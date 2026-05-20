@@ -516,8 +516,8 @@ async def telegram_upload(track, user, batch_mode=False):
         }
         
     try: 
-        # --- PERBAIKAN: Gunakan tipe yang sudah diset di handler ---
-        media_type = meta.get('type', 'audio')
+        # --- [FIX FINAL] BACA MEDIA_TYPE SECARA AKURAT DAN JADIKAN HURUF KECIL ---
+        media_type = meta.get('media_type', meta.get('type', 'audio')).lower()
         if media_type not in ['audio', 'video', 'doc']:
             media_type = 'audio'  # Fallback
             
