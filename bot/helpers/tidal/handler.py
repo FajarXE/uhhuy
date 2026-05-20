@@ -37,6 +37,7 @@ from bot.logger import LOGGER
 from config import Config
 
 
+# 1. Update fungsi start_tidal untuk mengarahkan rute 'video'
 async def start_tidal(url:str, user:dict):
     item_id, type_ = await parse_url(url)
     if not type_:
@@ -50,6 +51,67 @@ async def start_tidal(url:str, user:dict):
         await start_album(item_id, user)
     elif type_ == 'playlist':
         await start_playlist(item_id, user) 
+    elif type_ == 'video':
+        await start_video(item_id, user) # <- TAMBAHAN RUTE VIDEO
+
+
+# 2. Tambahkan fungsi inti start_video (Bisa diletakkan di paling bawah)
+async def start_video(video_id: str, user: dict, upload=True):
+    client: TidalApi = user['tidal_api']
+    
+    try:
+        video_data = await client.get_video(video_id)
+    except Exception as e:
+        LOGGER.error(f"Gagal mengambil data video: {e}")
+        return None
+        
+    video_meta = await get_video_metadata(video_id, video_data, user['r_id'], client, user['user_id'])
+    
+    filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{video_meta['provider']}/{video_meta['artist']}"
+    if not os.path.exists(filepath):
+        os.makedirs(filepath, exist_ok=True)
+    
+    filename = f"{video_meta['title']} - {video_meta['artist']}".replace('/', ' ')
+    raw_ts_path = sanitize_filepath(f"{filepath}/{filename}.ts")
+    final_mp4_path = sanitize_filepath(f"{filepath}/{filename}.mp4")
+    
+    session = client.tv_session 
+    try:
+        stream_data = await client.get_video_stream_url(video_id, session)
+        segment_urls = await parse_m3u8_video(stream_data['manifest'], session.auth_headers())
+    except Exception as e:
+        LOGGER.error(f"Gagal memuat URL Video streaming: {e}")
+        raise e
+    
+    details = None
+    if upload and 'bot_msg' in user:
+        details = {'msg': user['bot_msg'], 'title': video_meta['title'], 'type': 'Video'}
+        
+    temp_files = []
+    # Unduh per-segmen HLS 
+    for i, url in enumerate(segment_urls):
+        t_path = f"{raw_ts_path}.{i}"
+        err = await download_file(url, t_path, details=details)
+        if err:
+            LOGGER.error("Terjadi masalah saat mengunduh bagian video.")
+            return None
+        temp_files.append(t_path)
+        
+    # Gabungkan file segmen dan ubah formatnya
+    await merge_tracks(temp_files, raw_ts_path)
+    await convert_ts_to_mp4(raw_ts_path, final_mp4_path)
+    
+    try: os.remove(raw_ts_path)
+    except OSError: pass
+    
+    video_meta['filepath'] = final_mp4_path
+    video_meta['extension'] = 'mp4'
+    
+    # Manfaatkan track_upload yang sudah ada
+    if upload:
+        await track_upload(video_meta, user, False)
+
+    return video_meta
         
 
 async def start_track(track_id:int, user:dict, track_meta:dict | None,
