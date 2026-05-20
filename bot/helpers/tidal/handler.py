@@ -138,18 +138,28 @@ async def start_video(video_id: str, user: dict, upload=True):
     try: os.remove(raw_ts_path)
     except OSError: pass
     
-    # --- [FIX FINAL] LOGIKA VIDEO-ZIP YANG KEBAL DARI STRING "False" ---
-    user_settings = bot_set.user_data.get(user['user_id'], {})
+    # --- [START DEBUGGING VIDEO ZIP] ---
+    user_id_debug = user.get('user_id')
+    user_settings = bot_set.user_data.get(user_id_debug, {})
     
     raw_zip = user_settings.get("VIDEO_ZIP")
     if raw_zip is None:
         raw_zip = user_settings.get("video_zip", False)
         
+    LOGGER.info("="*50)
+    LOGGER.info(f"[DEBUG VIDEO ZIP] 1. User ID: {user_id_debug} | Tipe: {type(user_id_debug)}")
+    LOGGER.info(f"[DEBUG VIDEO ZIP] 2. Isi Memory: {user_settings}")
+    LOGGER.info(f"[DEBUG VIDEO ZIP] 3. Nilai raw_zip: '{raw_zip}' | Tipe Data: {type(raw_zip)}")
+    
     # Validasi super ketat: pastikan teks "false" tidak dianggap True oleh Python
     if isinstance(raw_zip, str):
         is_video_zip = raw_zip.strip().lower() in ['true', '1', 'on', 'yes']
     else:
         is_video_zip = bool(raw_zip)
+        
+    LOGGER.info(f"[DEBUG VIDEO ZIP] 4. KEPUTUSAN is_video_zip: {is_video_zip}")
+    LOGGER.info("="*50)
+    # --- [END DEBUGGING] ---
     
     if is_video_zip:
         import zipfile
@@ -174,7 +184,6 @@ async def start_video(video_id: str, user: dict, upload=True):
         video_meta['extension'] = 'mp4'
         video_meta['type'] = 'Video'       
         video_meta['media_type'] = 'video' 
-    # ----------------------------------------------------------------
     
     # --- BUAT KETERANGAN CAPTION OTOMATIS ---
     video_caption = (
