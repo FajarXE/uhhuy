@@ -464,6 +464,25 @@ async def get_artist_metadata(a_meta:dict, r_id, user_id=0):
     return metadata
 
 
+async def get_video_metadata(video_id, v_meta, r_id, client=None, user_id=0):
+    metadata = copy.deepcopy(base_meta)
+    metadata['tempfolder'] += f"{r_id}-temp/"
+    metadata['itemid'] = video_id
+    metadata['title'] = v_meta.get('title', 'Unknown Video')
+    metadata['artist'] = get_artists_name(v_meta)
+    metadata['albumartist'] = metadata['artist']
+    metadata['duration'] = v_meta.get('duration', 0)
+    metadata['explicit'] = v_meta.get('explicit', False)
+    metadata['provider'] = 'Tidal'
+    metadata['type'] = 'video'
+    
+    # Ambil Cover Thumbnail Video
+    metadata['cover'] = await get_cover(v_meta.get('imageId'), metadata, False, user_id)
+    metadata['thumbnail'] = await get_cover(v_meta.get('imageId'), metadata, True, user_id)
+    
+    return metadata
+    
+
 async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
     try:
         term = f"{metadata.get('artist', '')} {metadata.get('album', '')}"
