@@ -503,9 +503,9 @@ async def telegram_upload(track, user, batch_mode=False):
         LOGGER.error(f"[UPLOAD FAIL] Path does not exist: '{filepath}'")
         raise FileNotFoundError(f"File not found: {filepath}")
         
-    # --- [SUNTIKAN RADAR UPLOAD TELEGRAM (LAGU/TRACK)] ---
     details = None
     if 'bot_msg' in user:
+        import hashlib
         task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         details = {
             'msg': user['bot_msg'],
@@ -515,11 +515,12 @@ async def telegram_upload(track, user, batch_mode=False):
             'machine': 'Telegram API',
             'task_id': task_id
         }
-    # -----------------------------------------------------
         
     try: 
-        # Menambahkan parameter 'progress' dan 'progress_args' ke mesin pengirim
-        await send_message(user, filepath, 'audio', meta=meta, progress=tg_progress_callback, progress_args=(details,))
+        # --- PERBAIKAN: Gunakan tipe 'video' jika meta['type'] menyatakan ini adalah video ---
+        media_type = 'video' if meta.get('type') == 'video' else 'audio'
+        await send_message(user, filepath, media_type, meta=meta, progress=tg_progress_callback, progress_args=(details,))
+        # -------------------------------------------------------------------------------------
     except Exception as e:
         LOGGER.error(f"[UPLOAD ERROR] send_message failed for {filepath}: {e}")
         raise e
