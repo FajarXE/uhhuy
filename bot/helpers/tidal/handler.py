@@ -181,10 +181,10 @@ async def start_video(video_id: str, user: dict, upload=True):
     
     # --- BUAT KETERANGAN CAPTION OTOMATIS ---
     video_caption = (
-        f"<b>NAME :</b> {video_meta.get('title', 'Unknown')}\n"
-        f"<b>TYPE :</b> Video\n"
-        f"<b>PROVIDER :</b> Tidal\n"
-        f"<b>QUALITY :</b> {quality_str}"
+        f"NAME : {video_meta.get('title', 'Unknown')}\n"
+        f"TYPE : Video\n"
+        f"PROVIDER : Tidal\n"
+        f"QUALITY : {quality_str}"
     )
     video_meta['caption'] = video_caption
     # ----------------------------------------
