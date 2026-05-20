@@ -76,9 +76,8 @@ async def start_video(video_id: str, user: dict, upload=True):
     session = client.tv_session 
     try:
         stream_data = await client.get_video_stream_url(video_id, session)
-        segment_urls = await parse_m3u8_video(stream_data['manifest'], session.auth_headers())
+        segment_urls, quality_str = await parse_m3u8_video(stream_data['manifest'], session.auth_headers())
     except Exception as e:
-        raise e
     
     # --- PERSIAPAN TASK PROGRESS ---
     import hashlib
@@ -178,6 +177,16 @@ async def start_video(video_id: str, user: dict, upload=True):
         video_meta['type'] = 'Video'       
         video_meta['media_type'] = 'video' 
     # ----------------------------------
+    
+    # --- BUAT KETERANGAN CAPTION OTOMATIS ---
+    video_caption = (
+        f"<b>NAME :</b> {video_meta.get('title', 'Unknown')}\n"
+        f"<b>TYPE :</b> Video\n"
+        f"<b>PROVIDER :</b> Tidal\n"
+        f"<b>QUALITY :</b> {quality_str}"
+    )
+    video_meta['caption'] = video_caption
+    # ----------------------------------------
     
     if upload:
         await track_upload(video_meta, user, False)
