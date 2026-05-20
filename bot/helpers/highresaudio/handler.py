@@ -299,9 +299,8 @@ async def start_album(album_url: str, user: dict, upload=True):
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
     if upload:
-        # Jika user memilih TIDAK membuat ZIP, uploader.py hanya akan mengunggah lagu.
-        # Jadi, kita harus mengirim Booklet secara terpisah ke Telegram.
-        if not album_zip and booklet_path and os.path.exists(booklet_path):
+        # Selalu kirim Booklet secara terpisah ke Telegram (terlepas dari mode ZIP atau Batch)
+        if booklet_path and os.path.exists(booklet_path):
             try:
                 await user['bot_msg'].reply_document(
                     document=booklet_path,
