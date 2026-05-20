@@ -83,19 +83,28 @@ async def start_video(video_id: str, user: dict, upload=True):
         LOGGER.error(f"Gagal memuat URL Video streaming: {e}")
         raise e
     
-    details = None
+    # Beri tahu UI bahwa bot sedang mengunduh kepingan (sekali saja)
     if upload and 'bot_msg' in user:
-        details = {'msg': user['bot_msg'], 'title': video_meta['title'], 'type': 'Video'}
+        try: await edit_message(user['bot_msg'], f"⏳ Mengunduh {len(segment_urls)} kepingan video (HLS)...")
+        except: pass
         
     temp_files = []
-    # Unduh per-segmen HLS 
+    # Unduh per-segmen HLS secara diam-diam
     for i, url in enumerate(segment_urls):
         t_path = f"{raw_ts_path}.{i}"
-        err = await download_file(url, t_path, details=details)
+        
+        # --- FIX: Hapus details=details di sini agar tidak membanjiri UI Radar ---
+        err = await download_file(url, t_path)
+        
         if err:
             LOGGER.error("Terjadi masalah saat mengunduh bagian video.")
             return None
         temp_files.append(t_path)
+        
+    # Beri tahu UI saat mulai menggabungkan file
+    if upload and 'bot_msg' in user:
+        try: await edit_message(user['bot_msg'], "⏳ Menggabungkan dan memproses video (FFmpeg)...")
+        except: pass
         
     # Gabungkan file segmen dan ubah formatnya
     await merge_tracks(temp_files, raw_ts_path)
@@ -219,19 +228,35 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         # ----------------------------------------
 
         if type(urls) == list:
+            # Beri tahu UI bahwa bot sedang mengunduh kepingan (sekali saja)
+            if upload and 'bot_msg' in user:
+                try: await edit_message(user['bot_msg'], f"⏳ Mengunduh {len(urls[0])} kepingan segmen...")
+                except: pass
+                
             i = 0
             temp_files = []
             for url in urls[0]:
                 temp_path = f"{filepath}.{i}"
-                err = await download_file(url, temp_path, details=details) # <-- Tambahkan details
+                
+                # --- FIX: Hapus details=details di sini agar tidak membanjiri UI Radar ---
+                err = await download_file(url, temp_path) 
+                
                 if err:
                     LOGGER.error(f"Download_file gagal (list): {err}")
                     return None
                 i+=1
                 temp_files.append(temp_path)
+                
+            # Beri tahu UI saat mulai menggabungkan file
+            if upload and 'bot_msg' in user:
+                try: await edit_message(user['bot_msg'], "⏳ Menggabungkan kepingan file...")
+                except: pass
+                
             await merge_tracks(temp_files, filepath)
         else:
-            err = await download_file(urls, filepath, details=details) # <-- Tambahkan details
+            # Untuk file tunggal (bukan kepingan), TETAP GUNAKAN details 
+            # agar progress bar berjalan normal di layar
+            err = await download_file(urls, filepath, details=details) 
             if err:
                 LOGGER.error(f"Download_file gagal (single): {err}")
                 return None
