@@ -147,7 +147,6 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
             
             try:
                 # Pastikan direktori tersedia sebelum mengunduh
-                import os
                 os.makedirs(album_folder, exist_ok=True)
                 
                 temp_path = os.path.join(album_folder, "Booklet.pdf")
