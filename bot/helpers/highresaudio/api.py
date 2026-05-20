@@ -57,7 +57,7 @@ class HighResAudioApi:
             r = self.s.get(f'{self.API_URL}user/login', params={
                 'password': password,
                 'username': username
-            }, timeout=30)
+            }, timeout=60)
 
             r.raise_for_status()
             data = r.json()
@@ -90,7 +90,7 @@ class HighResAudioApi:
 
     def get_album_id_from_url(self, url: str) -> str:
         try:
-            r = self.s.get(url, timeout=30)
+            r = self.s.get(url, timeout=60)
             r.raise_for_status()
             
             soup = BeautifulSoup(r.text, "html.parser")
@@ -117,7 +117,7 @@ class HighResAudioApi:
             r = self.s.get(f'{self.API_URL}vault/album/', params={
                 'album_id': album_id,
                 'userData': self.user_data_string 
-            }, timeout=30)
+            }, timeout=60)
             r.raise_for_status()
             return r.json()
         except Exception as e:
