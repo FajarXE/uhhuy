@@ -78,6 +78,7 @@ async def start_video(video_id: str, user: dict, upload=True):
         stream_data = await client.get_video_stream_url(video_id, session)
         segment_urls, quality_str = await parse_m3u8_video(stream_data['manifest'], session.auth_headers())
     except Exception as e:
+        raise e  # <--- INI BARIS YANG HARUS DITAMBAHKAN
     
     # --- PERSIAPAN TASK PROGRESS ---
     import hashlib
