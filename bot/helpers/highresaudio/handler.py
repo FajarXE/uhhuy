@@ -106,8 +106,11 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             details = {}
             
         details['headers'] = headers_dict
-        if client.proxy:
-            details['proxy'] = client.proxy # Suntikkan proxy ke Aria2!
+        
+        # ARIA2 HANYA MENDUKUNG HTTP/HTTPS PROXY! 
+        # Jika proxy adalah SOCKS (misal socks5h://), JANGAN berikan ke Aria2 agar tidak error.
+        if client.proxy and not client.proxy.startswith('socks'):
+            details['proxy'] = client.proxy 
         # --------------------------------------
 
         # Langkah 1: Coba kekuatan penuh Aria2 (retries=1 agar cepat beralih jika ditolak server)
@@ -134,9 +137,13 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             if client.proxy and client.proxy.startswith('socks'):
                 try:
                     from aiohttp_socks import ProxyConnector
-                    connector = ProxyConnector.from_url(client.proxy)
+                    # [FIX]: Library menolak skema 'socks5h://'. Kita normalkan ke 'socks5://' secara internal
+                    safe_proxy = client.proxy.replace('socks5h://', 'socks5://').replace('socks4a://', 'socks4://')
+                    connector = ProxyConnector.from_url(safe_proxy)
                 except ImportError:
                     LOGGER.warning("aiohttp_socks tidak terinstall, proxy SOCKS dilewati.")
+                except Exception as e:
+                    LOGGER.warning(f"Gagal memuat ProxyConnector: {e}")
 
             async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
                 get_kwargs = {}
