@@ -41,9 +41,8 @@ async def parse_url(url):
     
     return None, None
 
-# Tambahkan fungsi baru di bagian paling bawah file
 async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
-    """Membaca master playlist HLS dan mengekstrak segment TS kualitas tertinggi."""
+    """Membaca master playlist HLS dan mengekstrak segment beserta Resolusinya."""
     manifest_json = json.loads(base64.b64decode(manifest_b64))
     master_url = manifest_json['urls'][0]
     
@@ -54,6 +53,7 @@ async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
         
         best_url = None
         max_bw = 0
+        quality_str = "Unknown" # Default jika tidak terdeteksi
         lines = master_m3u8.splitlines()
         
         # Cari resolusi tertinggi
@@ -61,9 +61,17 @@ async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
             if line.startswith('#EXT-X-STREAM-INF:'):
                 bw_match = re.search(r'BANDWIDTH=(\d+)', line)
                 bw = int(bw_match.group(1)) if bw_match else 0
+                
                 if bw > max_bw and i + 1 < len(lines):
                     max_bw = bw
                     best_url = lines[i+1].strip()
+                    
+                    # --- BACA RESOLUSI UNTUK QUALITY TAG ---
+                    res_match = re.search(r'RESOLUTION=\d+x(\d+)', line)
+                    if res_match:
+                        quality_str = f"{res_match.group(1)}p"
+                    # ---------------------------------------
+                    
                     # Tangani URL relatif
                     if not best_url.startswith('http'):
                         best_url = urllib.parse.urljoin(master_url, best_url)
@@ -83,7 +91,8 @@ async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
                     line = urllib.parse.urljoin(best_url, line)
                 segment_urls.append(line)
                 
-        return segment_urls
+        # --- PERBAIKAN: Kembalikan 2 nilai (urls dan kualitas) ---
+        return segment_urls, quality_str
 
 async def convert_ts_to_mp4(ts_path: str, output_path: str):
     """Membungkus ulang (muxing) file .ts hasil gabungan ke .mp4 tanpa re-encode visual."""
