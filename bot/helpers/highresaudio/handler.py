@@ -101,14 +101,14 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             "Cookie": cookie_str
         }
         
-        # --- [FIX BUG HEADER ARIA2] ---
-        # Pastikan details selalu berbentuk dictionary agar headers SELALU disuntikkan,
-        # bahkan saat mengunduh Album (di mana details awalnya None).
+        # --- [FIX BUG HEADER & PROXY ARIA2] ---
         if details is None:
             details = {}
             
         details['headers'] = headers_dict
-        # ------------------------------
+        if client.proxy:
+            details['proxy'] = client.proxy # Suntikkan proxy ke Aria2!
+        # --------------------------------------
 
         # Langkah 1: Coba kekuatan penuh Aria2 (retries=1 agar cepat beralih jika ditolak server)
         err = await download_file(download_url, track_meta['filepath'], retries=1, details=details)
@@ -129,9 +129,21 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                 except: pass
             # --------------------------------------
             
-            # Langkah 2: AIOHTTP Turbo Fallback (Menjamin Cookie Tembus 100%)
-            async with aiohttp.ClientSession(headers=headers_dict) as session:
-                async with session.get(download_url) as r:
+            # --- [FIX BUG 403 AKAMAI] TERAPKAN PROXY KE AIOHTTP ---
+            connector = None
+            if client.proxy and client.proxy.startswith('socks'):
+                try:
+                    from aiohttp_socks import ProxyConnector
+                    connector = ProxyConnector.from_url(client.proxy)
+                except ImportError:
+                    LOGGER.warning("aiohttp_socks tidak terinstall, proxy SOCKS dilewati.")
+
+            async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
+                get_kwargs = {}
+                if client.proxy and not client.proxy.startswith('socks'):
+                    get_kwargs['proxy'] = client.proxy
+                    
+                async with session.get(download_url, **get_kwargs) as r:
                     r.raise_for_status()
                     total_size = int(r.headers.get('content-length', 0))
                     downloaded = 0
@@ -151,7 +163,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                                         last_update = now
                                         from bot.helpers.utils import progress_message
                                         await progress_message(downloaded, total_size, details)
-        # --------------------------------------------------------
+            # --------------------------------------------------------
         
     except Exception as e:
         LOGGER.error(f"HighResAudio dl_track gagal: {e}")
