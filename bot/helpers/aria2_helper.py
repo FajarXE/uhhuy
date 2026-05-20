@@ -38,6 +38,11 @@ async def aria2_download(url, filepath, details=None):
         if header_list:
             options["header"] = header_list
     # ------------------------------------------------------
+
+    # --- FIX AKAMAI 403: Pasangkan Proxy ke Aria2 ---
+    if details and 'proxy' in details and details['proxy']:
+        options["all-proxy"] = details['proxy']
+    # ------------------------------------------------
     
     payload_add = {
         "jsonrpc": "2.0",
