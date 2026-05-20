@@ -61,7 +61,6 @@ async def start_video(video_id: str, user: dict, upload=True):
     try:
         video_data = await client.get_video(video_id)
     except Exception as e:
-        # --- FIX: Lempar error ke atas agar download.py bisa mencoba akun berikutnya ---
         raise e
         
     video_meta = await get_video_metadata(video_id, video_data, user['r_id'], client, user['user_id'])
@@ -79,43 +78,68 @@ async def start_video(video_id: str, user: dict, upload=True):
         stream_data = await client.get_video_stream_url(video_id, session)
         segment_urls = await parse_m3u8_video(stream_data['manifest'], session.auth_headers())
     except Exception as e:
-        # --- FIX: Lempar error juga di sini agar sistem fallback bekerja ---
         raise e
     
-    # Beri tahu UI bahwa bot sedang mengunduh kepingan (sekali saja)
     if upload and 'bot_msg' in user:
-        try: await edit_message(user['bot_msg'], f"⏳ Mengunduh {len(segment_urls)} kepingan video (HLS)...")
+        try: await edit_message(user['bot_msg'], f"🚀 Mengunduh {len(segment_urls)} kepingan video secara PARALEL...")
         except: pass
         
-    temp_files = []
-    # Unduh per-segmen HLS secara diam-diam
-    for i, url in enumerate(segment_urls):
-        t_path = f"{raw_ts_path}.{i}"
+    # --- [SPEED UP] UNDUHAN HLS SECARA PARALEL (16 Koneksi Sekaligus) ---
+    sem = asyncio.Semaphore(16)
+    
+    async def fetch_segment(index, url):
+        t_path = f"{raw_ts_path}.{index}"
+        async with sem:
+            err = await download_file(url, t_path)
+            if err:
+                raise Exception(f"Gagal mengunduh bagian video: {err}")
+        return t_path
+
+    tasks = [fetch_segment(i, url) for i, url in enumerate(segment_urls)]
+    
+    try:
+        temp_files = await asyncio.gather(*tasks)
+    except Exception as e:
+        raise e
+    # --------------------------------------------------------------------
         
-        err = await download_file(url, t_path)
-        
-        if err:
-            # Jika satu segmen gagal, gagalkan seluruh tugas agar bisa dicoba di akun lain
-            raise Exception(f"Gagal mengunduh bagian video: {err}")
-            
-        temp_files.append(t_path)
-        
-    # Beri tahu UI saat mulai menggabungkan file
     if upload and 'bot_msg' in user:
         try: await edit_message(user['bot_msg'], "⏳ Menggabungkan dan memproses video (FFmpeg)...")
         except: pass
         
-    # Gabungkan file segmen dan ubah formatnya
     await merge_tracks(temp_files, raw_ts_path)
     await convert_ts_to_mp4(raw_ts_path, final_mp4_path)
     
     try: os.remove(raw_ts_path)
     except OSError: pass
     
-    video_meta['filepath'] = final_mp4_path
-    video_meta['extension'] = 'mp4'
+    # --- LOGIKA ZIPPING UNTUK VIDEO ---
+    user_settings = bot_set.user_data.get(user['user_id'], {})
+    is_video_zip = user_settings.get("VIDEO_ZIP", False)
     
-    # Manfaatkan track_upload yang sudah ada
+    if is_video_zip:
+        import zipfile
+        zip_path = f"{filepath}/{filename}.zip"
+        
+        if upload and 'bot_msg' in user:
+            try: await edit_message(user['bot_msg'], "🗜 Mengarsipkan video ke dalam file ZIP...")
+            except: pass
+            
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(final_mp4_path, os.path.basename(final_mp4_path))
+            
+        try: os.remove(final_mp4_path)
+        except: pass
+        
+        video_meta['filepath'] = zip_path
+        video_meta['extension'] = 'zip'
+        video_meta['type'] = 'doc' # Kirim sebagai dokumen karena ini file ZIP
+    else:
+        video_meta['filepath'] = final_mp4_path
+        video_meta['extension'] = 'mp4'
+        video_meta['type'] = 'video'
+    # ----------------------------------
+    
     if upload:
         await track_upload(video_meta, user, False)
 
