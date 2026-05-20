@@ -138,16 +138,16 @@ async def start_video(video_id: str, user: dict, upload=True):
     try: os.remove(raw_ts_path)
     except OSError: pass
     
-    # --- LOGIKA FAST-ZIPPING YANG SUDAH KEBAL DARI STRING "False" ---
+    # --- [FIX FINAL] LOGIKA VIDEO-ZIP YANG KEBAL DARI STRING "False" ---
     user_settings = bot_set.user_data.get(user['user_id'], {})
     
     raw_zip = user_settings.get("VIDEO_ZIP")
     if raw_zip is None:
         raw_zip = user_settings.get("video_zip", False)
         
-    # Validasi ekstrem: pastikan tidak terjebak teks string dari database
+    # Validasi super ketat: pastikan teks "false" tidak dianggap True oleh Python
     if isinstance(raw_zip, str):
-        is_video_zip = raw_zip.strip().lower() == 'true'
+        is_video_zip = raw_zip.strip().lower() in ['true', '1', 'on', 'yes']
     else:
         is_video_zip = bool(raw_zip)
     
