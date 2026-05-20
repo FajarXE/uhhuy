@@ -2332,16 +2332,22 @@ async def uset_zip(self, query):
         await query.answer(f"Art poster: {new_val}")
         return await start_user_setting(self, query.message, True, users_)
 
-    # --- TAMBAHAN: Toggle Video Zip ---
+    # Toggle Video Zip
     if data == "video":
         current = user_dict.get("VIDEO_ZIP")
         if current is None:
             current = user_dict.get("video_zip", False)
             
+        # Jika isinya string "False"/"True", bersihkan dulu
+        if isinstance(current, str):
+            current = current.lower() in ['true', '1', 'on']
+            
         new_val = not current
-        data_saved = {"VIDEO_ZIP": new_val}
+        data_saved = {"VIDEO_ZIP": new_val, "video_zip": None} # Matikan yang huruf kecil
         
         bot_set.user_data[user_id].update(data_saved)
+        bot_set.user_data[user_id].pop("video_zip", None) # Hapus dari memori lokal
+        
         await database.save_user_settings(user_id, data_saved)
         await query.answer(f"Video zip: {new_val}")
         return await start_user_setting(self, query.message, True, users_)
