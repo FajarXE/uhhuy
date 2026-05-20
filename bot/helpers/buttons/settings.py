@@ -1456,8 +1456,18 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
 
     is_poster = user_dict.get("ART_POSTER", False)
     style_poster = ButtonStyle.SUCCESS if is_poster else ButtonStyle.DANGER
-    buttons.append([InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster", style=style_poster)])
+    
+    # Tambahkan status UI untuk VIDEO_ZIP
+    is_video = user_dict.get("VIDEO_ZIP", False)
+    style_video = ButtonStyle.SUCCESS if is_video else ButtonStyle.DANGER
+    
+    # Letakkan ART_POSTER dan VIDEO_ZIP berdampingan
+    buttons.append([
+        InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster", style=style_poster),
+        InlineKeyboardButton(text="VIDEO_ZIP", callback_data="zip_video", style=style_video)
+    ])
     
     buttons.append([InlineKeyboardButton(text="Close", callback_data="uset_close", style=ButtonStyle.DANGER)])
     
     return InlineKeyboardMarkup(buttons)
+
