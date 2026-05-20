@@ -160,7 +160,7 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
                 try: 
                     await user['bot_msg'].reply_document(
                         document=booklet_path, 
-                        caption=f"📖 **Booklet**: {album_meta['title']}", 
+                        caption=f"**Booklet**: {album_meta['title']}", 
                         file_name=f"{album_meta['title']} - Booklet.pdf"
                     )
                     await edit_message(user['bot_msg'], "✅ Booklet berhasil dikirim! Tugas selesai.")
