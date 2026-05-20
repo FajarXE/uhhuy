@@ -78,11 +78,11 @@ async def start_video(video_id: str, user: dict, upload=True):
         stream_data = await client.get_video_stream_url(video_id, session)
         segment_urls, quality_str = await parse_m3u8_video(stream_data['manifest'], session.auth_headers())
     except Exception as e:
-        raise e  # <--- INI BARIS YANG HARUS DITAMBAHKAN
+        raise e
     
     # --- PERSIAPAN TASK PROGRESS ---
     import hashlib
-    import time # <--- IMPORT TIME UNTUK STOPWATCH
+    import time 
     from bot.helpers.utils import progress_message
     
     details = None
@@ -102,7 +102,7 @@ async def start_video(video_id: str, user: dict, upload=True):
     total_segments = len(segment_urls)
     completed_segments = 0
     total_bytes = 0
-    last_ui_update = time.time() # Stopwatch untuk mencegah spam edit
+    last_ui_update = time.time() 
     
     async def fetch_segment(index, url):
         nonlocal completed_segments, total_bytes, last_ui_update
@@ -116,16 +116,11 @@ async def start_video(video_id: str, user: dict, upload=True):
                 total_bytes += os.path.getsize(t_path)
             completed_segments += 1
             
-            # UPDATE PROGRESS BAR MAKSIMAL 1 KALI SETIAP 5 DETIK
             now = time.time()
             if details and (now - last_ui_update > 5.0 or completed_segments == total_segments):
                 last_ui_update = now
-                # Estimasi ukuran total video (karena HLS tidak memberikan total size di awal)
                 estimasi_total = int((total_bytes / completed_segments) * total_segments) if completed_segments > 0 else 0
                 details['action'] = 'Download'
-                
-                # Jalankan fungsi update UI di background (create_task) 
-                # agar tidak menjeda/menahan kecepatan unduhan file
                 asyncio.create_task(progress_message(total_bytes, estimasi_total, details))
                 
         return t_path
@@ -136,7 +131,6 @@ async def start_video(video_id: str, user: dict, upload=True):
         temp_files = await asyncio.gather(*tasks)
     except Exception as e:
         raise e
-    # --------------------------------------------------------------------
         
     await merge_tracks(temp_files, raw_ts_path)
     await convert_ts_to_mp4(raw_ts_path, final_mp4_path)
@@ -144,11 +138,18 @@ async def start_video(video_id: str, user: dict, upload=True):
     try: os.remove(raw_ts_path)
     except OSError: pass
     
-    # --- LOGIKA FAST-ZIPPING UNTUK VIDEO ---
+    # --- LOGIKA FAST-ZIPPING YANG SUDAH KEBAL DARI STRING "False" ---
     user_settings = bot_set.user_data.get(user['user_id'], {})
-    is_video_zip = user_settings.get("VIDEO_ZIP")
-    if is_video_zip is None:
-        is_video_zip = user_settings.get("video_zip", False)
+    
+    raw_zip = user_settings.get("VIDEO_ZIP")
+    if raw_zip is None:
+        raw_zip = user_settings.get("video_zip", False)
+        
+    # Validasi ekstrem: pastikan tidak terjebak teks string dari database
+    if isinstance(raw_zip, str):
+        is_video_zip = raw_zip.strip().lower() == 'true'
+    else:
+        is_video_zip = bool(raw_zip)
     
     if is_video_zip:
         import zipfile
@@ -156,7 +157,7 @@ async def start_video(video_id: str, user: dict, upload=True):
         
         if details:
             details['action'] = 'Zipping'
-            await progress_message(1, 1, details) # Tampilkan animasi Zipping di layar
+            await progress_message(1, 1, details) 
             
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zipf:
             zipf.write(final_mp4_path, os.path.basename(final_mp4_path))
@@ -173,7 +174,7 @@ async def start_video(video_id: str, user: dict, upload=True):
         video_meta['extension'] = 'mp4'
         video_meta['type'] = 'Video'       
         video_meta['media_type'] = 'video' 
-    # ----------------------------------
+    # ----------------------------------------------------------------
     
     # --- BUAT KETERANGAN CAPTION OTOMATIS ---
     video_caption = (
@@ -186,9 +187,7 @@ async def start_video(video_id: str, user: dict, upload=True):
     # ----------------------------------------
     
     if upload:
-        # --- FIX: BYPASS TRACK_UPLOAD ---
-        # Kita tembak langsung ke telegram_upload agar fungsi lama 
-        # tidak membajak dan memaksa video ini menjadi format ZIP Audio.
+        # Panggil telegram_upload secara langsung
         from bot.helpers.uploder import telegram_upload
         await telegram_upload(video_meta, user)
 
