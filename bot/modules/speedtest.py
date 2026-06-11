@@ -30,7 +30,7 @@ async def speedtest_handler(client, message):
     if not bot_set.bot_public and user_id not in bot_set.auth_users and user_id not in bot_set.admins:
         return
         
-    m = await message.reply_text("🚀 **Menjalankan Speedtest...**\nMohon tunggu...", quote=True)
+    m = await message.reply_text("🚀 **Running Speedtest...**\nPlease wait...", quote=True)
     
     try:
         # Jalankan di thread terpisah
