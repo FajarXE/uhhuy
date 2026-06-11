@@ -223,9 +223,6 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
     if not track_asins:
         raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk playlist {playlist_asin}. Pastikan link valid.")
 
-    if 'bot_msg' in user:
-        await edit_message(user['bot_msg'], f"💽 **Playlist Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
-
     update_details = {
         'text': lang.s.DOWNLOAD_PROGRESS, 
         'msg': user.get('bot_msg'), 
@@ -389,9 +386,6 @@ async def start_album(album_asin: str, user: dict, url: str):
             
     if not track_asins:
         raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk album {album_asin}. Pastikan link valid.")
-
-    if 'bot_msg' in user:
-        await edit_message(user['bot_msg'], f"💿 **Data Ditemukan!**\nMemulai unduhan {len(track_asins)} lagu...")
 
     # --- PERBAIKAN: GUNAKAN RUN_CONCURRENT_TASKS ALA QOBUZ ---
     update_details = {
