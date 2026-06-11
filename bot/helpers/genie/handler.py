@@ -262,7 +262,7 @@ async def start_genie(link: str, user: dict):
     async with aiohttp.ClientSession() as session:
         if "xgnm" in link:
             if 'bot_msg' in user:
-                await edit_message(user['bot_msg'], "🔍 **Fetching Genie Track...**")
+                await edit_message(user['bot_msg'], "🚀 Starting task...")
             
             extra_base = {'user_id': user_id}
             metadata = await process_track(session, code, quality_pref, download_dir, details, extra_base)
@@ -270,7 +270,7 @@ async def start_genie(link: str, user: dict):
 
         elif "axnm" in link:
             if 'bot_msg' in user:
-                await edit_message(user['bot_msg'], "🔍 **Fetching Genie Album...**")
+                await edit_message(user['bot_msg'], "🚀 Starting task...")
                 
             api_url = f"https://info.genie.co.kr/info/album?axnm={code}"
             album_data = await fetch_json(session, api_url)
