@@ -297,17 +297,11 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         # ----------------------------------------
 
         if type(urls) == list:
-            # Beri tahu UI bahwa bot sedang mengunduh kepingan (sekali saja)
-            if upload and 'bot_msg' in user:
-                try: await edit_message(user['bot_msg'], f"⏳ Mengunduh {len(urls[0])} kepingan segmen...")
-                except: pass
-                
             i = 0
             temp_files = []
             for url in urls[0]:
                 temp_path = f"{filepath}.{i}"
                 
-                # --- FIX: Hapus details=details di sini agar tidak membanjiri UI Radar ---
                 err = await download_file(url, temp_path) 
                 
                 if err:
@@ -315,11 +309,6 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                     return None
                 i+=1
                 temp_files.append(temp_path)
-                
-            # Beri tahu UI saat mulai menggabungkan file
-            if upload and 'bot_msg' in user:
-                try: await edit_message(user['bot_msg'], "⏳ Menggabungkan kepingan file...")
-                except: pass
                 
             await merge_tracks(temp_files, filepath)
         else:
