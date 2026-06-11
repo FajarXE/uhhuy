@@ -81,7 +81,7 @@ def set_file_tags(filepath, meta, cover_path, fmt):
 # --- HANDLER UTAMA ---
 async def start_khinsider(url, user):
     msg = user['bot_msg']
-    await edit_message(msg, "⚙️ Memproses Album Khinsider...")
+    await edit_message(msg, "🚀 Starting task...")
     
     try:
         album_meta = await khinsider_manager.get_album(url)
