@@ -200,7 +200,6 @@ async def _process_track_worker(track_info, i, total, dl_dir, user, session, api
 
 async def process_single_gaana(track, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "⚙️ Mengambil data lagu...")
     try:
         track['track_number'] = 1
         track['track_count'] = 1
@@ -217,7 +216,6 @@ async def process_single_gaana(track, user, session, api):
 
 async def process_album_gaana(identifier, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "⚙️ Mengambil data Album...")
     data = await api.get_metadata(session, identifier, 'albumDetail')
     
     if not data or 'tracks' not in data:
@@ -299,7 +297,6 @@ async def process_album_gaana(identifier, user, session, api):
 
 async def process_playlist_gaana(identifier, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "⚙️ Mengambil data Playlist...")
     data = await api.get_metadata(session, identifier, 'playlistDetail')
     
     if not data or 'tracks' not in data:
