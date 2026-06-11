@@ -506,10 +506,16 @@ async def telegram_upload(track, user, batch_mode=False):
     details = None
     if 'bot_msg' in user:
         task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+        
+        # Pengecekan manual untuk tipe tugas
+        task_type = meta.get('type')
+        if not task_type:  
+            task_type = 'Track'
+            
         details = {
             'msg': user['bot_msg'],
             'title': meta.get('title', os.path.basename(filepath)),
-            'type': meta.get('type', 'Track').capitalize(),
+            'type': task_type.capitalize(),
             'action': 'Upload',
             'machine': 'Telegram API',
             'task_id': task_id
