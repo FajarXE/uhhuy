@@ -38,8 +38,6 @@ async def start_bandcamp(link: str, user: dict):
         await edit_message(msg, "Link Bandcamp tidak valid.")
         return
 
-    await edit_message(msg, "⚙️ Mengambil data dari Bandcamp...")
-    
     data = await api.get_track_or_album(session, link)
     if not data:
         await edit_message(msg, "❌ Gagal mengambil metadata (Mungkin Geo-blocked atau URL salah).")
