@@ -62,7 +62,7 @@ def get_status_text(page=1, limit=5):
 
     tasks = list(GLOBAL_TASKS.values())
     if not tasks:
-        return "💤 **Tidak ada task yang sedang berjalan saat ini.**", None
+        return "💤 **There are no tasks currently running.**", None
 
     total_tasks = len(tasks)
     max_pages = (total_tasks + limit - 1) // limit
