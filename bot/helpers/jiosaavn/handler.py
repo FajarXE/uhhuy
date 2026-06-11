@@ -150,7 +150,7 @@ async def _process_track_worker(track_data, i, total, dl_dir, user, session, api
 
 async def process_single_track(token_id, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "⚙️ Mengambil info lagu...")
+    await edit_message(msg, "🚀 Starting task...")
     try:
         track_data = await api.get_song_details(session, token_id)
         if not track_data: raise Exception("Metadata tidak ditemukan.")
@@ -172,7 +172,7 @@ async def process_single_track(token_id, user, session, api):
 
 async def process_album(token_id, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "⚙️ Mengambil data Album...")
+    await edit_message(msg, "🚀 Starting task...")
     try:
         album_data = await api.get_album_details(session, token_id)
         tracks = album_data.get("list") or album_data.get("songs") or []
@@ -255,7 +255,7 @@ async def process_album(token_id, user, session, api):
 
 async def process_playlist(token_id, user, session, api):
     msg = user['bot_msg']
-    await edit_message(msg, "⚙️ Mengambil data Playlist...")
+    await edit_message(msg, "🚀 Starting task...")
     try:
         pl_data = await api.get_playlist_details(session, token_id)
         tracks = pl_data.get("list") or pl_data.get("songs") or []
