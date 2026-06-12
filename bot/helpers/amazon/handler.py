@@ -761,7 +761,6 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
                 audio.tags.add(TYER(encoding=3, text=year_only))
                 audio.save()
     except Exception as e:
-        from bot.logger import LOGGER
         LOGGER.debug(f"Gagal injeksi tanggal manual Amazon: {e}")
     # ---------------------------------------------------------------------
 
