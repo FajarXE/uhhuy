@@ -760,6 +760,21 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
                 audio.tags.add(TDRC(encoding=3, text=raw_date))
                 audio.tags.add(TYER(encoding=3, text=year_only))
                 audio.save()
+
+            elif ext in ['opus', 'ogg']:
+                # Standar Vorbis Comment untuk Opus/Ogg
+                try:
+                    from mutagen.oggopus import OggOpus
+                    audio = OggOpus(final_path)
+                except Exception:
+                    from mutagen.oggvorbis import OggVorbis
+                    audio = OggVorbis(final_path)
+                    
+                audio['DATE'] = raw_date 
+                audio['YEAR'] = year_only
+                audio['ORIGINALDATE'] = raw_date
+                audio.save()
+                
     except Exception as e:
         LOGGER.debug(f"Gagal injeksi tanggal manual Amazon: {e}")
     # ---------------------------------------------------------------------
