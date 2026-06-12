@@ -527,7 +527,7 @@ def qb_button(qualities: dict, user_id: int = 0):
         
         inline_keyboard.append(
             [
-                InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.SUCCESS)
+                InlineKeyboardButton(text="🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="uset_qb_auth", style=ButtonStyle.PRIMARY)
             ]
         )
         
