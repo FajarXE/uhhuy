@@ -1440,9 +1440,9 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     if genie_manager:
         buttons.append([InlineKeyboardButton(text=f"Genie Quality", callback_data=f"uset_genie")])
 
-    buttons.append([InlineKeyboardButton(text="🔁 Switch Upload Mode", callback_data="uset_upload_mode")])
+    buttons.append([InlineKeyboardButton(text="🔁 Switch Upload Mode", callback_data="uset_upload_mode", style=ButtonStyle.PRIMARY)])
 
-    buttons.append([InlineKeyboardButton(text="LYRICS SETTINGS", callback_data="uset_lyrics")])
+    buttons.append([InlineKeyboardButton(text="LYRICS SETTINGS", callback_data="uset_lyrics", style=ButtonStyle.PRIMARY)])
     
     user_dict = bot_set.user_data.get(user_id, {})
 
