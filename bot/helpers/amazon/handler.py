@@ -731,6 +731,40 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
     from bot.helpers.metadata import set_metadata
     await set_metadata(track_meta, user_id)
 
+    # --- FIX: SUNTIKAN MANUAL TANGGAL RILIS UNTUK POWERAMP & MEDIAINFO ---
+    try:
+        raw_date = str(track_meta.get('date') or track_meta.get('release_date') or '').strip()
+        if raw_date and raw_date != 'None':
+            year_only = raw_date[:4] 
+            
+            if ext == 'flac':
+                from mutagen.flac import FLAC
+                audio = FLAC(final_path)
+                audio['DATE'] = raw_date 
+                audio['YEAR'] = year_only
+                audio['ORIGINALDATE'] = raw_date
+                audio.save()
+                
+            elif ext == 'm4a':
+                from mutagen.mp4 import MP4
+                audio = MP4(final_path)
+                audio['\xa9day'] = raw_date 
+                audio.save()
+                
+            elif ext == 'mp3':
+                from mutagen.mp3 import MP3
+                from mutagen.id3 import ID3, TDRC, TYER
+                audio = MP3(final_path, ID3=ID3)
+                if audio.tags is None:
+                    audio.add_tags()
+                audio.tags.add(TDRC(encoding=3, text=raw_date))
+                audio.tags.add(TYER(encoding=3, text=year_only))
+                audio.save()
+    except Exception as e:
+        from bot.logger import LOGGER
+        LOGGER.debug(f"Gagal injeksi tanggal manual Amazon: {e}")
+    # ---------------------------------------------------------------------
+
     # 3. Panggil uploader utama (Mendukung Cloud / Local / Telegram)
     if upload:
         from bot.helpers.uploder import track_upload
