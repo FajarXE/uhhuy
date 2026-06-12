@@ -338,7 +338,7 @@ async def run_download_task(link: str, user: dict):
     
     # Jika 2 slot pengguna ini sudah penuh, beri tahu bahwa dia masuk antrean pribadi
     if user_sem.locked():
-        notif_msg = await send_message(user, f"⏳ **Entering Personal Queue...**\nYou have completed 1 task. This link will be automatically processed afterward.\n`{link}`")
+        notif_msg = await send_message(user, f"⏳ **Entering Personal Queue...**\nYou are currently performing 1 task. This link will be automatically processed afterward.\n`{link}`")
     
     # Menunggu slot pribadi kosong (User lain TIDAK akan terpengaruh)
     async with user_sem:
