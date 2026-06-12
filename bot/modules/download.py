@@ -477,7 +477,10 @@ async def run_download_task(link: str, user: dict):
 
                     # --- [FIX GHOST PANEL] PASTIKAN PESAN TELEGRAM DIHAPUS ---
                     try: 
-                        await user['bot_msg'].delete()
+                        # Hanya hapus pesan jika unduhan SUKSES. 
+                        # Jika ERROR (task_successful = False), biarkan pesan tetap tayang!
+                        if task_successful:
+                            await user['bot_msg'].delete()
                     except: 
                         pass
                     
