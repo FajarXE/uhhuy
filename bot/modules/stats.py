@@ -206,7 +206,7 @@ async def stats_handler(client, message):
     final_text = generate_stats_text()
     
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("♻️ Refresh Stats", callback_data="stats_refresh", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton("Close", callback_data="stats_close", style=ButtonStyle.DANGER)]
     ])
     
@@ -232,7 +232,7 @@ async def refresh_stats_callback(client, query: CallbackQuery):
     new_text = generate_stats_text()
     
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Refresh Stats", callback_data="stats_refresh", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("♻️ Refresh Stats", callback_data="stats_refresh", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton("Close", callback_data="stats_close", style=ButtonStyle.DANGER)]
     ])
     
