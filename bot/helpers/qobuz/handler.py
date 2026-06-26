@@ -349,15 +349,14 @@ async def start_playlist(tracks, playlist, user):
 
     # [FIX] SATUKAN LOGIC CONCURRENT & SEQUENTIAL MENGGUNAKAN RADAR PINTAR ARIA2
     if bot_set.playlist_conc:
-        upload = False # Concurrent selalu batch upload
         limit_pekerja = Config.MAX_WORKERS
     else:
-        if playlist_zip: upload = False
         limit_pekerja = 1 # Sequential (Kerjakan 1 per 1 agar berurutan)
 
     tasks = []
     for track in play_meta['tracks']: 
-        tasks.append(start_track(track['itemid'], user, track, upload, playlist_folder, bot_set.disable_sort_link, True))
+        # PAKSA argumen upload menjadi False agar fokus mendownload seluruh playlist terlebih dahulu
+        tasks.append(start_track(track['itemid'], user, track, False, playlist_folder, bot_set.disable_sort_link, True))
     
     # Radar Pintar akan otomatis membuat ID Cancel unik & memantau kecepatan Aria2!
     task_results = await run_concurrent_tasks(tasks, update_details, limit=limit_pekerja)
@@ -375,11 +374,10 @@ async def start_playlist(tracks, playlist, user):
     if playlist_zip and playlist_sort: 
         play_meta['folderpath'] = await move_sorted_playlist(play_meta, user)
        
-    # Upload Batch (Jika upload per track dimatikan)
-    if not upload:
-        if not play_meta['tracks']:
-            await edit_message(user['bot_msg'], "Gagal: Tidak ada lagu yang berhasil diunduh.")
-            return
-            
-        # Zipping dan upload diurus secara otomatis oleh uploader.py
-        await playlist_upload(play_meta, user)
+    # SETELAH SEMUA LAGU SELESAI DIUNDUH, BARU LAKUKAN BATCH UPLOAD
+    if not play_meta['tracks']:
+        await edit_message(user['bot_msg'], "Gagal: Tidak ada lagu yang berhasil diunduh.")
+        return
+        
+    # Zipping dan upload borongan diurus secara otomatis oleh uploader.py
+    await playlist_upload(play_meta, user)
