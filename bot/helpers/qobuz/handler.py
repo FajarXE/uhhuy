@@ -269,10 +269,15 @@ async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=Tru
         # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
         details = None
         if upload and 'bot_msg' in user:
+            # Gabungkan msg ID dengan Track ID agar hash bersifat unik
+            unique_str = f"{user['bot_msg'].id}_{item_id}"
+            task_id = hashlib.md5(unique_str.encode()).hexdigest()[:16]
+            
             details = {
                 'msg': user['bot_msg'],
                 'title': track_meta.get('title', 'Unknown'),
-                'type': track_meta.get('type', 'Track').capitalize()
+                'type': track_meta.get('type', 'Track').capitalize(),
+                'task_id': task_id # Paksa Aria2 menggunakan ID unik ini
             }
 
         # Jalankan Aria2 dengan mengirimkan "details" UI
