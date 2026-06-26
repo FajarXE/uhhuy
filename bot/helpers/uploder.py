@@ -505,10 +505,7 @@ async def telegram_upload(track, user, batch_mode=False):
         
     details = None
     if 'bot_msg' in user:
-        # Gunakan itemid lagu jika tersedia, jika tidak gunakan path file sebagai pembeda
-        item_identifier = meta.get('itemid', os.path.basename(filepath))
-        unique_str = f"{user['bot_msg'].id}_{item_identifier}"
-        task_id = hashlib.md5(unique_str.encode()).hexdigest()[:16]
+        task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         
         # Pengecekan manual untuk tipe tugas
         task_type = meta.get('type')
