@@ -184,6 +184,11 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
         except: 
             raise QobuzContentUnavailableError(f"Gagal mendapatkan URL track sampel album.")
             
+    # --- [FIX] CEK APAKAH AKUN HANYA MENDAPATKAN SAMPEL ---
+    if track_meta and track_meta.get('sample'):
+        raise QobuzContentUnavailableError("Akun ini hanya dapat mengunduh sampel (Region Block / Akun Free). Beralih akun...")
+    # ------------------------------------------------------
+            
     _, album_meta['quality'] = await get_quality(track_meta, user)
     
     if upload: album_meta['poster_msg'] = await post_art_poster(user, album_meta)
@@ -232,17 +237,37 @@ async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
 async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=True, basefolder=None, disable_link=False, disable_msg=False):
     client = user['qobuz_api']
 
-    if not track_meta:
+    is_single_track = track_meta is None
+    
+    if is_single_track:
         track_meta, err = await get_track_metadata(item_id, user['r_id'], None, user)
-        if err: return await send_message(user, err)
+        if err: 
+            # --- [FIX] PAKSA PINDAH AKUN JIKA METADATA DIBLOKIR ---
+            raise QobuzContentUnavailableError(f"Gagal memuat metadata: {err}")
+            
         filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
         filepath = sanitize_filepath(filepath)
-    else: filepath = basefolder
+    else: 
+        filepath = basefolder
     
     try:
         raw_data = await client.get_track_url(item_id, user)
+        # --- [FIX] CEK SAMPEL PADA TRACK TUNGGAL ---
+        if raw_data and raw_data.get('sample'):
+            raise QobuzContentUnavailableError("Track hanya tersedia sebagai sampel (Region Block / Akun Free).")
+        # -------------------------------------------
         url = raw_data['url']
+    except QobuzContentUnavailableError as e:
+        # Jika track ini diunduh sendirian, pindah akun!
+        if is_single_track:
+            raise e
+        
+        # Jika bagian dari album, skip lagu ini agar lagu lain yang tersedia tetap jalan
+        from bot.logger import LOGGER
+        LOGGER.warning(f"Track ID {item_id} hanya sampel (Region Block/Free). Skipping...")
+        return False
     except Exception as e:
+        from bot.logger import LOGGER
         LOGGER.warning(f"Gagal mendapatkan URL Track ID {item_id}: {e}. Skipping...")
         return False 
         
@@ -269,10 +294,12 @@ async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=Tru
         # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
         details = None
         if upload and 'bot_msg' in user:
+            task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
             details = {
                 'msg': user['bot_msg'],
                 'title': track_meta.get('title', 'Unknown'),
-                'type': track_meta.get('type', 'Track').capitalize()
+                'type': track_meta.get('type', 'Track').capitalize(),
+                'task_id': task_id
             }
 
         # Jalankan Aria2 dengan mengirimkan "details" UI
@@ -289,6 +316,7 @@ async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=Tru
             
         return True
     except Exception as e:
+        from bot.logger import LOGGER
         LOGGER.error(f"Error processing track {item_id}: {e}")
         return False
 
@@ -322,7 +350,13 @@ async def start_playlist(tracks, playlist, user):
     # Coba ambil sampel kualitas
     try:
         track_meta = await client.get_track_url(tracks[0]['id'], user)
+        # --- [FIX] CEK APAKAH AKUN HANYA MENDAPATKAN SAMPEL ---
+        if track_meta and track_meta.get('sample'):
+            raise QobuzContentUnavailableError("Akun ini hanya dapat mengunduh sampel (Region Block / Akun Free). Beralih akun...")
+        # ------------------------------------------------------
         _, play_meta['quality'] = await get_quality(track_meta, user)
+    except QobuzContentUnavailableError as e:
+        raise e # Lemparkan ke luar agar memicu pergantian akun
     except:
         play_meta['quality'] = "Unknown"
 
