@@ -615,10 +615,11 @@ async def start_link(link: str, user: dict) -> None:
         
         for client in clients_list:
             try:
-                # --- [FIX] CEK APAKAH AKUN FREE ---
-                if client.sub_type and "FREE" in client.sub_type.upper():
-                    raise Exception("Akun berstatus FREE. Beralih ke akun Premium...")
-                # ----------------------------------
+                # --- [FIX] BLOKIR AKUN FREE & INTRO ---
+                sub_type_upper = (client.sub_type or "").upper()
+                if "FREE" in sub_type_upper or "INTRO" in sub_type_upper:
+                    raise Exception(f"Akun berstatus {client.sub_type} (Limitasi). Beralih ke akun Premium...")
+                # --------------------------------------
                 
                 user['tidal_api'] = client
                 await start_tidal(link, user)
