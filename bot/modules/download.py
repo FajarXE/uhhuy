@@ -631,7 +631,7 @@ async def start_link(link: str, user: dict) -> None:
                 if 'asset is not ready' in error_str or \
                    'not available in your region' in error_str or \
                    'region-locked' in error_str or \
-                   'berstatus free' in error_str:
+                   'berstatus' in error_str:
                     
                     LOGGER.warning(f"Tidal: Akun Global {client.user_id} gagal (Region Lock / Free): {e}. Mencoba akun berikutnya...")
                     last_error = e
