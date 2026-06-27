@@ -615,6 +615,11 @@ async def start_link(link: str, user: dict) -> None:
         
         for client in clients_list:
             try:
+                # --- [FIX] CEK APAKAH AKUN FREE ---
+                if client.sub_type and "FREE" in client.sub_type.upper():
+                    raise Exception("Akun berstatus FREE. Beralih ke akun Premium...")
+                # ----------------------------------
+                
                 user['tidal_api'] = client
                 await start_tidal(link, user)
                 LOGGER.info(f"Tidal: Unduhan berhasil menggunakan akun Global User ID {client.user_id}")
@@ -624,9 +629,10 @@ async def start_link(link: str, user: dict) -> None:
                 
                 if 'asset is not ready' in error_str or \
                    'not available in your region' in error_str or \
-                   'region-locked' in error_str:
+                   'region-locked' in error_str or \
+                   'berstatus free' in error_str:
                     
-                    LOGGER.warning(f"Tidal: Akun Global {client.user_id} gagal (Region Lock): {e}. Mencoba akun berikutnya...")
+                    LOGGER.warning(f"Tidal: Akun Global {client.user_id} gagal (Region Lock / Free): {e}. Mencoba akun berikutnya...")
                     last_error = e
                     continue 
                 else:
