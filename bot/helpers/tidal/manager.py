@@ -47,6 +47,19 @@ class TidalLoginManager:
         """
         Memuat pengaturan global dan akun Global (Admin) dari database.
         """
+        # --- [FIX] TUTUP SESI LAMA SEBELUM RESTART MANAGER ---
+        if hasattr(self, 'clients') and self.clients:
+            for old_client in self.clients:
+                try: 
+                    # Tutup koneksi dengan aman jika ada fungsi close()
+                    if hasattr(old_client, 'close'):
+                        await old_client.close()
+                    elif hasattr(old_client, 'session') and old_client.session:
+                        await old_client.session.close()
+                except: 
+                    pass
+        # -----------------------------------------------------
+        
         self.clients = [] 
         LOGGER.info("Tidal Manager: Menginisialisasi klien Global...")
         
