@@ -248,6 +248,9 @@ async def tidal_auth_cb(c, cb:CallbackQuery):
 @Client.on_callback_query(filters.regex(pattern=r"^tdLogin"))
 async def tidal_login_cb(c:Client, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
+        # 1. JAWAB CALLBACK SECARA INSTAN DI AWAL AGAR TIDAK EXPIRED/ERROR
+        await cb.answer("Memproses permintaan login Tidal...", show_alert=False)
+        
         temp_client = TidalApi() 
         try:
             # Simpan list klien saat ini agar tombol 'Back' & list hapus tidak hilang saat proses login
@@ -258,7 +261,7 @@ async def tidal_login_cb(c:Client, cb:CallbackQuery):
                 # Tutup sesi temp jika error
                 if hasattr(temp_client, 'close'): await temp_client.close()
                 elif hasattr(temp_client, 'session') and temp_client.session: await temp_client.session.close()
-                return await c.answer_callback_query(cb.id, str(err), True)
+                return await cb.message.reply_text(f"❌ Error: {err}") # Diubah menjadi reply_text
             
             await edit_message(
                 cb.message, 
@@ -285,8 +288,7 @@ async def tidal_login_cb(c:Client, cb:CallbackQuery):
                     all_settings = {}
                 accounts_list = all_settings.get("TIDAL_ACCOUNTS_LIST", [])
                 
-                # --- LOGIKA BARU: Cek Duplikasi ---
-                # Jangan tambah jika ID sudah ada di database
+                # Cek Duplikasi
                 if not any(str(acc.get('user_id')) == str(auth_data['user_id']) for acc in accounts_list):
                     accounts_list.append(auth_data)
                     await database.set_variable('TIDAL_ACCOUNTS_LIST', accounts_list)
@@ -298,11 +300,13 @@ async def tidal_login_cb(c:Client, cb:CallbackQuery):
                     if hasattr(temp_client, 'close'): await temp_client.close()
                     elif hasattr(temp_client, 'session') and temp_client.session: await temp_client.session.close()
                     
-                    await c.answer_callback_query(cb.id, f"✅ Login Berhasil! Akun {sub} ditambahkan.", True)
+                    # 2. KIRIM NOTIFIKASI BERUPA PESAN BARU
+                    await cb.message.reply_text(f"✅ Login Berhasil! Akun {sub} ditambahkan.")
+                    
                     # Refresh Menu Auth
                     await tidal_auth_cb(c, cb)
                 else:
-                    await c.answer_callback_query(cb.id, "⚠️ Akun ini sudah ada di database.", True)
+                    await cb.message.reply_text("⚠️ Akun ini sudah ada di database.")
                     if hasattr(temp_client, 'close'): await temp_client.close()
                     elif hasattr(temp_client, 'session') and temp_client.session: await temp_client.session.close()
                     await tidal_auth_cb(c, cb)
@@ -311,7 +315,7 @@ async def tidal_login_cb(c:Client, cb:CallbackQuery):
             LOGGER.error(f"Gagal login Tidal: {traceback.format_exc()}")
             if hasattr(temp_client, 'close'): await temp_client.close()
             elif hasattr(temp_client, 'session') and temp_client.session: await temp_client.session.close()
-            await c.answer_callback_query(cb.id, f"Error: {e}", True)
+            await cb.message.reply_text(f"Error: {e}")
 
 @Client.on_callback_query(filters.regex(pattern=r"^tdRemove_(.+)"))
 async def tidal_remove_specific_cb(c: Client, cb: CallbackQuery):
