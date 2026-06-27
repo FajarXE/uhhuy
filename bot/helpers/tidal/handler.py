@@ -249,7 +249,6 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
             raise Exception(error)
         else:
             # Jika bagian dari playlist/album, cukup lewati lagu ini agar lagu lain tetap terunduh
-            from bot.logger import LOGGER
             LOGGER.error(error)
             return None
         # ------------------------------------------------------
@@ -414,7 +413,6 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
         if 'Asset is not ready' in str(e):
             raise Exception(f"Region-locked: Album tidak tersedia di akun ini.")
         # ---------------------------------------------------
-        from bot.logger import LOGGER
         LOGGER.error(f"Gagal mendapatkan info kualitas untuk album {album_id}: {e}")
         session, quality = (None, "LOSSLESS") 
         album_meta['quality'] = "LOSSLESS"
@@ -511,7 +509,6 @@ async def start_playlist(playlist_id:str, user:dict, upload=True, basefolder=Non
         if 'Asset is not ready' in str(e):
             raise Exception(f"Region-locked: Playlist tidak tersedia di akun ini.")
         # ---------------------------------------------------
-        from bot.logger import LOGGER
         LOGGER.error(f"Gagal mendapatkan info kualitas untuk playlist {playlist_id}: {e}")
         session, quality = (None, "LOSSLESS")
         playlist_meta['quality'] = "LOSSLESS"
