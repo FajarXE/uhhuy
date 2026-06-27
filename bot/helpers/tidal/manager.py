@@ -109,6 +109,9 @@ class TidalLoginManager:
             return client
         except Exception as e:
             LOGGER.error(f"Tidal Manager: Gagal login Akun #{account_id}: {e}")
+            # --- [FIX] TUTUP SESI AGAR TIDAK BOCOR ---
+            try: await client.close()
+            except: pass
             return None
 
     # ==================================================================
@@ -162,6 +165,9 @@ class TidalLoginManager:
                     clients.append(client)
                 except Exception as e:
                     LOGGER.error(f"Tidal Manager: Gagal memuat 1 sesi privat user {user_id}: {e}")
+                    # --- [FIX] TUTUP SESI AGAR TIDAK BOCOR ---
+                    try: await client.close()
+                    except: pass
             
             if clients:
                 # Simpan list ke memory lengkap dengan cycler-nya
