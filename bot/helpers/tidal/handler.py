@@ -334,8 +334,10 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         except Exception:
             user_convert_m4a = "OFF" 
         
-        is_high_tier = quality in ['LOSSLESS', 'HI_RES', 'HI_RES_LOSSLESS']
-        is_m4a_file = (track_meta['extension'] == 'm4a')
+        # --- [FIX] GUNAKAN KUALITAS AKTUAL YANG DIDAPAT, BUKAN YANG DIMINTA ---
+        actual_quality = track_meta.get('quality', '')
+        is_high_tier = actual_quality in ['LOSSLESS', 'MAX', 'HI_RES']
+        is_m4a_file = (track_meta.get('extension') == 'm4a')
 
         if lyrics_manager:
             try:
