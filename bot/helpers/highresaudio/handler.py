@@ -1,314 +1,241 @@
-# [GANTI SELURUH FILE: bot/helpers/highresaudio/handler.py]
+# [FILE: bot/helpers/aria2_helper.py]
 
-import aiohttp
-import aiofiles
 import os
-import shutil
-import traceback
 import asyncio
-import math 
-import requests 
-import random 
-import time
-
-from pathvalidate import sanitize_filepath
-from config import Config
-
-from .metadata import (
-    process_album_metadata,
-    custom_url_parse
-)
-from .manager import HighResAudioError, highresaudio_manager
-
-from ..uploder import *
-from ..metadata import set_metadata
-from ..message import edit_message
-from ..utils import fetch_zip_settings, run_concurrent_tasks, format_string, zip_handler, download_file
-from ...settings import bot_set 
-import bot.helpers.translations as lang
+import aiohttp
 from bot.logger import LOGGER
 
+ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc"
 
-async def start_highresaudio(url: str, user: dict):
-    # --- RE-LOGIN OTOMATIS ---
-    try:
-        user_id = user.get('user_id')
-        client = highresaudio_manager.get_client(user_id)
-        
-        if client:
-            if hasattr(client, 're_login'):
-                await asyncio.to_thread(client.re_login)
-            else:
-                LOGGER.warning(f"HighResAudio: Client {user_id} tidak memiliki method 're_login'.")
-    except Exception as e:
-        LOGGER.error(f"HighResAudio: Gagal menyegarkan sesi (Re-login): {e}")
+# Dictionary untuk menyimpan ID unduhan yang sedang berjalan
+ACTIVE_DOWNLOADS = {}
 
-    try:
-        media_type, item_id, extra_kwargs = custom_url_parse(url)
-        if media_type == 'album':
-            await start_album(url, user)
-        else:
-            raise NotImplementedError(f"Tipe media HighResAudio '{media_type}' belum didukung.")
-    except Exception as e:
-        LOGGER.error(f"Error fatal di HighResAudio handler: {e}\n{traceback.format_exc()}")
-        raise e 
+async def aria2_download(url, filepath, details=None):
+    # Import di dalam fungsi untuk menghindari circular import
+    from bot.helpers.utils import progress_message 
 
-async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
+    # --- FIX: Ubah path menjadi Absolut agar daemon Aria2 tidak nyasar ---
+    dir_path = os.path.abspath(os.path.dirname(filepath))
+    file_name = os.path.basename(filepath)
     
-    client = highresaudio_manager.get_client(user.get('user_id'))
-    
-    if not client:
-         raise HighResAudioError("Tidak ada klien HighResAudio yang tersedia (Silakan login akun sendiri atau hubungi Admin).")
-
-    if not track_meta:
-        raise HighResAudioError("start_track dipanggil tanpa track_meta.")
-            
-    if not filepath:
-        filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
-        filepath = sanitize_filepath(filepath)
-
-    download_url = track_meta.get('download_url')
-    album_id_referer = track_meta.get('album_id_referer') 
-    
-    if not download_url or not album_id_referer:
-        LOGGER.error(f"Metadata tidak lengkap untuk unduhan HRA track.")
-        return False
-
-    track_meta['folderpath'] = filepath
-    
-    raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
-    safe_filename = sanitize_filepath(raw_filename)
-    filepath += f"/{safe_filename}.{track_meta['extension']}"
-    track_meta['filepath'] = filepath
-
-    # --- SUNTIKAN KABEL RADAR UI TELEGRAM ---
-    details = None
-    if upload and 'bot_msg' in user:
-        details = {
-            'msg': user['bot_msg'],
-            'title': track_meta.get('title', 'Unknown'),
-            'type': track_meta.get('type', 'Track').capitalize()
-        }
-
-    try:
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    # --- [FIX ARIA2] KEMAMPUAN MEMAKAI TOPENG (HEADERS) & ANTI-THROTTLING ---
+    options = {
+        "dir": dir_path,
+        "out": file_name,
         
-        # --- MESIN PENGUNDUH HYBRID (ARIA2 -> AIOHTTP TURBO) ---
-        cookie_str = "; ".join([f"{k}={v}" for k, v in client.s.cookies.items()])
-        headers_dict = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-            "Referer": f"https://stream-app.highresaudio.com/album/{album_id_referer}",
-            "Cookie": cookie_str
-        }
+        # 1. Agresi Koneksi Diturunkan
+        # Menggunakan 16 koneksi ke CDN Akamai sering dianggap sebagai serangan/leeching.
+        # Menurunkannya ke 8 (atau bahkan 4) justru akan menghasilkan kecepatan yang lebih stabil.
+        "max-connection-per-server": "8",
+        "split": "8",
         
-        # --- [FIX BUG HEADER & PROXY ARIA2] ---
-        if details is None:
-            details = {}
-            
-        details['headers'] = headers_dict
+        # 2. Ukuran Potongan Diperbesar
+        # Jangan memecah file terlalu kecil. 5M berarti Aria2 baru akan memecah file jika ukurannya > 5MB.
+        # Ini mengurangi jumlah request ke server Akamai.
+        "min-split-size": "5M",
         
-        # ARIA2 HANYA MENDUKUNG HTTP/HTTPS PROXY! 
-        # Jika proxy adalah SOCKS (misal socks5h://), JANGAN berikan ke Aria2 agar tidak error.
-        if client.proxy and not client.proxy.startswith('socks'):
-            details['proxy'] = client.proxy 
-        # --------------------------------------
-
-        # Langkah 1: Coba kekuatan penuh Aria2 (retries=1 agar cepat beralih jika ditolak server)
-        err = await download_file(download_url, track_meta['filepath'], retries=1, details=details)
+        "allow-overwrite": "true",
         
-        if err:
-            LOGGER.warning(f"HighResAudio: Aria2 gagal/ditolak server. Mengaktifkan AIOHTTP Turbo Fallback...")
-            
-            # --- [FIX CLEANUP GHOST FILE ARIA2] ---
-            # Hapus file .aria2 yang ditinggalkan oleh kegagalan Aria2
-            aria2_file = track_meta['filepath'] + '.aria2'
-            if os.path.exists(aria2_file):
-                try: os.remove(aria2_file)
-                except: pass
-                
-            # Jika file flac parsial hasil kegagalan Aria2 juga ada, hapus agar bersih sebelum ditimpa
-            if os.path.exists(track_meta['filepath']):
-                try: os.remove(track_meta['filepath'])
-                except: pass
-            # --------------------------------------
-            
-            # --- [FIX BUG 403 AKAMAI] TERAPKAN PROXY KE AIOHTTP ---
-            connector = None
-            if client.proxy and client.proxy.startswith('socks'):
-                try:
-                    from aiohttp_socks import ProxyConnector
-                    # [FIX]: Library menolak skema 'socks5h://'. Kita normalkan ke 'socks5://' secara internal
-                    safe_proxy = client.proxy.replace('socks5h://', 'socks5://').replace('socks4a://', 'socks4://')
-                    connector = ProxyConnector.from_url(safe_proxy)
-                except ImportError:
-                    LOGGER.warning("aiohttp_socks tidak terinstall, proxy SOCKS dilewati.")
-                except Exception as e:
-                    LOGGER.warning(f"Gagal memuat ProxyConnector: {e}")
-
-            async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
-                get_kwargs = {}
-                if client.proxy and not client.proxy.startswith('socks'):
-                    get_kwargs['proxy'] = client.proxy
-                    
-                async with session.get(download_url, **get_kwargs) as r:
-                    r.raise_for_status()
-                    total_size = int(r.headers.get('content-length', 0))
-                    downloaded = 0
-                    start_time = time.time()
-                    last_update = start_time
-                    
-                    async with aiofiles.open(track_meta['filepath'], 'wb') as f:
-                        async for chunk in r.content.iter_chunked(256 * 1024):
-                            if chunk:
-                                await f.write(chunk)
-                                downloaded += len(chunk)
-                                
-                                # Update Radar UI (Hanya jika Single Track)
-                                if details and 'msg' in details:
-                                    now = time.time()
-                                    if now - last_update > 2.0 or downloaded == total_size:
-                                        last_update = now
-                                        from bot.helpers.utils import progress_message
-                                        await progress_message(downloaded, total_size, details)
-            # --------------------------------------------------------
+        # 3. Toleransi Waktu & Retry Ditingkatkan
+        "max-tries": "15",
+        "retry-wait": "5",
+        "timeout": "60",
         
-    except Exception as e:
-        LOGGER.error(f"HighResAudio dl_track gagal: {e}")
-        return False
-
-    try:
-        await set_metadata(track_meta, user['user_id'])
-    except Exception as e:
-        LOGGER.error(f"Gagal memproses metadata HRA: {filepath} -> {e}")
-        try: os.remove(filepath)
-        except: pass
-        return False
-
-    if upload:
-        await track_upload(track_meta, user, disable_link)
-
-    return True
-
-def download_booklet(client, url, temp_location):
-    try:
-        r = client.get_booklet_stream(url) 
-        r.raise_for_status()
-        with open(temp_location, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=32 * 1024):
-                if chunk:
-                    f.write(chunk)
-    except Exception as e:
-        if os.path.isfile(temp_location):
-            os.remove(temp_location)
-        LOGGER.error(f"HighResAudio: Gagal mengunduh booklet: {e}")
-    
-
-async def start_album(album_url: str, user: dict, upload=True):
-    try:
-        album_meta = await process_album_metadata(album_url, user['r_id'], user)
-    except Exception as e:
-        raise Exception(f"Gagal mendapatkan metadata album HighResAudio: {e}")
-
-    album_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{album_meta['artist']}/{album_meta['title']}"
-    album_folder = sanitize_filepath(album_folder)
-    album_meta['folderpath'] = album_folder 
-
-    # --- FITUR BARU: MODE BOOKLET ONLY ---
-    if user.get('booklet_only'):
-        await edit_message(user['bot_msg'], f"🔍 Mencari booklet untuk album: `{album_meta['title']}`...")
+        # 4. Batas Kecepatan Terendah Dilonggarkan
+        # Turunkan dari 100K menjadi 10K (10 KB/s). 
+        # Ini mencegah Aria2 memutus koneksi secara prematur saat CDN sedang melakukan micro-throttling.
+        "lowest-speed-limit": "10K",
         
-        if album_meta.get('booklet_url'):
-            booklet_path = None
-            try:
-                # Pastikan direktori tersedia sebelum mengunduh
-                os.makedirs(album_folder, exist_ok=True)
-                
-                temp_path = os.path.join(album_folder, "Booklet.pdf")
-                dl_client = highresaudio_manager.get_client(user.get('user_id'))
-                
-                if dl_client:
-                    # Gunakan fungsi download_booklet bawaan (via to_thread karena requests itu sync)
-                    await asyncio.to_thread(download_booklet, dl_client, album_meta['booklet_url'], temp_path)
-                    if os.path.exists(temp_path):
-                        booklet_path = temp_path
-                else:
-                    raise Exception("Klien HighResAudio tidak tersedia.")
-                    
-            except Exception as e:
-                await edit_message(user['bot_msg'], f"❌ Gagal mengunduh booklet: {e}")
-                return
-            
-            if booklet_path and os.path.exists(booklet_path):
-                try: 
-                    await user['bot_msg'].reply_document(
-                        document=booklet_path, 
-                        caption=f"**Booklet**: {album_meta['title']}", 
-                        file_name=f"{album_meta['title']} - Booklet.pdf"
-                    )
-                    await edit_message(user['bot_msg'], "✅ Booklet berhasil dikirim! Tugas selesai.")
-                except Exception as e:
-                    await edit_message(user['bot_msg'], f"❌ Gagal mengirim file Telegram: {e}")
-            else:
-                await edit_message(user['bot_msg'], "❌ File booklet gagal diproses/rusak.")
-        else:
-            await edit_message(user['bot_msg'], f"❌ Tidak ada booklet digital yang dirilis untuk album ini.")
-        
-        # RETURN EARLY: Hentikan eksekusi di sini agar lagu tidak diunduh!
-        return
-    # -------------------------------------
-
-    if upload:
-        album_meta['poster_msg'] = await post_art_poster(user, album_meta)
-
-    tasks = []
-    for track in album_meta['tracks']:
-        tasks.append(start_track(None, user, track, False, album_folder))
-
-    update_details = {
-        'text': lang.s.DOWNLOAD_PROGRESS,
-        'msg': user['bot_msg'],
-        'title': album_meta['title'],
-        'type': album_meta['type']
+        # Ekstra: Mencegah error nama file jika server mengirim karakter aneh
+        "content-disposition-default-utf8": "true" 
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
+    # Jika ada headers dari layanan musik, pasangkan ke opsi Aria2!
+    if details and 'headers' in details and isinstance(details['headers'], dict):
+        header_list = [f"{k}: {v}" for k, v in details['headers'].items()]
+        if header_list:
+            options["header"] = header_list
+    # ------------------------------------------------------
+
+    # --- FIX AKAMAI 403: Pasangkan Proxy ke Aria2 ---
+    if details and 'proxy' in details and details['proxy']:
+        options["all-proxy"] = details['proxy']
+    # ------------------------------------------------
     
-    successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
-    album_meta['tracks'] = successful_tracks
-    album_meta['totaltracks'] = len(successful_tracks)
-
-    if not successful_tracks:
-        raise Exception(f"Tidak ada lagu HighResAudio yang berhasil diunduh.")
-
-    # Booklet untuk pengunduhan album normal (beserta lagu-lagunya)
-    booklet_path = None
-    if 'booklet_url' in album_meta:
-        LOGGER.info("HighResAudio: Mengunduh booklet...")
-        booklet_path = os.path.join(album_folder, "booklet.pdf")
-        dl_client = highresaudio_manager.get_client(user.get('user_id'))
-        if dl_client:
-            await asyncio.to_thread(download_booklet, dl_client, album_meta['booklet_url'], booklet_path)
+    payload_add = {
+        "jsonrpc": "2.0",
+        "id": "bot_add",
+        "method": "aria2.addUri",
+        "params": [
+            [url],
+            options # <--- Masukkan opsi yang sudah ditambahkan headers
+        ]
+    }
     
-    if album_meta.get('cover') and os.path.exists(album_meta['cover']):
-        try:
-            cover_dest_path = os.path.join(album_folder, "cover.jpg")
-            if not os.path.exists(cover_dest_path):
-                await asyncio.to_thread(shutil.copy, album_meta['cover'], cover_dest_path)
-        except: pass
+    try:
+        async with aiohttp.ClientSession() as session:
+            # 1. Mengirim perintah ke Aria2
+            async with session.post(ARIA2_RPC_URL, json=payload_add) as resp:
+                res = await resp.json()
+                if "error" in res:
+                    LOGGER.error(f"Aria2 Add Error: {res['error']['message']}")
+                    return False
+                
+                # Mendapatkan Task ID (GID) asli dari Aria2
+                gid = res["result"]
+                ACTIVE_DOWNLOADS[gid] = file_name
+                
+                # --- FIX: Sembunyikan log 'Memulai Unduhan' untuk file berakhiran angka (.0, .1) ---
+                if not file_name.split('.')[-1].isdigit():
+                    LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
+                
+                # Menyiapkan data untuk UI Progress Bar
+                if details:
+                    details['task_id'] = gid
+                    details['title'] = file_name
+                    details['type'] = 'Download'
 
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
+            # 2. Polling status unduhan secara Live
+            payload_status = {
+                "jsonrpc": "2.0",
+                "id": "bot_status",
+                "method": "aria2.tellStatus",
+                "params": [gid]
+            }
+            
+            while True:
+                # --- [FIX ZOMBIE TASK] CEK SINYAL BATAL GLOBAL ---
+                if details and 'task_id' in details:
+                    from bot.helpers.utils import GLOBAL_CANCEL_DICT
+                    if details['task_id'] in GLOBAL_CANCEL_DICT:
+                        await aria2_cancel(gid) # Hancurkan task di sisi server Aria2
+                        LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
+                        return False
+                # -------------------------------------------------
 
-    if upload:
-        # Selalu kirim Booklet secara terpisah ke Telegram (terlepas dari mode ZIP atau Batch)
-        if booklet_path and os.path.exists(booklet_path):
-            try:
-                await user['bot_msg'].reply_document(
-                    document=booklet_path,
-                    caption=f"**Booklet**\n{album_meta['title']} - {album_meta['artist']}",
-                    quote=True
-                )
-            except Exception as e:
-                LOGGER.error(f"HighResAudio: Gagal mengunggah booklet: {e}")
+                async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
+                    res = await resp.json()
+                    if "error" in res:
+                        ACTIVE_DOWNLOADS.pop(gid, None)
+                        return False
+                        
+                    status = res["result"]
+                    state = status.get("status")
+                    
+                    # Ambil angka bytes untuk progress bar
+                    total_length = int(status.get("totalLength", 0))
+                    completed_length = int(status.get("completedLength", 0))
+                    
+                    # --- [FIX GHOST TASK] JANTUNG BUATAN ---
+                    if details:
+                        if total_length > 0:
+                            await progress_message(completed_length, total_length, details)
+                        else:
+                            # Memompa detak jantung meski Aria2 nyangkut agar tidak dihapus sistem
+                            from bot.helpers.utils import GLOBAL_TASKS
+                            import time
+                            task_id = details.get('task_id')
+                            if task_id and task_id in GLOBAL_TASKS:
+                                GLOBAL_TASKS[task_id]['timestamp'] = time.time()
+                                GLOBAL_TASKS[task_id]['action'] = 'Connecting'
+                                GLOBAL_TASKS[task_id]['processed'] = 'Mengalokasikan file...'
+                    # ----------------------------------------
+                    
+                    if state == "complete":
+                        ACTIVE_DOWNLOADS.pop(gid, None)
+                        # Sembunyikan log pecahan DASH (.0, .1) agar terminal tidak kotor/lag
+                        if not file_name.split('.')[-1].isdigit():
+                            LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
+                        return True
+                        
+                    elif state in ["error", "removed"]:
+                        ACTIVE_DOWNLOADS.pop(gid, None)
+                        err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
+                        LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
+                        return False
+                        
+                # --- [PROPER FIX CPU OVERLOAD & SPEED UNLOCK] ---
+                # Titik ideal: 0.05 detik (20x request/detik).
+                # CPU server tetap sangat rileks, tapi potongan DASH Tidal akan dieksekusi secepat kilat!
+                await asyncio.sleep(0.05)
+ 
+    except Exception as e:
+        LOGGER.error(f"Aria2 RPC Exception: {e}")
+        return False
+
+# FUNGSI BARU: Untuk membatalkan unduhan (Force Remove)
+async def aria2_cancel(gid):
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "bot_cancel",
+        "method": "aria2.forceRemove",
+        "params": [gid]
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(ARIA2_RPC_URL, json=payload) as resp:
+                res = await resp.json()
+                if "error" not in res:
+                    ACTIVE_DOWNLOADS.pop(gid, None)
+                    return True
+    except:
+        pass
+    return False
+
+async def get_aria2_global_stat():
+    """Mengambil total kecepatan download Aria2 secara realtime"""
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "bot_global_stat",
+        "method": "aria2.getGlobalStat",
+        "params": []
+    }
+    
+    # Pastikan URL di dalam fungsi juga menggunakan IP statis
+    ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc" 
+    
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.post(ARIA2_RPC_URL, json=payload) as resp:
+                res = await resp.json()
+                if "error" not in res:
+                    return res["result"]
+    except Exception:
+        # [FIX] Hapus/Bungkam LOGGER.error di sini agar tidak membanjiri log 
+        # saat Aria2 sedang dimuat ulang atau gagal berjalan.
+        pass
         
-        # Zipping dan upload album diurus sepenuhnya secara otomatis oleh uploader.py
-        await album_upload(album_meta, user)
+    return None
+
+async def aria2_purge_all():
+    """Membersihkan SEMUA task Aria2 yang nyangkut di background saat bot baru nyala"""
+    payload_active = {
+        "jsonrpc": "2.0",
+        "id": "bot_purge",
+        "method": "aria2.tellActive",
+        "params": []
+    }
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            # Cari semua task yang sedang berjalan
+            async with session.post(ARIA2_RPC_URL, json=payload_active) as resp:
+                res = await resp.json()
+                if "result" in res:
+                    for task in res["result"]:
+                        gid = task.get("gid")
+                        if gid:
+                            # Bunuh paksa task yang nyangkut
+                            kill_payload = {
+                                "jsonrpc": "2.0",
+                                "id": "bot_kill",
+                                "method": "aria2.forceRemove",
+                                "params": [gid]
+                            }
+                            await session.post(ARIA2_RPC_URL, json=kill_payload)
+                            
+            # Bersihkan cache memori bot kita
+            ACTIVE_DOWNLOADS.clear()
+    except Exception:
+        pass
