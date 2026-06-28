@@ -18,18 +18,36 @@ async def aria2_download(url, filepath, details=None):
     dir_path = os.path.abspath(os.path.dirname(filepath))
     file_name = os.path.basename(filepath)
     
-    # --- [FIX ARIA2] KEMAMPUAN MEMAKAI TOPENG (HEADERS) ---
+    # --- [FIX ARIA2] KEMAMPUAN MEMAKAI TOPENG (HEADERS) & ANTI-THROTTLING ---
     options = {
         "dir": dir_path,
         "out": file_name,
-        "max-connection-per-server": "16",
-        "split": "16",
-        "min-split-size": "1M",
+        
+        # 1. Agresi Koneksi Diturunkan
+        # Menggunakan 16 koneksi ke CDN Akamai sering dianggap sebagai serangan/leeching.
+        # Menurunkannya ke 8 (atau bahkan 4) justru akan menghasilkan kecepatan yang lebih stabil.
+        "max-connection-per-server": "8",
+        "split": "8",
+        
+        # 2. Ukuran Potongan Diperbesar
+        # Jangan memecah file terlalu kecil. 5M berarti Aria2 baru akan memecah file jika ukurannya > 5MB.
+        # Ini mengurangi jumlah request ke server Akamai.
+        "min-split-size": "5M",
+        
         "allow-overwrite": "true",
-        "max-tries": "10",
-        "retry-wait": "3",
-        "timeout": "40",
-        "lowest-speed-limit": "100K"
+        
+        # 3. Toleransi Waktu & Retry Ditingkatkan
+        "max-tries": "15",
+        "retry-wait": "5",
+        "timeout": "60",
+        
+        # 4. Batas Kecepatan Terendah Dilonggarkan
+        # Turunkan dari 100K menjadi 10K (10 KB/s). 
+        # Ini mencegah Aria2 memutus koneksi secara prematur saat CDN sedang melakukan micro-throttling.
+        "lowest-speed-limit": "10K",
+        
+        # Ekstra: Mencegah error nama file jika server mengirim karakter aneh
+        "content-disposition-default-utf8": "true" 
     }
     
     # Jika ada headers dari layanan musik, pasangkan ke opsi Aria2!
