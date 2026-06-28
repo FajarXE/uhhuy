@@ -125,8 +125,9 @@ async def start_qobuz(url:str, user:dict):
             LOGGER.error(f"Fatal Error Qobuz (Start): {e}\n{traceback.format_exc()}")
             break 
 
-    try: await edit_message(user['bot_msg'], f"Gagal Semua Akun: {last_error}")
-    except: pass
+    # --- [FIX] LEMPAR ERROR AGAR PESAN TIDAK DIHAPUS OLEH SISTEM UTAMA ---
+    raise Exception(f"Gagal memproses dengan semua akun Qobuz yang tersedia. Error terakhir: {last_error}")
+    # ---------------------------------------------------------------------
 
 async def start_album(item_id:int, user:dict, upload=True, basefolder=None):
     client = user['qobuz_api']
