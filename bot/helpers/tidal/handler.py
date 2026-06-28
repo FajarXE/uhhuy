@@ -334,10 +334,11 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         except Exception:
             user_convert_m4a = "OFF" 
         
-        # --- [FIX] GUNAKAN KUALITAS AKTUAL YANG DIDAPAT, BUKAN YANG DIMINTA ---
+        # --- [FIX] PERBAIKAN KONVERSI HALU ---
         actual_quality = track_meta.get('quality', '')
-        is_high_tier = actual_quality in ['LOSSLESS', 'MAX', 'HI_RES']
+        is_high_tier = actual_quality in ['LOSSLESS', 'MAX', 'HI_RES', 'HI_RES_LOSSLESS']
         is_m4a_file = (track_meta.get('extension') == 'm4a')
+        # -------------------------------------
 
         if lyrics_manager:
             try:
@@ -346,22 +347,27 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                     track_meta['lyrics'] = lyrics_text 
                     LOGGER.info("Lirik berhasil diambil.")
             except Exception as e:
+                from bot.logger import LOGGER
                 LOGGER.error(f"Gagal mengambil lirik: {e}")
 
         if is_high_tier and is_m4a_file and user_convert_m4a == "ON":
-            LOGGER.info(f"Mengonversi M4A (Tier {quality}) ke FLAC untuk user {user['user_id']} Sesuai pengaturan.")
+            # Perbaiki teks log agar mencetak kualitas asli, bukan yang diminta
+            from bot.logger import LOGGER
+            LOGGER.info(f"Mengonversi M4A (Tier {actual_quality}) ke FLAC untuk user {user['user_id']} Sesuai pengaturan.")
             await ffmpeg_convert_and_tag(filepath, track_meta)
             track_meta['filepath'] = track_meta['filepath'] + '.flac'
             try: os.remove(filepath)
             except OSError: pass
         else:
             if is_high_tier and is_m4a_file and user_convert_m4a == "OFF":
+                from bot.logger import LOGGER
                 LOGGER.info(f"File Lossless/Max format M4A terdeteksi, tapi convert OFF (User {user['user_id']}).")
             
             new_filepath = track_meta['filepath'] + f".{track_meta['extension']}"
             os.rename(filepath, new_filepath)
             track_meta['filepath'] = new_filepath
             
+        from bot.logger import LOGGER
         LOGGER.info(f"Menjalankan FINAL set_metadata (Mutagen) untuk: {track_meta['filepath']}")
         await set_metadata(track_meta, user['user_id']) 
 
