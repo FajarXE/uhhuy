@@ -384,6 +384,13 @@ async def get_album_metadata(album_id, a_meta, t_meta, r_id, user_id=0):
         raw_tn = track.get('trackNumber', 1)
         str_tn = str(raw_tn).zfill(2)
 
+        # --- [FIX] GABUNGKAN JUDUL DENGAN VERSI (REMIX/REMASTER) ---
+        track_title = track.get('title', 'Unknown Title')
+        if track.get('version'):
+            track_title += f" ({track['version']})"
+        track_title = track_title.replace('/', ' ')
+        # -----------------------------------------------------------
+
         stub_meta = {
             'itemid': track['id'],
             'albumartist': metadata['albumartist'],
@@ -391,7 +398,7 @@ async def get_album_metadata(album_id, a_meta, t_meta, r_id, user_id=0):
             'cover': metadata['cover'], 
             'thumbnail': metadata['thumbnail'], 
             'provider': 'Tidal',
-            'title': track['title'].replace('/', ' ') if track.get('title') else 'Unknown Title',
+            'title': track_title, # <-- Gunakan variabel track_title yang baru
             'artist': get_artists_name(track),
             'tracknumber': str_tn, 
             'upc': metadata['upc']
@@ -435,6 +442,13 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id, user_id=0):
             raw_tn = track.get('trackNumber', 1)
             str_tn = str(raw_tn).zfill(2)
 
+            # --- [FIX] GABUNGKAN JUDUL DENGAN VERSI (REMIX/REMASTER) ---
+            track_title = track.get('title', 'Unknown Title')
+            if track.get('version'):
+                track_title += f" ({track['version']})"
+            track_title = track_title.replace('/', ' ')
+            # -----------------------------------------------------------
+
             stub_meta = {
                 'itemid': track['id'],
                 'albumartist': track.get('artist', {}).get('name', 'Various Artists'),
@@ -442,7 +456,7 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id, user_id=0):
                 'cover': None, 
                 'thumbnail': None,
                 'provider': 'Tidal',
-                'title': track['title'].replace('/', ' ') if track.get('title') else 'Unknown Title',
+                'title': track_title, # <-- Gunakan variabel track_title yang baru
                 'artist': get_artists_name(track),
                 'tracknumber': str_tn 
             }
