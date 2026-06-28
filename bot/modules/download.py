@@ -598,6 +598,12 @@ async def start_link(link: str, user: dict) -> None:
         if user_client:
             LOGGER.info(f"Tidal: Menggunakan akun PRIVATE untuk User {user['user_id']}")
             try:
+                # --- [FIX] CEGAT AKUN FREE/INTRO PADA AKUN PRIVATE ---
+                sub_type_upper = (user_client.sub_type or "").upper()
+                if "FREE" in sub_type_upper or "INTRO" in sub_type_upper:
+                    raise Exception(f"Akun Private berstatus {user_client.sub_type} (Limitasi). Harap gunakan akun langganan aktif.")
+                # -----------------------------------------------------
+                
                 user['tidal_api'] = user_client
                 await start_tidal(link, user)
                 return 
