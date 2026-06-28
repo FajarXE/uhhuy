@@ -582,14 +582,20 @@ def tidal_quality_button(qualities: dict, user_id: int = 0, spatial: str = 'OFF'
             ]
         )
         
+    # --- LOGIKA WARNA TOMBOL SPATIAL ---
+    # Jika OFF berwarna Merah (DANGER), selain itu berwarna Hijau (SUCCESS)
+    spatial_style = ButtonStyle.DANGER if spatial_to_show == "OFF" else ButtonStyle.SUCCESS
+    
     inline_keyboard.append(
         [
             InlineKeyboardButton(
                     text=f'SPATIAL : {spatial_to_show}',
-                    callback_data=f"tdSQ_spatial" if not user_id else "utdqs_spatial"
+                    callback_data=f"tdSQ_spatial" if not user_id else "utdqs_spatial",
+                    style=spatial_style
                 )
         ]
     )
+    # -----------------------------------
     
     if usetting:
         # --- LOGIKA TOMBOL COVER SOURCE ---
