@@ -283,15 +283,14 @@ async def start_playlist(playlist_id, user):
     
     # [FIX] SATUKAN LOGIC CONCURRENT & SEQUENTIAL MENGGUNAKAN RADAR PINTAR ARIA2
     if bot_set.playlist_conc:
-        upload = False # Concurrent selalu batch upload
         limit_pekerja = Config.MAX_WORKERS
     else:
-        if playlist_zip: upload = False
         limit_pekerja = 1 # Sequential (Kerjakan 1 per 1 agar berurutan)
 
     tasks = []
     for track in play_meta['tracks']:
-        tasks.append(start_track(track['itemid'], user, track, upload, playlist_folder, bot_set.disable_sort_link))
+        # PAKSA argumen upload menjadi False agar fokus mendownload seluruh playlist terlebih dahulu
+        tasks.append(start_track(track['itemid'], user, track, False, playlist_folder, bot_set.disable_sort_link))
     
     # Radar Pintar akan otomatis membuat ID Cancel unik & memantau kecepatan Aria2!
     task_results = await run_concurrent_tasks(tasks, update_details, limit=limit_pekerja)
@@ -321,6 +320,5 @@ async def start_playlist(playlist_id, user):
                 from bot.logger import LOGGER
                 LOGGER.warning(f"Gagal menyalin cover.jpg ke folder playlist: {e}")
 
-    # Zipping otomatis diurus uploader.py
-    if not upload:
-        await playlist_upload(play_meta, user)
+    # SETELAH SEMUA LAGU SELESAI DIUNDUH, BARU LAKUKAN BATCH UPLOAD
+    await playlist_upload(play_meta, user)
