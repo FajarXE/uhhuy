@@ -39,11 +39,6 @@ except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor kkbox_manager.")
     kkbox_manager = None
 try:
-    from ..helpers.beatsource.manager import beatsource_manager
-except ImportError:
-    LOGGER.warning("ProviderSettings: Gagal mengimpor beatsource_manager.")
-    beatsource_manager = None
-try:
     from ..helpers.soundcloud.manager import soundcloud_manager
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor soundcloud_manager.")
@@ -63,28 +58,21 @@ try:
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor moov_manager.")
     moov_manager = None
-
-# --- TAMBAHAN BARU: LivePhish Manager ---
 try:
     from ..helpers.livephish.manager import livephish_manager
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor livephish_manager.")
     livephish_manager = None
-
-# --- TAMBAHAN BARU: Khinsider Manager ---
 try:
     from ..helpers.khinsider.manager import khinsider_manager
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor khinsider_manager.")
     khinsider_manager = None
-
-# --- TAMBAHAN BARU: Genie Manager ---
 try:
     from ..helpers.genie.manager import genie_manager
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor genie_manager.")
     genie_manager = None
-# --- BATAS TAMBAHAN ---
 
 
 @Client.on_callback_query(filters.regex(pattern=r"^providerPanel"))
@@ -370,51 +358,6 @@ async def beatport_quality_cb(c, cb:CallbackQuery):
         beatport_manager.quality = to_set
         await database.set_variable('BEATPORT_QUALITY', to_set)
         await beatport_cb(c, cb)
-
-
-#----------------
-# BEATSOURCE
-#----------------
-@Client.on_callback_query(filters.regex(pattern=r"^bsP")) 
-async def beatsource_cb(c, cb:CallbackQuery):
-    if await check_user(cb.from_user.id, restricted=True):
-        quality = {
-            "lossless": "Lossless (FLAC)",
-            "high": "High (AAC 256)",
-            "medium": "Medium (AAC 128)"
-        }
-        if not beatsource_manager or not beatsource_manager.clients:
-            return await edit_message(cb.message, "Layanan Beatsource tidak aktif (tidak ada klien yang login).")
-        
-        current = beatsource_manager.quality 
-        if current in quality:
-            quality[current] = quality[current] + '✅'
-        
-        await edit_message(
-            cb.message,
-            "Pilih kualitas default untuk Beatsource:\n(Klien non-Pro akan tetap di 128k)",
-            markup=bs_button(quality) 
-        )
-
-@Client.on_callback_query(filters.regex(pattern=r"^bsQ")) 
-async def beatsource_quality_cb(c, cb:CallbackQuery):
-    if await check_user(cb.from_user.id, restricted=True):
-        qual_map_display = {
-            "Lossless (FLAC)": "lossless",
-            "High (AAC 256)": "high",
-            "Medium (AAC 128)": "medium"
-        }
-        to_set_display = cb.data.split('_')[1]
-        to_set = qual_map_display.get(to_set_display)
-        if not to_set:
-            return await c.answer_callback_query(cb.id, "Kualitas tidak valid.", True)
-        if not beatsource_manager or not beatsource_manager.clients:
-            return await edit_message(cb.message, "Layanan Beatsource tidak aktif (tidak ada klien yang login).")
-        
-        beatsource_manager.quality = to_set
-        await database.set_variable('BEATSOURCE_QUALITY', to_set)
-        
-        await beatsource_cb(c, cb)
 
 
 #----------------
