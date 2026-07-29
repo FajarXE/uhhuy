@@ -34,11 +34,6 @@ except ImportError:
     logging.warning("UserSettings: Gagal mengimpor kkbox_manager.")
     kkbox_manager = None
 try:
-    from ..helpers.beatsource.manager import beatsource_manager
-except ImportError:
-    logging.warning("UserSettings: Gagal mengimpor beatsource_manager.")
-    beatsource_manager = None
-try:
     from ..helpers.soundcloud.manager import soundcloud_manager
 except ImportError:
     logging.warning("UserSettings: Gagal mengimpor soundcloud_manager.")
@@ -94,8 +89,8 @@ except ImportError:
 from ..helpers.buttons.settings import (
     usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
-    bs_button, sc_button, id_button, bugs_button, lyrics_button, mv_button,
-    lp_button, khi_button, beatport_user_auth_buttons, beatsource_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button
+    sc_button, id_button, bugs_button, lyrics_button, mv_button,
+    lp_button, khi_button, beatport_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button
 )
 from ..helpers.database.mongo_async import database
 from ..helpers.utils import fetch_zip_settings
@@ -262,108 +257,6 @@ async def uset_bp_instr_handler(client, query):
     )
     # Tombol Back (Warna Biru)
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_bp_auth", style=ButtonStyle.PRIMARY)]]
-    await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
-
-
-# ==================================
-# BEATSOURCE PRIVATE AUTH
-# ==================================
-
-# 1. COMMAND LOGIN (/beatsource_login email password)
-@Client.on_message(filters.command("beatsource_login"))
-async def uset_bs_login_cmd(client, message):
-    if not await check_user(msg=message):
-        return
-
-    user_id = message.from_user.id
-    args = message.text.split()
-    
-    if len(args) < 3:
-        return await message.reply_text(
-            "❌ **Format Salah**\n"
-            "Gunakan: <code>/beatsource_login email password</code>\n\n"
-            "⚠️ Password Anda akan disimpan dengan aman untuk login otomatis."
-        )
-    
-    email = args[1]
-    password = args[2] 
-    
-    status_msg = await message.reply_text("🔄 **Verifying Account...**\nMencoba login ke Beatsource...")
-    
-    try:
-        # Memanggil fungsi add_user_account di manager yang baru
-        await beatsource_manager.add_user_account(user_id, email, password)
-        await status_msg.edit_text(
-            f"✅ **Login Berhasil!**\n\n"
-            f"Akun: <code>{email}</code>\n"
-            f"Mode: Private Session\n"
-            f"Sekarang bot akan menggunakan akun ini saat Anda mendownload dari Beatsource."
-        )
-    except Exception as e:
-        await status_msg.edit_text(f"❌ **Login Gagal:**\n{str(e)}")
-
-
-# 2. CALLBACK MENU AUTH (uset_bs_auth)
-@Client.on_callback_query(filters.regex("^uset_bs_auth"))
-async def uset_bs_auth_handler(client, query):
-    if not await check_user(msg=query.message):
-        return
-    
-    user_id = query.from_user.id
-    # Cek apakah user punya sesi
-    has_session = beatsource_manager.has_private_session(user_id)
-    
-    text = "🔐 **BEATSOURCE PRIVATE SESSION**\n\n"
-    
-    if has_session:
-        client_obj = beatsource_manager.get_client(user_id)
-        email_masked = client_obj.email
-        text += f"✅ **Status: LOGGED IN**\n"
-        text += f"👤 Akun: <code>{email_masked}</code>\n"
-        text += "Bot menggunakan akun ini khusus untuk Anda."
-    else:
-        text += "❌ **Status: NOT LOGGED IN**\n"
-        text += "Bot menggunakan akun Global (Shared) untuk Anda jika tersedia.\n\n"
-        text += "Login akun sendiri untuk akses region/konten yang lebih spesifik."
-
-    # Render tombol Auth Beatsource
-    await edit_message(query.message, text, markup=beatsource_user_auth_buttons(has_session))
-
-
-# 3. CALLBACK LOGOUT (uset_bs_logout)
-@Client.on_callback_query(filters.regex("^uset_bs_logout"))
-async def uset_bs_logout_handler(client, query):
-    if not await check_user(msg=query.message):
-        return
-        
-    user_id = query.from_user.id
-    if beatsource_manager.has_private_session(user_id):
-        # Hapus sesi user
-        await beatsource_manager.remove_user_account(user_id)
-        await query.answer("✅ Sesi Beatsource dihapus. Kembali ke mode Global.", True)
-    else:
-        await query.answer("Anda belum login.", True)
-    
-    # Refresh tampilan menu auth
-    await uset_bs_auth_handler(client, query)
-
-
-# 4. CALLBACK INSTRUKSI (uset_bs_instr)
-@Client.on_callback_query(filters.regex("^uset_bs_instr"))
-async def uset_bs_instr_handler(client, query):
-    if not await check_user(msg=query.message):
-        return
-    
-    text = (
-        "📝 **CARA LOGIN BEATSOURCE**\n\n"
-        "Kirim perintah ini di chat:\n"
-        "<code>/beatsource_login email password</code>\n\n"
-        "Contoh:\n"
-        "<code>/beatsource_login myemail@gmail.com rahasia123</code>"
-    )
-    style=ButtonStyle.PRIMARY
-    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_bs_auth", style=ButtonStyle.PRIMARY)]]
-    
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
@@ -1406,30 +1299,6 @@ async def uset_cb(client, query, datatype=""):
             
         # Tombol bp_button sekarang akan menyertakan tombol "PRIVATE ACCOUNT"
         return await edit_message(query.message, text, markup=bp_button(quality, user_id))
-
-    # --- BEATSOURCE MENU ---
-    if data[1] == "beatsource" or datatype == "beatsource":
-        text = f"Choose Beatsource Audio Quality bellow:"
-        quality = {
-            "lossless": "Lossless (FLAC)",
-            "high": "High (AAC 256)",
-            "medium": "Medium (AAC 128)"
-        }
-        if not beatsource_manager or not beatsource_manager.clients:
-            return await edit_message(query.message, "Layanan Beatsource tidak aktif (tidak ada klien yang login).")
-        
-        main_user_dict = bot_set.user_data.get(user_id, {})
-        current = main_user_dict.get("beatsource_qual", beatsource_manager.quality) 
-        await beatsource_manager.setup_quality(user_id, current) 
-        
-        if current in quality:
-            quality[current] = quality[current] + '✅'
-        
-        return await edit_message(
-            query.message,
-            text + "\n(Kualitas tergantung langganan akun bot)",
-            markup=bs_button(quality, user_id)
-        )
     
     # --- SOUNDCLOUD MENU ---
     if data[1] == "soundcloud" or datatype == "soundcloud":
@@ -1869,49 +1738,6 @@ async def uset_beatport(client, query):
     await database.save_user_settings(user_id, {'beatport_qual': to_set})
     
     await uset_cb(client, query, "beatport")
-
-
-# --- HANDLER BEATSOURCE SPECIFIC ---
-@Client.on_callback_query(filters.regex("^usbs"))
-async def uset_beatsource(client, query):
-    m = query.message
-    if not await check_user(msg=m):
-        return
-    
-    qual_map_display = {
-        "Lossless (FLAC)": "lossless",
-        "High (AAC 256)": "high",
-        "Medium (AAC 128)": "medium"
-    }
-    to_set_display = query.data.split('_')[1]
-    to_set = qual_map_display.get(to_set_display)
-    
-    if not to_set:
-        return await query.answer("Kualitas tidak valid.", True)
-
-    # 1. Pindahkan user_id ke sini agar bisa digunakan untuk validasi
-    user_id = query.from_user.id
-
-    # --- 2. PERBAIKAN LOGIKA PENGECEKAN KLIEN BEATSOURCE ---
-    has_client = False
-    if beatsource_manager:
-        # Pengecekan aman untuk global clients atau clients biasa
-        if getattr(beatsource_manager, 'global_clients', []) or getattr(beatsource_manager, 'clients', []):
-            has_client = True
-        # Pengecekan untuk private session milik user
-        elif beatsource_manager.has_private_session(user_id):
-            has_client = True
-
-    if not has_client:
-        await query.answer("Layanan Beatsource tidak aktif!", show_alert=True)
-        return
-    # --- BATAS PERBAIKAN ---
-    
-    await beatsource_manager.setup_quality(user_id, to_set) 
-    bot_set.user_data.setdefault(user_id, {})['beatsource_qual'] = to_set 
-    await database.save_user_settings(user_id, {'beatsource_qual': to_set})
-    
-    await uset_cb(client, query, "beatsource")
 
 
 # --- HANDLER SOUNDCLOUD SPECIFIC ---
@@ -2374,16 +2200,6 @@ async def debug(c, m):
         dt_bp += f"Global Default Quality: {beatport_manager.quality}\n"
     else:
         dt_bp += "Beatport Manager tidak aktif."
-
-    # BEATSOURCE DEBUG
-    dt_bs = "\n\nBEATSOURCE:\n"
-    if beatsource_manager and beatsource_manager.clients:
-        dt_bs += f"{len(beatsource_manager.clients)} klien Beatsource aktif.\n"
-        dt_bs += f"Kualitas Default: {beatsource_manager.quality}\n"
-        dt_bs += f"Cache User (Global): {len([u for u in bot_set.user_data if 'beatsource_qual' in bot_set.user_data[u]])} pengguna\n"
-        dt_bs += f"Cache Langganan: { {k.session.cookie_jar.filter_cookies(k.API_URL).get('sessionid').value[:5]+'...': v for k, v in beatsource_manager.subscription_cache.items()} }"
-    else:
-        dt_bs += "Tidak ada klien Beatsource yang aktif."
     
     # SOUNDCLOUD DEBUG
     dt_sc = "\n\nSOUNDCLOUD:\n"
@@ -2511,7 +2327,7 @@ async def debug(c, m):
     zips = f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
     
     # Combine all debug texts (Pastikan dt_amz ditambahkan ke dalam final_debug_text)
-    final_debug_text = dt_qb + dt_bp + dt_bs + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + zips
+    final_debug_text = dt_qb + dt_bp + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + zips
     
     # Reply safely
     await m.reply(final_debug_text, True)
