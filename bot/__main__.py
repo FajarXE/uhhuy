@@ -50,7 +50,6 @@ deezer_manager = safe_import('bot.helpers.deezer.manager', 'deezer_manager')
 beatport_manager = safe_import('bot.helpers.beatport.manager', 'beatport_manager')
 tidal_manager = safe_import('bot.helpers.tidal.manager', 'tidal_manager')
 kkbox_manager = safe_import('bot.helpers.kkbox.manager', 'kkbox_manager')
-beatsource_manager = safe_import('bot.helpers.beatsource.manager', 'beatsource_manager')
 soundcloud_manager = safe_import('bot.helpers.soundcloud.manager', 'soundcloud_manager')
 idagio_manager = safe_import('bot.helpers.idagio.manager', 'idagio_manager')
 nugs_manager = safe_import('bot.helpers.nugs.manager', 'nugs_manager')
@@ -93,7 +92,6 @@ async def load_all_user_settings_into_managers():
             'deezer_qual': deezer_manager,
             'beatport_qual': beatport_manager,
             'kkbox_qual': kkbox_manager,
-            'beatsource_qual': beatsource_manager,
             'soundcloud_qual': soundcloud_manager,
             'idagio_qual': idagio_manager,
             'bugs_qual': bugs_manager,
@@ -170,7 +168,7 @@ async def start_services():
     managers = [
         (deezer_manager, "Deezer"), (beatport_manager, "Beatport"), 
         (tidal_manager, "Tidal"), (kkbox_manager, "KKBox"),
-        (beatsource_manager, "Beatsource"), (soundcloud_manager, "Soundcloud"),
+        (soundcloud_manager, "Soundcloud"),
         (idagio_manager, "Idagio"), (nugs_manager, "Nugs"), (bugs_manager, "Bugs"),
         (highresaudio_manager, "HIGHRESAUDIO"), (moov_manager, "Moov"),
         (jiosaavn_manager, "JioSaavn"), (gaana_manager, "Gaana"), 
@@ -232,7 +230,7 @@ async def shutdown_all_services():
     
     managers_list = [
         deezer_manager, beatport_manager, tidal_manager, kkbox_manager,
-        beatsource_manager, soundcloud_manager, idagio_manager, nugs_manager, bugs_manager, highresaudio_manager, moov_manager,
+        soundcloud_manager, idagio_manager, nugs_manager, bugs_manager, highresaudio_manager, moov_manager,
         jiosaavn_manager, gaana_manager, bandcamp_manager, livephish_manager, beatstars_manager, khinsider_manager, amazon_manager, genie_manager
     ]
     for mgr in managers_list:
