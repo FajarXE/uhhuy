@@ -55,37 +55,31 @@ try:
 except ImportError:
     kkbox_manager = None
 
-# 5. Beatsource
-try:
-    from bot.helpers.beatsource.manager import beatsource_manager
-except ImportError:
-    beatsource_manager = None
-
-# 6. Soundcloud
+# 5. Soundcloud
 try:
     from bot.helpers.soundcloud.manager import soundcloud_manager
 except ImportError:
     soundcloud_manager = None
 
-# 7. Moov
+# 6. Moov
 try:
     from bot.helpers.moov.manager import moov_manager
 except ImportError:
     moov_manager = None
 
-# 8. Idagio
+# 7. Idagio
 try:
     from bot.helpers.idagio.manager import idagio_manager
 except ImportError:
     idagio_manager = None
 
-# 9. Nugs.net
+# 8. Nugs.net
 try:
     from bot.helpers.nugs.manager import nugs_manager
 except ImportError:
     nugs_manager = None
 
-# 10. Bugs
+# 9. Bugs
 try:
     from bot.helpers.bugs.manager import bugs_manager
     from bot.helpers.bugs.manager import BugsError
@@ -93,56 +87,56 @@ except ImportError:
     bugs_manager = None
     class BugsError(Exception): pass
 
-# 11. HIGHRESAUDIO
+# 10. HIGHRESAUDIO
 try:
     from bot.helpers.highresaudio.manager import highresaudio_manager, HighResAudioError
 except ImportError:
     highresaudio_manager = None
     class HighResAudioError(Exception): pass
 
-# 12. JioSaavn
+# 11. JioSaavn
 try:
     from bot.helpers.jiosaavn.manager import jiosaavn_manager
 except ImportError:
     jiosaavn_manager = None
 
-# 13. Gaana
+# 12. Gaana
 try:
     from bot.helpers.gaana.manager import gaana_manager
 except ImportError:
     gaana_manager = None
 
-# 14. Bandcamp
+# 13. Bandcamp
 try:
     from bot.helpers.bandcamp.manager import bandcamp_manager
 except ImportError:
     bandcamp_manager = None
 
-# 15. LivePhish
+# 14. LivePhish
 try:
     from bot.helpers.livephish.manager import livephish_manager
 except ImportError:
     livephish_manager = None
 
-# 16. BeatStars
+# 15. BeatStars
 try:
     from bot.helpers.beatstars.manager import beatstars_manager
 except ImportError:
     beatstars_manager = None
 
-# 17. Khinsider
+# 16. Khinsider
 try:
     from bot.helpers.khinsider.manager import khinsider_manager
 except ImportError:
     khinsider_manager = None
 
-# 18. Amazon
+# 17. Amazon
 try:
     from bot.helpers.amazon.manager import amazon_manager
 except ImportError:
     amazon_manager = None
 
-# 19. Genie
+# 18. Genie
 try:
     from bot.helpers.genie.manager import genie_manager
 except ImportError:
@@ -164,9 +158,6 @@ try:
 except ImportError:
     async def start_kkbox(*args, **kwargs):
         raise NotImplementedError("Modul KKBox belum diimplementasikan.")
-
-# Beatsource
-from bot.helpers.beatsource.handler import start_beatsource
 
 # Moov
 try:
@@ -555,7 +546,6 @@ async def start_link(link: str, user: dict) -> None:
     qobuz = ["https://play.qobuz.com", "https://open.qobuz.com", "https://www.qobuz.com"]
     spotify = ["https://open.spotify.com"]
     beatport = ["https://www.beatport.com", "http://www.beatport.com", "beatport.com"]
-    beatsource = ["https://www.beatsource.com", "beatsource.com"]
     
     soundcloud = [
         "https://soundcloud.com", "soundcloud.com", 
@@ -762,44 +752,6 @@ async def start_link(link: str, user: dict) -> None:
             raise Exception(f"Item tidak tersedia di semua ({len(clients_list)}) akun Beatport yang dicoba. Error terakhir: {last_error}")
         else:
             raise Exception("Gagal mengunduh Beatport karena alasan yang tidak diketahui setelah mencoba semua akun.")
-
-    # Blok BEATSOURCE
-    elif link.startswith(tuple(beatsource)):
-        user['provider'] = 'Beatsource'
-        
-        if not beatsource_manager.clients:
-            raise Exception("Maaf, tidak ada akun Beatsource bot yang aktif saat ini.")
-
-        clients_list = random.sample(beatsource_manager.clients, len(beatsource_manager.clients))
-        last_error = None
-
-        for client in clients_list:
-            try:
-                user['beatsource_api'] = client 
-                await start_beatsource(link, user)
-                
-                LOGGER.info(f"Beatsource: Unduhan berhasil menggunakan akun.") 
-                return 
-                
-            except Exception as e:
-                error_str = str(e).lower()
-                if "not available in your country" in error_str or \
-                   "subscription" in error_str or \
-                   "region locked" in error_str or \
-                   "not available for streaming" in error_str or \
-                   "tidak streamable" in error_str or \
-                   "login gagal" in error_str:
-                    LOGGER.warning(f"Beatsource: Akun gagal (Region/Sub Lock/Auth/Tidak Streamable): {e}. Mencoba akun berikutnya...")
-                    last_error = e 
-                    continue 
-                else:
-                    LOGGER.error(f"Beatsource: Akun gagal (Fatal): {e}")
-                    raise e 
-                    
-        if last_error:
-            raise Exception(f"Item tidak tersedia di semua ({len(clients_list)}) akun Beatsource yang dicoba. Error terakhir: {last_error}")
-        else:
-            raise Exception("Gagal mengunduh Beatsource karena alasan yang tidak diketahui setelah mencoba semua akun.")
     
     # Blok SOUNDCLOUD
     elif link.startswith(tuple(soundcloud)):
