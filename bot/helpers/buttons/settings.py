@@ -55,12 +55,6 @@ try:
 except ImportError:
     kkbox_manager = _DummyManager()
 
-# Impor Manajer Beatsource
-try:
-    from bot.helpers.beatsource.manager import beatsource_manager
-except ImportError:
-    beatsource_manager = _DummyManager()
-
 # Impor Manajer Soundcloud
 try:
     from bot.helpers.soundcloud.manager import soundcloud_manager
@@ -186,16 +180,6 @@ def providers_button():
                 InlineKeyboardButton(
                     text="BEATPORT", 
                     callback_data='bpP'
-                )
-            ]
-        )
-    
-    if beatsource_manager and (getattr(beatsource_manager, 'global_clients', []) or getattr(beatsource_manager, 'clients', [])):
-        inline_keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text="BEATSOURCE", 
-                    callback_data='bsP'
                 )
             ]
         )
@@ -706,67 +690,6 @@ def bp_button(quality: dict, user_id: int = None):
             
     if usetting:
         buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bp_auth", style=ButtonStyle.PRIMARY)])
-        buttons.append(
-            [
-                InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
-            ]
-        )
-        return InlineKeyboardMarkup(buttons)
-        
-    main_button, close_button = fetch_base_buttons()
-    buttons += main_button + close_button
-    return InlineKeyboardMarkup(buttons)
-
-
-# ==========================================
-# BEATSOURCE BUTTONS (PRIVATE ACCOUNT)
-# ==========================================
-
-def beatsource_user_auth_buttons(is_logged_in: bool):
-    buttons = []
-    
-    if is_logged_in:
-        buttons.append([InlineKeyboardButton("🚪 LOGOUT SESSION", callback_data="uset_bs_logout", style=ButtonStyle.DANGER)])
-    else:
-        buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT", callback_data="uset_bs_instr", style=ButtonStyle.SUCCESS)])
-        
-    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_beatsource", style=ButtonStyle.PRIMARY)])
-    return InlineKeyboardMarkup(buttons)
-
-def bs_button(quality: dict, user_id: int = None):
-    buttons = []
-    usetting = user_id is not None
-    prefix = "bsQ" if not usetting else f"usbs" 
-    row = []
-    
-    display_text_map = {
-        "lossless": "Lossless (FLAC)",
-        "high": "High (AAC 256)",
-        "medium": "Medium (AAC 128)"
-    }
-    
-    for i, (key, value) in enumerate(quality.items()):
-        # Ambil teks bersih dari map
-        clean_text = display_text_map.get(key)
-        
-        # 1. Cek Warna: Gunakan value asli (yang mungkin ada emoji ✅)
-        is_selected = "✅" in value
-        btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
-
-        if clean_text:
-            # 2. Buat Tombol: Gunakan clean_text sebagai label tombol
-            row.append(InlineKeyboardButton(
-                text=clean_text, # Teks bersih (tanpa emoji)
-                callback_data=f"{prefix}_{clean_text}", 
-                style=btn_style
-            ))
-            
-        if (i + 1) % 2 == 0 or i == len(quality) - 1:
-            buttons.append(row)
-            row = []
-            
-    if usetting:
-        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bs_auth", style=ButtonStyle.PRIMARY)])
         buttons.append(
             [
                 InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
@@ -1399,10 +1322,6 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     if beatport_manager:
         if getattr(beatport_manager, 'global_clients', []) or beatport_manager.has_private_session(user_id):
             buttons.append([InlineKeyboardButton(text=f"Beatport Quality", callback_data=f"uset_beatport")])
-
-    if beatsource_manager:
-        if getattr(beatsource_manager, 'global_clients', []) or beatsource_manager.has_private_session(user_id):
-            buttons.append([InlineKeyboardButton(text=f"Beatsource Quality", callback_data=f"uset_beatsource")])
     
     if soundcloud_manager and soundcloud_manager.get_client():
         buttons.append([InlineKeyboardButton(text=f"Soundcloud Quality", callback_data=f"uset_soundcloud")])
@@ -1476,4 +1395,3 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="Close", callback_data="uset_close", style=ButtonStyle.DANGER)])
     
     return InlineKeyboardMarkup(buttons)
-
