@@ -219,6 +219,25 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     
     return None
 
+# --- [TAMBAHAN: FUNGSI PENGHAPUS LIRIK JIKA OFF] ---
+def handle_lyrics_files(folderpath, user_id):
+    """
+    Menghapus file lirik (.lrc, .txt) dari direktori jika pengguna
+    memilih untuk TIDAK menyertakan lirik (Send Lyrics File: OFF).
+    """
+    user_settings = bot_set.user_data.get(user_id, {})
+    send_lyrics = user_settings.get('send_lyrics_file', False)
+    
+    if not send_lyrics and folderpath and os.path.exists(folderpath):
+        for root, dirs, files in os.walk(folderpath):
+            for file in files:
+                if file.lower().endswith(('.lrc', '.txt')):
+                    try:
+                        os.remove(os.path.join(root, file))
+                    except Exception as e:
+                        LOGGER.error(f"Gagal menghapus lirik {file}: {e}")
+# ---------------------------------------------------
+
 async def album_upload(metadata, user):
     user_dict = user.copy()
     user_id = user['user_id']
@@ -227,6 +246,10 @@ async def album_upload(metadata, user):
     
     _, is_zip, _, show_poster = fetch_zip_settings(user)
     LOGGER.info(f"[DEBUG ALBUM] User: {user_id} | Mode: {user_mode} | ZIP: {is_zip} | Poster: {show_poster}")
+
+    # === [TAMBAHAN DI SINI] ===
+    handle_lyrics_files(metadata.get('folderpath'), user_id)
+    # ==========================
 
     if is_zip and not metadata.get('zip_path'):
         LOGGER.info("[DEBUG ALBUM] ZIP aktif tapi path kosong. Memulai Zipping...")
@@ -303,6 +326,10 @@ async def artist_upload(metadata, user):
     _, _, is_zip, show_poster = fetch_zip_settings(user)
     LOGGER.info(f"[DEBUG ARTIST] User: {user_id} | ZIP: {is_zip} | Poster: {show_poster}")
     
+    # === [TAMBAHAN DI SINI] ===
+    handle_lyrics_files(metadata.get('folderpath'), user_id)
+    # ==========================
+
     if is_zip and not metadata.get('zip_path'):
         if 'bot_msg' in user: 
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
@@ -366,6 +393,10 @@ async def playlist_upload(metadata, user):
     
     is_zip, _, _, show_poster = fetch_zip_settings(user)
     LOGGER.info(f"[DEBUG PLAYLIST] User: {user_id} | ZIP: {is_zip} | Poster: {show_poster}")
+
+    # === [TAMBAHAN DI SINI] ===
+    handle_lyrics_files(metadata.get('folderpath'), user_id)
+    # ==========================
 
     if is_zip and not metadata.get('zip_path'):
         if 'bot_msg' in user: 
@@ -529,6 +560,24 @@ async def telegram_upload(track, user, batch_mode=False):
             
         await send_message(user, filepath, media_type, meta=meta, progress=tg_progress_callback, progress_args=(details,))
         # -----------------------------------------------------------
+
+        # === [TAMBAHAN: KIRIM LIRIK BERSAMAAN DENGAN LAGU (TANPA ZIP)] ===
+        user_settings = bot_set.user_data.get(user['user_id'], {})
+        if user_settings.get('send_lyrics_file', False):
+            base_path = os.path.splitext(filepath)[0]
+            for ext in ['.lrc', '.txt']:
+                lyrics_path = base_path + ext
+                if os.path.exists(lyrics_path):
+                    await send_message(
+                        user, 
+                        lyrics_path, 
+                        'doc', 
+                        caption=f"📝 Lyrics: {meta.get('title', 'Unknown')}", 
+                        progress=tg_progress_callback, 
+                        progress_args=(details,)
+                    )
+        # =================================================================
+
     except Exception as e:
         LOGGER.error(f"[UPLOAD ERROR] send_message failed for {filepath}: {e}")
         raise e
