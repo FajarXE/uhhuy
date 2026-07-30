@@ -2041,7 +2041,8 @@ async def uset_genie_handler(client, query):
 
 
 # --- HANDLER CALLBACK BARU UNTUK LIRIK ---
-@Client.on_callback_query(filters.regex("^uset_ly"))
+# Ubah filter regex untuk menyertakan 'uset_sendly'
+@Client.on_callback_query(filters.regex("^uset_ly|^uset_sendly"))
 async def uset_lyrics_handler(client, query):
     if not await check_user(msg=query.message):
         return
@@ -2057,13 +2058,22 @@ async def uset_lyrics_handler(client, query):
     if data == "uset_lyrics":
         pass # Langsung render di bawah
 
-    # 2. Toggle ON/OFF
+    # 2. Toggle Status Lirik
     elif data == "uset_ly_on":
         bot_set.user_data[user_id]['lyrics_status'] = True
         await database.save_user_settings(user_id, {'lyrics_status': True})
     elif data == "uset_ly_off":
         bot_set.user_data[user_id]['lyrics_status'] = False
         await database.save_user_settings(user_id, {'lyrics_status': False})
+
+    # === [TAMBAHAN: LOGIKA SIMPAN TOGGLE FILE LIRIK] ===
+    elif data == "uset_sendly_on":
+        bot_set.user_data[user_id]['send_lyrics_file'] = True
+        await database.save_user_settings(user_id, {'send_lyrics_file': True})
+    elif data == "uset_sendly_off":
+        bot_set.user_data[user_id]['send_lyrics_file'] = False
+        await database.save_user_settings(user_id, {'send_lyrics_file': False})
+    # ===================================================
 
     # 3. Ganti Provider
     elif data.startswith("uset_ly_p_"):
