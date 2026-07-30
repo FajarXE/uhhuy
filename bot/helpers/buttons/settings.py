@@ -1244,9 +1244,17 @@ def lyrics_button(user_settings: dict, user_id):
     status_text = "Status: ON" if status else "Status: OFF"
     status_cb = "uset_ly_off" if status else "uset_ly_on"
     
-    # Beri warna merah jika OFF, hijau jika ON
     status_style = ButtonStyle.SUCCESS if status else ButtonStyle.DANGER
     buttons.append([InlineKeyboardButton(text=status_text, callback_data=status_cb, style=status_style)])
+
+    # === [TAMBAHAN: TOMBOL BARU UNTUK MENGIRIM FILE LIRIK] ===
+    send_ly = user_settings.get('send_lyrics_file', False)
+    send_ly_text = "Send Lyrics File: ON" if send_ly else "Send Lyrics File: OFF"
+    send_ly_cb = "uset_sendly_off" if send_ly else "uset_sendly_on"
+    
+    send_ly_style = ButtonStyle.SUCCESS if send_ly else ButtonStyle.DANGER
+    buttons.append([InlineKeyboardButton(text=send_ly_text, callback_data=send_ly_cb, style=send_ly_style)])
+    # =========================================================
 
     if status:
         prov = user_settings.get('lyrics_provider', 'lrclib')
