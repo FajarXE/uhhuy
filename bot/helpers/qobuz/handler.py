@@ -3,6 +3,7 @@
 import shutil
 import os
 import traceback
+import hashlib
 from .utils import *
 from config import Config
 from pathvalidate import sanitize_filepath
