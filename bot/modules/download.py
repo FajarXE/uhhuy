@@ -416,7 +416,8 @@ async def run_download_task(link: str, user: dict):
                     link_type = "track" # Default ke track (Tanpa Limit)
                     if re.search(r'/(album|release|ep|master)/', link_lower):
                         link_type = "album"
-                    elif re.search(r'/(playlist|mix)/', link_lower) or "playlist" in link_lower:
+                    # --- [PERBAIKAN: Tambahkan kata 'chart' ke dalam deteksi playlist] ---
+                    elif re.search(r'/(playlist|mix|chart)/', link_lower) or "playlist" in link_lower:
                         link_type = "playlist"
                     elif re.search(r'/(artist|creator|user)/', link_lower):
                         link_type = "artist"
