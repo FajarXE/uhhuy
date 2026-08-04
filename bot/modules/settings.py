@@ -181,7 +181,7 @@ async def ban(client: Client, msg: Message):
         await send_message(msg, lang.s.BAN_ID)
         
 
-@Client.on_message(filters.command(CMD.AUTH))
+@Client.on_message(filters.command(CMD.AUTH + ["add"]))
 async def auth(client: Client, msg: Message):
     if await check_user(msg.from_user.id, restricted=True):
         try:
