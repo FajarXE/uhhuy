@@ -1,6 +1,6 @@
 # [GANTI FILE: bot/modules/download.py]
 
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram import Client, filters
 import asyncio
 import collections
@@ -510,8 +510,21 @@ async def run_download_task(link: str, user: dict):
             else:
                  LOGGER.error(f"Error fatal di run_download_task: {e}\n{traceback.format_exc()}")
 
-            try: await edit_message(user['bot_msg'], error_message)
+            # --- [PERBAIKAN: MENAMBAHKAN TOMBOL KONTAK ADMIN UNTUK LIMIT] ---
+            admin_markup = None
+            if "vip access required" in error_str.lower() or "limit reached" in error_str.lower():
+                # Memanggil variabel dari Config
+                admin_markup = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(Config.ADMIN_TEXT, url=Config.ADMIN_URL)]
+                ])
+
+            try: 
+                if admin_markup:
+                    await edit_message(user['bot_msg'], error_message, markup=admin_markup)
+                else:
+                    await edit_message(user['bot_msg'], error_message)
             except: pass 
+            # ----------------------------------------------------------------
                 
         finally:
             import bot.helpers.utils as utils
