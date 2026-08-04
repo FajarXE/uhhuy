@@ -25,6 +25,19 @@ class Config:
         PORT = getenv("PORT", "0")
         if PORT.isdigit():
             PORT = int(PORT)
+
+        # --- [TAMBAHAN: VARIABEL LIMIT PENGGUNA GRATIS] ---
+        # Jika tidak diisi di server/ .env, nilainya menjadi None (Fitur Mati)
+        _free_album = getenv("FREE_ALBUM_LIMIT")
+        FREE_ALBUM_LIMIT = int(_free_album) if _free_album else None
+        
+        _free_playlist = getenv("FREE_PLAYLIST_LIMIT")
+        FREE_PLAYLIST_LIMIT = int(_free_playlist) if _free_playlist else None
+        
+        _free_wait = getenv("FREE_WAIT_TIME")
+        FREE_WAIT_TIME = int(_free_wait) if _free_wait else None
+        # --------------------------------------------------
+    
     except Exception as e:
         logging.warning(f"BOT : Essential Configs are missing -> {e}")
         sys.exit(1)
