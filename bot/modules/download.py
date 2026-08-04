@@ -2,6 +2,7 @@
 
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram import Client, filters
+from pyrogram.enums import ButtonStyle
 import asyncio
 import collections
 import traceback
@@ -515,7 +516,7 @@ async def run_download_task(link: str, user: dict):
             if "vip access required" in error_str.lower() or "limit reached" in error_str.lower():
                 from config import Config
                 admin_markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton(Config.ADMIN_BTN_TEXT, url=Config.ADMIN_BTN_URL)]
+                    [InlineKeyboardButton(Config.ADMIN_BTN_TEXT, url=Config.ADMIN_BTN_URL, style=ButtonStyle.PRIMARY)]
                 ])
 
             try: 
