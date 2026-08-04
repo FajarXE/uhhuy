@@ -402,46 +402,51 @@ async def run_download_task(link: str, user: dict):
             # =======================================================================
             # --- [FITUR LIMIT UNDUHAN PENGGUNA GRATIS] ---
             from bot.settings import bot_set
+            from config import Config 
             
-            # Abaikan limit jika pengguna adalah Admin atau masuk dalam daftar VIP (Auth Users)
-            if user['user_id'] not in bot_set.admins and user['user_id'] not in bot_set.auth_users:
-                current_time = time.time()
-                link_lower = link.lower()
+            # 1. Pastikan fitur limit diaktifkan lewat variabel server (.env)
+            if Config.FREE_ALBUM_LIMIT is not None and Config.FREE_PLAYLIST_LIMIT is not None and Config.FREE_WAIT_TIME is not None:
                 
-                # Identifikasi jenis tautan berdasarkan pola URL
-                link_type = "track" # Default ke track (Tanpa Limit)
-                if re.search(r'/(album|release|ep|master)/', link_lower):
-                    link_type = "album"
-                elif re.search(r'/(playlist|mix)/', link_lower) or "playlist" in link_lower:
-                    link_type = "playlist"
-                elif re.search(r'/(artist|creator|user)/', link_lower):
-                    link_type = "artist"
-                
-                # Bersihkan riwayat lama yang sudah melewati 1 jam (3600 detik)
-                USER_DOWNLOAD_HISTORY[user['user_id']]['album'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['album'] if current_time - ts < 3600]
-                USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] if current_time - ts < 3600]
-                
-                # Cek aturan limitasi
-                if link_type == "artist":
-                    raise Exception("🔒 VIP Access Required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
-                
-                elif link_type == "album":
-                    if len(USER_DOWNLOAD_HISTORY[user['user_id']]['album']) > 5:
-                        oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['album'][0]
-                        wait_time = int(3600 - (current_time - oldest_ts))
-                        mins, secs = divmod(wait_time, 60)
-                        raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of 6 Albums/Hour. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
-                    else:
-                        USER_DOWNLOAD_HISTORY[user['user_id']]['album'].append(current_time)
-                        
-                elif link_type == "playlist":
-                    if len(USER_DOWNLOAD_HISTORY[user['user_id']]['playlist']) >= 1:
-                        oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'][0]
-                        wait_time = int(3600 - (current_time - oldest_ts))
-                        mins, secs = divmod(wait_time, 60)
-                        raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of 1 Playlist/Hour. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
-                    else:
-                        USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'].append(current_time)
+                # 2. Abaikan limit jika pengguna adalah Admin atau masuk dalam daftar VIP (Auth Users)
+                if user['user_id'] not in bot_set.admins and user['user_id'] not in bot_set.auth_users:
+                    current_time = time.time()
+                    link_lower = link.lower()
+                    
+                    # 3. Identifikasi jenis tautan berdasarkan pola URL
+                    link_type = "track" # Default ke track (Tanpa Limit)
+                    if re.search(r'/(album|release|ep|master)/', link_lower):
+                        link_type = "album"
+                    elif re.search(r'/(playlist|mix)/', link_lower) or "playlist" in link_lower:
+                        link_type = "playlist"
+                    elif re.search(r'/(artist|creator|user)/', link_lower):
+                        link_type = "artist"
+                    
+                    # 4. Bersihkan riwayat lama yang sudah melewati batas tunggu dinamis
+                    USER_DOWNLOAD_HISTORY[user['user_id']]['album'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['album'] if current_time - ts < Config.FREE_WAIT_TIME]
+                    USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] if current_time - ts < Config.FREE_WAIT_TIME]
+                    
+                    # 5. Cek aturan limitasi
+                    if link_type == "artist":
+                        raise Exception("🔒 VIP Access Required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                    
+                    elif link_type == "album":
+                        if len(USER_DOWNLOAD_HISTORY[user['user_id']]['album']) >= Config.FREE_ALBUM_LIMIT:
+                            oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['album'][0]
+                            wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
+                            mins, secs = divmod(wait_time, 60)
+                            raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of {Config.FREE_ALBUM_LIMIT} Albums. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                        else:
+                            USER_DOWNLOAD_HISTORY[user['user_id']]['album'].append(current_time)
+                            
+                    elif link_type == "playlist":
+                        if len(USER_DOWNLOAD_HISTORY[user['user_id']]['playlist']) >= Config.FREE_PLAYLIST_LIMIT:
+                            oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'][0]
+                            wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
+                            mins, secs = divmod(wait_time, 60)
+                            raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of {Config.FREE_PLAYLIST_LIMIT} Playlist. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                        else:
+                            USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'].append(current_time)
+            # =======================================================================
 
             # --- [FIX SEMAPHORE] BATAS WAKTU DIPERPANJANG UNTUK PLAYLIST RAKSASA ---
             try:
