@@ -169,13 +169,15 @@ async def ban(client: Client, msg: Message):
         if user:
             if id_ in bot_set.auth_users:
                 bot_set.auth_users.remove(id_)
-                await database.authorize_users('AUTH_USERS', id_, True)
+                # --- [PERBAIKAN] ---
+                await database.set_variable('AUTH_USERS', bot_set.auth_users)
             else:
                 await send_message(msg, lang.s.USER_DOEST_EXIST)
         else:
             if id_ in bot_set.auth_chats:
                 bot_set.auth_chats.remove(id_)
-                await database.authorize_chats('AUTH_CHATS', id_, True)
+                # --- [PERBAIKAN] ---
+                await database.set_variable('AUTH_CHATS', bot_set.auth_chats)
             else:
                 await send_message(msg, lang.s.USER_DOEST_EXIST)
         await send_message(msg, lang.s.BAN_ID)
@@ -194,13 +196,15 @@ async def auth(client: Client, msg: Message):
         if user:
             if id_ not in bot_set.auth_users:
                 bot_set.auth_users.append(id_)
-                await database.authorize_users('AUTH_USERS', id_)
+                # --- [PERBAIKAN] ---
+                await database.set_variable('AUTH_USERS', bot_set.auth_users)
             else:
                 await send_message(msg, lang.s.USER_EXIST)
         else:
             if id_ not in bot_set.auth_chats:
                 bot_set.auth_chats.append(id_)
-                await database.authorize_chats('AUTH_CHATS', id_)
+                # --- [PERBAIKAN] ---
+                await database.set_variable('AUTH_CHATS', bot_set.auth_chats)
             else:
                 await send_message(msg, lang.s.USER_EXIST)
         await send_message(msg, lang.s.AUTH_ID)
