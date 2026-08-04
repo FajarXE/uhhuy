@@ -426,7 +426,7 @@ async def run_download_task(link: str, user: dict):
                     raise Exception("🔒 VIP Access Required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
                 
                 elif link_type == "album":
-                    if len(USER_DOWNLOAD_HISTORY[user['user_id']]['album']) >= 5:
+                    if len(USER_DOWNLOAD_HISTORY[user['user_id']]['album']) > 5:
                         oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['album'][0]
                         wait_time = int(3600 - (current_time - oldest_ts))
                         mins, secs = divmod(wait_time, 60)
