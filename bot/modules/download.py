@@ -513,9 +513,9 @@ async def run_download_task(link: str, user: dict):
             # --- [PERBAIKAN: MENAMBAHKAN TOMBOL KONTAK ADMIN UNTUK LIMIT] ---
             admin_markup = None
             if "vip access required" in error_str.lower() or "limit reached" in error_str.lower():
-                # Memanggil variabel dari Config
+                from config import Config
                 admin_markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton(Config.ADMIN_TEXT, url=Config.ADMIN_URL)]
+                    [InlineKeyboardButton(Config.ADMIN_BTN_TEXT, url=Config.ADMIN_BTN_URL)]
                 ])
 
             try: 
