@@ -423,14 +423,14 @@ async def run_download_task(link: str, user: dict):
                 
                 # Cek aturan limitasi
                 if link_type == "artist":
-                    raise Exception("🔒 **Akses VIP Diperlukan!**\nPengunduhan tautan **Artist** tidak tersedia untuk pengguna gratis. Hubungi Admin untuk berdonasi dan mendapatkan akses tanpa batas.")
+                    raise Exception("🔒 VIP Access Required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
                 
                 elif link_type == "album":
                     if len(USER_DOWNLOAD_HISTORY[user['user_id']]['album']) >= 5:
                         oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['album'][0]
                         wait_time = int(3600 - (current_time - oldest_ts))
                         mins, secs = divmod(wait_time, 60)
-                        raise Exception(f"⏳ **Limit Tercapai!**\nAnda telah mencapai batas **5 Album/Jam**. Silakan tunggu {mins} menit {secs} detik lagi, atau donasi untuk akses tanpa batas.")
+                        raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of 5 Albums/Hour. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                     else:
                         USER_DOWNLOAD_HISTORY[user['user_id']]['album'].append(current_time)
                         
@@ -439,10 +439,9 @@ async def run_download_task(link: str, user: dict):
                         oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'][0]
                         wait_time = int(3600 - (current_time - oldest_ts))
                         mins, secs = divmod(wait_time, 60)
-                        raise Exception(f"⏳ **Limit Tercapai!**\nAnda telah mencapai batas **1 Playlist/Jam**. Silakan tunggu {mins} menit {secs} detik lagi, atau donasi untuk akses tanpa batas.")
+                        raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of 1 Playlist/Hour. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                     else:
                         USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'].append(current_time)
-            # =======================================================================
 
             # --- [FIX SEMAPHORE] BATAS WAKTU DIPERPANJANG UNTUK PLAYLIST RAKSASA ---
             try:
@@ -468,6 +467,8 @@ async def run_download_task(link: str, user: dict):
             is_handled_error = False
             
             if "not available in any" in error_str or \
+               "vip access required" in error_str or \
+               "limit reached" in error_str or \
                "Maaf, tidak ada akun" in error_str or \
                "NotImplementedError" in error_str or \
                "URL Deezer tidak valid" in error_str or \
