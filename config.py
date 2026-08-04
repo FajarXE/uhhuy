@@ -40,6 +40,11 @@ class Config:
         _free_wait = getenv("FREE_WAIT_TIME")
         FREE_WAIT_TIME = int(_free_wait) if _free_wait else None
         # --------------------------------------------------
+
+        # --- [TAMBAHAN: VARIABEL KONTAK ADMIN] ---
+        ADMIN_BTN_TEXT = getenv("ADMIN_BTN_TEXT", "💬 Contact Admin")
+        ADMIN_BTN_URL = getenv("ADMIN_BTN_URL", "https://t.me/monomars")
+        # -----------------------------------------
     
     except Exception as e:
         logging.warning(f"BOT : Essential Configs are missing -> {e}")
