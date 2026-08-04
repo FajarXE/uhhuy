@@ -13,8 +13,8 @@ import re
 import bot.helpers.utils as utils
 
 USER_SEMAPHORES = collections.defaultdict(lambda: asyncio.Semaphore(1))
-# --- TAMBAHKAN DICTIONARY INI UNTUK MENCATAT HISTORY LIMIT ---
-USER_DOWNLOAD_HISTORY = collections.defaultdict(lambda: {'album': [], 'playlist': []})
+# --- DICTIONARY UNTUK MENCATAT HISTORY LIMIT ---
+USER_DOWNLOAD_HISTORY = collections.defaultdict(lambda: {'album': [], 'playlist': [], 'artist': []})
 BOT_UPTIME = time.time()
 
 from bot import CMD
@@ -424,10 +424,20 @@ async def run_download_task(link: str, user: dict):
                     # 4. Bersihkan riwayat lama yang sudah melewati batas tunggu dinamis
                     USER_DOWNLOAD_HISTORY[user['user_id']]['album'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['album'] if current_time - ts < Config.FREE_WAIT_TIME]
                     USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] if current_time - ts < Config.FREE_WAIT_TIME]
+                    USER_DOWNLOAD_HISTORY[user['user_id']]['artist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['artist'] if current_time - ts < Config.FREE_WAIT_TIME]
                     
                     # 5. Cek aturan limitasi
                     if link_type == "artist":
-                        raise Exception("🔒 VIP Access Required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                        # Jika FREE_ARTIST_LIMIT diset 0 atau tidak diset
+                        if Config.FREE_ARTIST_LIMIT <= 0:
+                            raise Exception("🔒 VIP Access Required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                        elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['artist']) >= Config.FREE_ARTIST_LIMIT:
+                            oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['artist'][0]
+                            wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
+                            mins, secs = divmod(wait_time, 60)
+                            raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of {Config.FREE_ARTIST_LIMIT} Artist link(s). Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                        else:
+                            USER_DOWNLOAD_HISTORY[user['user_id']]['artist'].append(current_time)
                     
                     elif link_type == "album":
                         if len(USER_DOWNLOAD_HISTORY[user['user_id']]['album']) >= Config.FREE_ALBUM_LIMIT:
