@@ -21,7 +21,7 @@ class CMD(object):
     HELP = ["help"]
     SETTINGS = ["settings"]
     DOWNLOAD = ["dl"]
-    BAN = ["ban"]
+    BAN = ["ban", "unadd", "unauth"]
     AUTH = ["auth"]
     LOG = ["log"]
     USETTING = ["usetting", "uset"]
