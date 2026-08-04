@@ -430,7 +430,7 @@ async def run_download_task(link: str, user: dict):
                         oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['album'][0]
                         wait_time = int(3600 - (current_time - oldest_ts))
                         mins, secs = divmod(wait_time, 60)
-                        raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of 5 Albums/Hour. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                        raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of 6 Albums/Hour. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                     else:
                         USER_DOWNLOAD_HISTORY[user['user_id']]['album'].append(current_time)
                         
