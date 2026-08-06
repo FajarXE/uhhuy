@@ -442,18 +442,22 @@ async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
             raise KKBoxError("Artis tidak ditemukan.")
 
         # Fetch artist albums with pagination
-        limit = 50  # Tetap gunakan 50 untuk menghindari 400 Bad Request
+        limit = 50
         offset = 0
         albums_list = []
         
         while True:
             try:
-                # Gunakan artist_id langsung BUKAN raw_id numerik
                 albums = await asyncio.to_thread(client.get_artist_albums, artist_id, limit, offset)
-                if not albums: # albums akan kosong/[] jika habis
+                if not albums:
                     break
                     
-                albums_list.extend(albums)
+                # Mencegah infinite loop jika API mengabaikan parameter offset
+                new_albums = [a for a in albums if a.get('id') not in [ex.get('id') for ex in albums_list]]
+                if not new_albums:
+                    break
+                    
+                albums_list.extend(new_albums)
                 
                 # Check pagination bounds
                 if len(albums) < limit:
@@ -463,6 +467,13 @@ async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
             except Exception as e:
                 LOGGER.warning(f"Berhenti mengambil halaman album artis (offset {offset}): {e}")
                 break
+
+        # Fallback terakhir: Ekstrak dari profil artist jika endpoint utama ditolak
+        if not albums_list:
+            if 'albums' in artist_data and isinstance(artist_data['albums'], list):
+                albums_list = artist_data['albums']
+            elif 'top_albums' in artist_data and isinstance(artist_data['top_albums'], list):
+                albums_list = artist_data['top_albums']
 
     except Exception as e:
         LOGGER.error(f"KKBox: Gagal mendapatkan metadata artist {artist_id}: {e}")
