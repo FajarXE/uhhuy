@@ -257,7 +257,7 @@ class KkboxAPI:
             raise self.exception('Playlist not found')
         return resp['data']['playlists']
     
-        def get_playlist_tracks(self, playlist_id):
+    def get_playlist_tracks(self, playlist_id):
         endpoints = [
             f'v1/playlists/{playlist_id}/tracks',
             f'v1/shared-playlists/{playlist_id}/tracks',
