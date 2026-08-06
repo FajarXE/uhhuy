@@ -387,6 +387,51 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
     if not metadata['tracks']: raise BeatportError("Album kosong/Gagal memproses track.")
     return metadata
 
+async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
+    user_id = user.get('user_id')
+    active_client = beatport_manager.get_client(user_id)
+    if not active_client: 
+        raise BeatportError("Tidak ada akun Beatport yang aktif.")
+
+    artist_data = await active_client.get_artist(artist_id)
+    if not artist_data: 
+        raise BeatportError("Artis tidak ditemukan.")
+
+    releases = []
+    p = 1
+    while True:
+        try:
+            res = await active_client.get_artist_releases(artist_id, page=p)
+            results = res.get("results", [])
+            if not results: 
+                break
+            releases.extend(results)
+            if not res.get("next") or len(releases) >= res.get("count", 0): 
+                break
+            p += 1
+            await asyncio.sleep(0.5)
+        except Exception:
+            break
+
+    metadata = copy.deepcopy(base_meta)
+    metadata['tempfolder'] += f"{r_id}-temp/"
+    metadata['itemid'] = artist_id
+    metadata['title'] = artist_data.get("name", "Unknown Artist")
+    metadata['artist'] = metadata['title']
+    metadata['type'] = 'artist'
+    metadata['provider'] = 'Beatport'
+
+    img_uri = artist_data.get("image", {}).get("dynamic_uri")
+    bp_cover = await _generate_artwork_url(img_uri)
+    metadata['cover'] = await _process_cover(metadata, bp_cover)
+    metadata['thumbnail'] = await create_cover_file(await _generate_artwork_url(bp_cover, 80), metadata, True)
+
+    metadata['releases'] = releases
+    if not releases:
+        raise BeatportError("Artis ini tidak memiliki rilis/album yang dapat diunduh.")
+        
+    return metadata
+
 async def process_playlist_metadata(playlist_id: str, r_id: str, user: dict, extra: dict):
     user_id = user.get('user_id')
     active_client = beatport_manager.get_client(user_id)
