@@ -80,9 +80,14 @@ async def start_artist(artist_id: str, user: dict):
 
     successful_albums = []
     for album in artist_meta.get('releases', []):
-        album_id = str(album.get('id'))
-        if not album_id:
+        # Cari dari key 'id' terlebih dahulu, gunakan 'album_id' sebagai fallback
+        raw_id = album.get('id') or album.get('album_id')
+        
+        # Lakukan validasi SEBELUM mengonversinya menjadi string
+        if not raw_id:
             continue
+            
+        album_id = str(raw_id)
             
         try:
             await start_album(album_id, user, upload=upload_album)
