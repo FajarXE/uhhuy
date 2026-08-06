@@ -259,8 +259,9 @@ class KkboxAPI:
     
     def get_playlist_tracks(self, playlist_id):
         try:
+            # Ubah timeout menjadi 30 detik
             resp = self.api_call('ds', f'v1/playlists/{playlist_id}/tracks', 
-                               params={'limit': 500}, timeout=5)
+                               params={'limit': 500}, timeout=30)
             if resp and resp.get('status', {}).get('type') == 'OK':
                  data = resp.get('data', [])
                  if data: return data
@@ -268,8 +269,9 @@ class KkboxAPI:
             pass
              
         try:
+            # Ubah timeout menjadi 30 detik
             resp = self.api_call('ds', f'v1/shared-playlists/{playlist_id}/tracks', 
-                               params={'limit': 500}, timeout=5)
+                               params={'limit': 500}, timeout=30)
             if resp and resp.get('status', {}).get('type') == 'OK':
                  data = resp.get('data', [])
                  if data: return data
@@ -277,8 +279,9 @@ class KkboxAPI:
             pass
 
         try:
+             # Ubah timeout menjadi 30 detik
              resp = self.api_call('ds', f'v1/charts/{playlist_id}/tracks', 
-                                params={'limit': 500}, timeout=3)
+                                params={'limit': 500}, timeout=30)
              if resp and resp.get('status', {}).get('type') == 'OK':
                   data = resp.get('data', [])
                   if data: return data
