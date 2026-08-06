@@ -26,21 +26,19 @@ HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 }
 
-# --- [FIX ID TOMBOL MP3 192] ---
 QUALITY_MAP = {
     "flac24": ["24bit", "16bit", "320", "192"],
     "flac16": ["16bit", "24bit", "320", "192"],
     "mp3": ["320", "192", "24bit", "16bit"],
-    "mp3192": ["192", "320", "24bit", "16bit"] # Diubah tanpa underscore
+    "mp3192": ["192", "320", "24bit", "16bit"]
 }
 
 QUALITY_MAP_DISPLAY = {
     "flac24": "FLAC-24",
     "flac16": "FLAC-16",
     "mp3": "MP3 320kbps",
-    "mp3192": "MP3 192kbps" # Diubah tanpa underscore
+    "mp3192": "MP3 192kbps"
 }
-# -------------------------------
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
     wait_time = 2
@@ -84,6 +82,35 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
         wait_time *= 2
         
     raise Exception("Max retries exceeded. Gagal memuat data dari Genie.")
+
+# --- [PERBAIKAN] Fungsi Fetch HTML yang di-inject Proxy ---
+async def fetch_html(url: str, max_retries=3):
+    wait_time = 2
+    loop = asyncio.get_event_loop()
+    
+    PROXY_STRING = getattr(Config, 'GENIE_PROXY', None) 
+    proxy_dict = {
+        "http": PROXY_STRING,
+        "https": PROXY_STRING
+    } if PROXY_STRING else None
+    
+    for attempt in range(max_retries):
+        try:
+            def _do_request():
+                resp = requests.get(url, headers=HEADERS, timeout=15, proxies=proxy_dict)
+                if resp.status_code != 200:
+                    raise ValueError(f"HTTP {resp.status_code}")
+                return resp.text
+            
+            return await loop.run_in_executor(None, _do_request)
+        except Exception as e:
+            LOGGER.warning(f"Genie HTML Request failed: {e}. Retrying... ({attempt + 1}/{max_retries})")
+        
+        await asyncio.sleep(wait_time)
+        wait_time *= 2
+        
+    raise Exception("Max retries exceeded. Gagal memuat HTML dari Genie.")
+# ----------------------------------------------------------
 
 def parse_code(url: str) -> str:
     match = re.findall(r'\d+', url)
@@ -189,10 +216,8 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         'date': final_date,
         'copyright': final_pub,
         'cover': cover_url,
-        # --- [FIX KEYERROR METADATA] ---
-        'isrc': '', # Memuaskan metadata.py yang mencari ISRC
-        'upc': ''   # Memuaskan metadata.py yang mencari UPC
-        # -------------------------------
+        'isrc': '', 
+        'upc': ''   
     }
 
     if cover_url and str(cover_url).startswith('http'):
@@ -238,10 +263,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
     return metadata
 
 async def start_album(session, code, user, quality_pref, download_dir, upload=True):
-    """
-    Fungsi modular untuk mengunduh album agar dapat digunakan di tautan langsung 
-    maupun saat mengunduh dari diskografi artis secara massal.
-    """
     api_url = f"https://info.genie.co.kr/info/album?axnm={code}"
     album_data = await fetch_json(session, api_url)
     
@@ -335,7 +356,6 @@ async def start_album(session, code, user, quality_pref, download_dir, upload=Tr
     }
     
     task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
-    # Filter metadata untuk melewati error individual di Aria2
     successful_tracks = [res for res in task_results if isinstance(res, dict)]
 
     if not successful_tracks:
@@ -385,7 +405,6 @@ async def start_genie(link: str, user: dict):
 
     async with aiohttp.ClientSession() as session:
         if "xgnm" in link:
-            # --- Pengunduhan Track Tunggal ---
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🚀 Starting task...")
             
@@ -394,14 +413,12 @@ async def start_genie(link: str, user: dict):
             await track_upload(metadata, user)
 
         elif "axnm" in link:
-            # --- Pengunduhan Album ---
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🚀 Starting task...")
                 
             await start_album(session, code, user, quality_pref, download_dir, upload=True)
 
         elif "plmSeq" in link:
-            # --- Pengunduhan Playlist ---
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 **Fetching Genie Playlist...**")
                 
@@ -473,7 +490,6 @@ async def start_genie(link: str, user: dict):
             await playlist_upload(pl_metadata, user)
 
         elif "xxnm" in link:
-            # --- Pengunduhan Diskografi Artis (Artist Batch) ---
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 Mengambil rilis artis Genie...")
                 
@@ -486,31 +502,32 @@ async def start_genie(link: str, user: dict):
             while True:
                 api_url = f"https://www.genie.co.kr/detail/artistAlbum?xxnm={artist_id}&pg={page}"
                 try:
-                    resp = await session.get(api_url, headers=HEADERS)
-                    html = await resp.text()
+                    # [PERBAIKAN] Gunakan fetch_html yang dilewatkan ke proxy SOCKS
+                    html = await fetch_html(api_url)
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengambil HTML artis halaman {page}: {e}")
                     break
                     
-                # [PERBAIKAN] Regex diperluas untuk menangkap berbagai variasi struktur atribut Genie
+                # [PERBAIKAN] Regex diperkuat untuk menangani berbagai bentuk atribut
                 found_albums = re.findall(r"axnm=(\d+)", html)
-                found_albums.extend(re.findall(r"fnViewAlbum\s*\(\s*['\"](\d+)['\"]\s*\)", html))
+                found_albums.extend(re.findall(r"fnViewAlbum\s*\(\s*['\"]?(\d+)['\"]?\s*\)", html))
                 found_albums.extend(re.findall(r"albumInfo\?axnm=(\d+)", html))
-                found_albums.extend(re.findall(r"data-album-id=['\"](\d+)['\"]", html))
+                found_albums.extend(re.findall(r"data-album-id=['\"]?(\d+)['\"]?", html))
+                found_albums.extend(re.findall(r"['\"]?ALBUM_ID['\"]?\s*:\s*['\"]?(\d+)['\"]?", html))
                 
-                # Hapus duplikat dalam array
+                # Filter duplikat 
                 found_albums = list(set(found_albums))
                 
-                # Ambil nama artis hanya di iterasi pertama
+                # Mencegah ID artist masuk ke array (antisipasi salah tag HTML)
+                if artist_id in found_albums:
+                    found_albums.remove(artist_id)
+                
                 if page == 1:
                     title_match = re.search(r"<title>(.*?)</title>", html)
                     if title_match:
-                        # Membersihkan string "Nama Artis - 지니"
                         artist_name = title_match.group(1).split("-")[0].strip()
 
                 if not found_albums:
-                    # Jika benar-benar kosong, cetak sedikit porsi HTML ke log untuk investigasi
-                    LOGGER.debug(f"Genie Artist (Page {page}) kosong. Snippet HTML: {html[:300]}")
                     break
                     
                 new_albums = 0
@@ -528,7 +545,6 @@ async def start_genie(link: str, user: dict):
             if not album_ids:
                 raise Exception(f"Artis ini tidak memiliki rilis/album yang dapat diunduh (Struktur HTML mungkin diblokir/berubah). ID: {artist_id}")
                 
-            # Evaluasi Logika Zip dan Batch Pengguna
             playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
             
             upload_album = True
