@@ -243,58 +243,6 @@ class KkboxAPI:
                 
         raise self.exception('API KKBox menolak request untuk mengambil daftar album artis di semua endpoint.')
 
-    def get_playlists(self, ids):
-        resp = self.api_call('ds', f'v1/playlists', params={
-            'playlist_ids': ','.join(ids)
-        })
-        
-        if not resp or resp['status']['type'] != 'OK':
-             resp = self.api_call('ds', f'v1/shared-playlists', params={
-                'playlist_ids': ','.join(ids)
-             })
-
-        if not resp or resp['status']['type'] != 'OK':
-            raise self.exception('Playlist not found')
-        return resp['data']['playlists']
-    
-    def get_playlist_tracks(self, playlist_id):
-        endpoints = [
-            f'v1/playlists/{playlist_id}/tracks',
-            f'v1/shared-playlists/{playlist_id}/tracks',
-            f'v1/charts/{playlist_id}/tracks'
-        ]
-        
-        for ep in endpoints:
-            tracks = []
-            offset = 0
-            limit = 100  # Kurangi limit menjadi 100 agar server KKBox merespons lebih cepat
-            
-            while True:
-                try:
-                    resp = self.api_call('ds', ep, params={'limit': limit, 'offset': offset}, timeout=15)
-                    
-                    if not resp or resp.get('status', {}).get('type') != 'OK':
-                        break  # Pindah ke endpoint berikutnya jika gagal/kosong
-                        
-                    data = resp.get('data', [])
-                    if not data:
-                        break
-                        
-                    tracks.extend(data)
-                    
-                    if len(data) < limit:
-                        break  # Sudah mencapai akhir halaman
-                        
-                    offset += limit
-                except Exception:
-                    break  # Pindah ke endpoint berikutnya jika terkena timeout
-                    
-            if tracks:
-                return tracks
-                
-        LOGGER.error(f"KKBox API: Gagal menemukan tracks di semua endpoint untuk ID {playlist_id}")
-        return []
-
     def search(self, query, types, limit):
         return self.api_call('ds', 'search_music.php', params={
             'sf': ','.join(types),
