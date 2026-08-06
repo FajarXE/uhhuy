@@ -147,7 +147,12 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
         if alb_info_pre:
             alb_info = alb_info_pre
         else:
-            album_raw_id = track_data.get('raw_album_id') or int(track_data['album_id'])
+            # Mencegah KeyError dan ValueError dengan mengekstrak ID secara dinamis
+            # dan menghindari konversi int() yang kaku.
+            album_raw_id = track_data.get('raw_album_id') or track_data.get('album_id')
+            if not album_raw_id and 'album' in track_data:
+                album_raw_id = track_data['album'].get('id')
+                
             try:
                 album_data_more = await asyncio.to_thread(client.get_album_more, album_raw_id)
                 if not album_data_more or 'info' not in album_data_more:
