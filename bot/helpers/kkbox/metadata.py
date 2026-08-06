@@ -441,19 +441,16 @@ async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
         if not artist_data:
             raise KKBoxError("Artis tidak ditemukan.")
 
-        # Ambil raw_id (ID numerik internal) jika v2 API membutuhkannya
-        raw_artist_id = artist_data.get('artist_id') or artist_data.get('id') or artist_id
-
         # Fetch artist albums with pagination
-        limit = 50  # Limit diturunkan untuk menghindari 400 Bad Request
+        limit = 50  # Tetap gunakan 50 untuk menghindari 400 Bad Request
         offset = 0
         albums_list = []
         
         while True:
             try:
-                # get_artist_albums di api.py sudah mengembalikan list (resp['data']['album'])
-                albums = await asyncio.to_thread(client.get_artist_albums, raw_artist_id, limit, offset)
-                if not albums:
+                # Gunakan artist_id langsung BUKAN raw_id numerik
+                albums = await asyncio.to_thread(client.get_artist_albums, artist_id, limit, offset)
+                if not albums: # albums akan kosong/[] jika habis
                     break
                     
                 albums_list.extend(albums)
