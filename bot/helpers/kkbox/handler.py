@@ -14,11 +14,11 @@ from .metadata import (
     process_track_metadata, 
     process_album_metadata,
     process_playlist_metadata,
+    process_artist_metadata,
     custom_url_parse
 )
 from .manager import KKBoxError
 
-# Impor yang diperlukan
 from ..uploder import *
 from ..metadata import set_metadata
 from ..message import edit_message
@@ -49,12 +49,53 @@ async def start_kkbox(url: str, user: dict):
         elif media_type == 'playlist':
             await start_playlist(item_id, user)
             
+        elif media_type == 'artist':
+            await start_artist(item_id, user)
+            
         else:
             raise NotImplementedError(f"Tipe media KKBox '{media_type}' belum didukung.")
         
     except Exception as e:
         LOGGER.error(f"Error fatal di KKBox handler: {e}\n{traceback.format_exc()}")
         raise e 
+
+
+async def start_artist(artist_id: str, user: dict):
+    """Handler untuk unduhan seluruh diskografi artis KKBox."""
+    try:
+        artist_meta = await process_artist_metadata(artist_id, user['r_id'], user)
+    except Exception as e:
+        raise Exception(f"Gagal mendapatkan metadata artist KKBox: {e}")
+
+    artist_folder = sanitize_filepath(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{artist_meta['provider']}/{artist_meta['title']}")
+    artist_meta['folderpath'] = artist_folder
+
+    upload_album = True
+    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
+    
+    if bot_set.artist_batch: 
+        upload_album = True if bot_set.upload_mode == 'Telegram' else False
+    if artist_zip: 
+        upload_album = False 
+
+    successful_albums = []
+    for album in artist_meta.get('releases', []):
+        album_id = str(album.get('id'))
+        if not album_id:
+            continue
+            
+        try:
+            await start_album(album_id, user, upload=upload_album)
+            successful_albums.append(album_id)
+        except Exception as e:
+            LOGGER.warning(f"KKBox: Gagal mengunduh rilis {album_id} milik {artist_meta['title']}: {e}")
+            continue
+
+    if not successful_albums:
+        raise Exception("Tidak ada rilis yang berhasil diunduh untuk artis ini.")
+
+    if not upload_album:
+        await artist_upload(artist_meta, user)
 
 
 async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
@@ -108,40 +149,33 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        # --- [FIX KECEPATAN] FULL ARIA2 + DEKRIPSI OTOMATIS ---
         is_drm = format_key != 'mp3_128k_chromecast'
-        # File sementara untuk menampung data mentah ber-DRM
         temp_filepath = track_meta['filepath'] + ".enc" if is_drm else track_meta['filepath']
 
-        # Inject penyamaran dari KKBox API
         headers_dict = {'User-Agent': 'okhttp/3.14.9'}
         details_aria = {'msg': None, 'headers': headers_dict} if not upload else {
             'msg': user['bot_msg'], 'title': track_meta['title'], 'type': 'Track', 'headers': headers_dict
         }
 
-        # 1. Aria2 menyedot file terenkripsi secara brutal
         err = await download_file(download_url, temp_filepath, retries=1, details=details_aria)
 
         if err or not os.path.exists(temp_filepath):
             LOGGER.error(f"KKBox: Aria2 gagal mengunduh {track_meta['title']}")
             return False
 
-        # 2. Mesin Dekripsi ARC4 Lokal (Menjahit DRM jadi lagu normal)
         if is_drm:
             def _decrypt_kkbox():
                 from Cryptodome.Cipher import ARC4
                 rc4 = ARC4.new(client.lic_content_key, drop=512)
                 with open(temp_filepath, 'rb') as f_in, open(track_meta['filepath'], 'wb') as f_out:
-                    f_in.seek(1024) # Melompati header 1024 bytes bawaan KKBox DRM
+                    f_in.seek(1024) 
                     while True:
                         chunk = f_in.read(65536)
                         if not chunk: break
                         f_out.write(rc4.decrypt(chunk))
-                os.remove(temp_filepath) # Bersihkan file mentah
+                os.remove(temp_filepath) 
 
-            # Jalankan di background agar bot tidak lag
             await asyncio.to_thread(_decrypt_kkbox)
-        # ----------------------------------------------------
 
     except Exception as e:
         LOGGER.error(f"KKBox dl_track gagal untuk {item_id}: {e}")
@@ -185,12 +219,11 @@ async def start_album(album_id: str, user: dict, upload=True):
 
     update_details = {
         'text': lang.s.DOWNLOAD_PROGRESS,
-        'msg': user['bot_msg'],
+        'msg': user.get('bot_msg'),
         'title': album_meta['title'],
         'type': album_meta['type']
     }
     
-    # --- [FIX PARALEL] Menggunakan MAX_WORKERS ---
     task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
     successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
@@ -215,8 +248,6 @@ async def start_album(album_id: str, user: dict, upload=True):
                 await asyncio.to_thread(shutil.copy, album_meta['cover'], cover_path)
         except Exception: pass
 
-    # Zipping dan upload diurus secara otomatis oleh uploader.py
-    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload:
         await album_upload(album_meta, user)
 
@@ -257,7 +288,6 @@ async def start_playlist(playlist_id: str, user: dict):
         'type': 'playlist' 
     }
     
-    # --- [FIX PARALEL] Menggunakan MAX_WORKERS ---
     task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
     successful_tracks = [pl_meta['tracks'][i] for i, result in enumerate(task_results) if result]
@@ -282,6 +312,4 @@ async def start_playlist(playlist_id: str, user: dict):
                 await asyncio.to_thread(shutil.copy, pl_meta['cover'], cover_path)
         except Exception: pass
 
-    # Zipping dan upload diurus secara otomatis oleh uploader.py
-    # --- [FIX CAPTION] Panggil mesin playlist, bukan mesin album! ---
     await playlist_upload(pl_meta, user)
