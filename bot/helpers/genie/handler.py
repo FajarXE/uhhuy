@@ -492,11 +492,16 @@ async def start_genie(link: str, user: dict):
                     LOGGER.warning(f"Gagal mengambil HTML artis halaman {page}: {e}")
                     break
                     
-                # Ekstrak 'axnm' dari format desktop/mobile/JS internal
+                # [PERBAIKAN] Regex diperluas untuk menangkap berbagai variasi struktur atribut Genie
                 found_albums = re.findall(r"axnm=(\d+)", html)
-                found_albums.extend(re.findall(r"fnViewAlbum\('(\d+)'\)", html))
+                found_albums.extend(re.findall(r"fnViewAlbum\s*\(\s*['\"](\d+)['\"]\s*\)", html))
+                found_albums.extend(re.findall(r"albumInfo\?axnm=(\d+)", html))
+                found_albums.extend(re.findall(r"data-album-id=['\"](\d+)['\"]", html))
                 
-                # Ekstrak nama artis (hanya pada page 1)
+                # Hapus duplikat dalam array
+                found_albums = list(set(found_albums))
+                
+                # Ambil nama artis hanya di iterasi pertama
                 if page == 1:
                     title_match = re.search(r"<title>(.*?)</title>", html)
                     if title_match:
@@ -504,6 +509,8 @@ async def start_genie(link: str, user: dict):
                         artist_name = title_match.group(1).split("-")[0].strip()
 
                 if not found_albums:
+                    # Jika benar-benar kosong, cetak sedikit porsi HTML ke log untuk investigasi
+                    LOGGER.debug(f"Genie Artist (Page {page}) kosong. Snippet HTML: {html[:300]}")
                     break
                     
                 new_albums = 0
@@ -519,7 +526,7 @@ async def start_genie(link: str, user: dict):
                 await asyncio.sleep(0.5)
                 
             if not album_ids:
-                raise Exception("Artis ini tidak memiliki rilis/album yang dapat diunduh (atau ID tidak valid).")
+                raise Exception(f"Artis ini tidak memiliki rilis/album yang dapat diunduh (Struktur HTML mungkin diblokir/berubah). ID: {artist_id}")
                 
             # Evaluasi Logika Zip dan Batch Pengguna
             playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
