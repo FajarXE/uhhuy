@@ -214,14 +214,16 @@ class KkboxAPI:
             raise self.exception('Artist not found')
         return resp['data']
     
-    def get_artist_albums(self, raw_id, limit, offset):
-        resp = self.api_call('ds', f'v2/artist/{raw_id}/album', params={
+    def get_artist_albums(self, artist_id, limit, offset):
+        resp = self.api_call('ds', f'v2/artist/{artist_id}/album', params={
             'limit': limit,
             'offset': offset,
         })
-        if not resp or resp['status']['type'] != 'OK':
-            raise self.exception('Gagal mengambil album artis (kemungkinan limit terlalu besar atau ID salah).')
-        return resp['data']['album']
+        if not resp or resp.get('status', {}).get('type') != 'OK':
+            raise self.exception('Gagal mengambil album artis (API menolak request).')
+        
+        # Gunakan .get() untuk menghindari KeyError jika artist tidak memiliki album
+        return resp.get('data', {}).get('album', [])
 
     def get_playlists(self, ids):
         resp = self.api_call('ds', f'v1/playlists', params={
