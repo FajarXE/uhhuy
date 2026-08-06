@@ -83,7 +83,6 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, max_retries=3):
         
     raise Exception("Max retries exceeded. Gagal memuat data dari Genie.")
 
-# --- [PERBAIKAN] Fungsi Fetch HTML yang di-inject Proxy ---
 async def fetch_html(url: str, max_retries=3):
     wait_time = 2
     loop = asyncio.get_event_loop()
@@ -98,6 +97,7 @@ async def fetch_html(url: str, max_retries=3):
         try:
             def _do_request():
                 resp = requests.get(url, headers=HEADERS, timeout=15, proxies=proxy_dict)
+                resp.encoding = 'utf-8'
                 if resp.status_code != 200:
                     raise ValueError(f"HTTP {resp.status_code}")
                 return resp.text
@@ -110,7 +110,6 @@ async def fetch_html(url: str, max_retries=3):
         wait_time *= 2
         
     raise Exception("Max retries exceeded. Gagal memuat HTML dari Genie.")
-# ----------------------------------------------------------
 
 def parse_code(url: str) -> str:
     match = re.findall(r'\d+', url)
@@ -132,7 +131,6 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
                 break 
         except Exception as e:
             if "HTTP 404" in str(e) or "HTTP 400" in str(e):
-                LOGGER.debug(f"Kualitas {bitrate} ditolak API Genie (404/400). Mencoba fallback...")
                 continue
             else:
                 raise e
@@ -179,8 +177,8 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
                 raw_cover = unquote(alb_info.get("album_img_path600", ""))
             if not album_name or album_name == "Unknown Album":
                 album_name = unquote(alb_info.get("album_name", "Unknown Album"))
-        except Exception as e:
-            LOGGER.debug(f"Pencarian paksa data album gagal: {e}")
+        except Exception:
+            pass
             
     if raw_cover and not cover_url:
         cover_url = "https:" + raw_cover if raw_cover.startswith("//") else raw_cover
@@ -500,25 +498,29 @@ async def start_genie(link: str, user: dict):
             artist_name = "Unknown Artist"
             
             while True:
-                api_url = f"https://www.genie.co.kr/detail/artistAlbum?xxnm={artist_id}&pg={page}"
+                # [PERBAIKAN] Pastikan iterasi pertama memprioritaskan endpoint artistInfo
+                if page == 1:
+                    api_url = f"https://www.genie.co.kr/detail/artistInfo?xxnm={artist_id}"
+                else:
+                    api_url = f"https://www.genie.co.kr/detail/artistAlbum?xxnm={artist_id}&pg={page}"
+                    
                 try:
-                    # [PERBAIKAN] Gunakan fetch_html yang dilewatkan ke proxy SOCKS
                     html = await fetch_html(api_url)
+                    if "Access Denied" in html or "접속이 제한" in html:
+                        raise Exception("IP diblokir oleh sistem anti-bot Genie.")
                 except Exception as e:
                     LOGGER.warning(f"Gagal mengambil HTML artis halaman {page}: {e}")
                     break
                     
-                # [PERBAIKAN] Regex diperkuat untuk menangani berbagai bentuk atribut
+                # [PERBAIKAN] Pola Regex dioptimalkan untuk membedah fungsi onClick & href
                 found_albums = re.findall(r"axnm=(\d+)", html)
-                found_albums.extend(re.findall(r"fnViewAlbum\s*\(\s*['\"]?(\d+)['\"]?\s*\)", html))
+                found_albums.extend(re.findall(r"fnViewAlbum[A-Za-z]*\s*\(\s*['\"]?(\d+)['\"]?\s*\)", html))
                 found_albums.extend(re.findall(r"albumInfo\?axnm=(\d+)", html))
                 found_albums.extend(re.findall(r"data-album-id=['\"]?(\d+)['\"]?", html))
                 found_albums.extend(re.findall(r"['\"]?ALBUM_ID['\"]?\s*:\s*['\"]?(\d+)['\"]?", html))
                 
-                # Filter duplikat 
                 found_albums = list(set(found_albums))
                 
-                # Mencegah ID artist masuk ke array (antisipasi salah tag HTML)
                 if artist_id in found_albums:
                     found_albums.remove(artist_id)
                 
@@ -528,6 +530,7 @@ async def start_genie(link: str, user: dict):
                         artist_name = title_match.group(1).split("-")[0].strip()
 
                 if not found_albums:
+                    LOGGER.debug(f"Genie Artist (Page {page}) HTML kosong atau tidak ditemukan tag album. Snippet: {html[:300]}")
                     break
                     
                 new_albums = 0
