@@ -430,6 +430,69 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
 
     return metadata
 
+async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
+    client = user['kkbox_api']
+    metadata = copy.deepcopy(base_meta)
+    metadata['tempfolder'] += f"{r_id}-temp/"
+
+    try:
+        # Fetch artist profile
+        artist_data = await asyncio.to_thread(client.get_artist, artist_id)
+        if not artist_data:
+            raise KKBoxError("Artis tidak ditemukan.")
+
+        # Fetch artist albums with pagination
+        limit = 500
+        offset = 0
+        albums_list = []
+        
+        while True:
+            try:
+                # Assuming get_artist_albums returns a dict containing 'data' as a list
+                page_data = await asyncio.to_thread(client.get_artist_albums, artist_id, limit, offset)
+                if not page_data or not page_data.get('data'):
+                    break
+                    
+                albums = page_data['data']
+                albums_list.extend(albums)
+                
+                # Check pagination bounds
+                if len(albums) < limit:
+                    break
+                offset += limit
+                
+            except Exception as e:
+                LOGGER.warning(f"Berhenti mengambil halaman album artis (offset {offset}): {e}")
+                break
+
+    except Exception as e:
+        LOGGER.error(f"KKBox: Gagal mendapatkan metadata artist {artist_id}: {e}")
+        raise e
+
+    metadata['itemid'] = artist_id
+    metadata['title'] = artist_data.get('name', 'Unknown Artist')
+    metadata['artist'] = metadata['title']
+    metadata['type'] = 'artist'
+    metadata['provider'] = 'KKBox'
+
+    # Process Artist Image
+    images = artist_data.get('images', [])
+    if images:
+        cover_template = images[0].get('url')
+        if cover_template:
+            metadata['cover'] = await _process_cover(metadata, cover_template)
+            metadata['thumbnail'] = await create_cover_file(
+                cover_template.replace('{width}', '80').replace('{height}', '80').replace('{format}', 'jpg'), 
+                metadata, 
+                True
+            )
+
+    metadata['releases'] = albums_list
+    if not albums_list:
+        raise KKBoxError("Artis ini tidak memiliki rilis/album yang dapat diunduh.")
+
+    return metadata
+
 async def process_playlist_metadata(playlist_id: str, r_id: str, user: dict):
     client = user['kkbox_api']
     metadata = copy.deepcopy(base_meta)
