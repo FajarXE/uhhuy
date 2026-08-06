@@ -107,7 +107,7 @@ async def _scrape_kkbox_date(album_id: str, known_prefix: str = None):
                 
     return None
 
-async def _scrape_playlist_ids(playlist_id: str):
+async def _scrape_playlist_ids(playlist_id: str, proxy: str = None):
     regions = ['tw', 'hk', 'sg', 'my', 'jp']
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -117,12 +117,17 @@ async def _scrape_playlist_ids(playlist_id: str):
         for region in regions:
             url = f"https://www.kkbox.com/{region}/en/playlist/{playlist_id}"
             try:
-                async with session.get(url, headers=headers, timeout=10) as resp:
+                # Masukkan proxy ke dalam request aiohttp
+                async with session.get(url, headers=headers, proxy=proxy, timeout=15) as resp:
                     if resp.status == 200:
                         html = await resp.text()
+                        
+                        # Cari dari format URL dan JSON metadata bawaan KKBox
                         matches = re.findall(r'\/song\/([a-zA-Z0-9-_]{10,})', html)
-                        if matches:
-                            found_ids = list(set(matches))
+                        matches_json = re.findall(r'"song_id"\s*:\s*"([a-zA-Z0-9-_]{10,})"', html)
+                        
+                        found_ids = list(set(matches + matches_json))
+                        if found_ids:
                             LOGGER.info(f"KKBox Scrape ({region}): Berhasil menemukan {len(found_ids)} lagu via Web Scraping.")
                             return found_ids
             except Exception:
@@ -570,7 +575,14 @@ async def process_playlist_metadata(playlist_id: str, r_id: str, user: dict):
     if not raw_tracks:
         try:
             LOGGER.info(f"KKBox: API Gagal. Memulai Web Scraping untuk ID {playlist_id}...")
-            scraped_ids = await _scrape_playlist_ids(playlist_id)
+            
+            # Ambil proxy dari instance requests (jika ada)
+            proxy_url = None
+            if hasattr(client, 's') and client.s.proxies:
+                proxy_url = client.s.proxies.get('http') or client.s.proxies.get('https')
+                
+            scraped_ids = await _scrape_playlist_ids(playlist_id, proxy=proxy_url)
+            
             if scraped_ids:
                 raw_tracks = [{'id': sid} for sid in scraped_ids]
                 LOGGER.info(f"KKBox: Berhasil scraping {len(raw_tracks)} tracks.")
