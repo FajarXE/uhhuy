@@ -257,37 +257,41 @@ class KkboxAPI:
             raise self.exception('Playlist not found')
         return resp['data']['playlists']
     
-    def get_playlist_tracks(self, playlist_id):
-        try:
-            # Ubah timeout menjadi 30 detik
-            resp = self.api_call('ds', f'v1/playlists/{playlist_id}/tracks', 
-                               params={'limit': 500}, timeout=30)
-            if resp and resp.get('status', {}).get('type') == 'OK':
-                 data = resp.get('data', [])
-                 if data: return data
-        except Exception:
-            pass
-             
-        try:
-            # Ubah timeout menjadi 30 detik
-            resp = self.api_call('ds', f'v1/shared-playlists/{playlist_id}/tracks', 
-                               params={'limit': 500}, timeout=30)
-            if resp and resp.get('status', {}).get('type') == 'OK':
-                 data = resp.get('data', [])
-                 if data: return data
-        except Exception:
-            pass
-
-        try:
-             # Ubah timeout menjadi 30 detik
-             resp = self.api_call('ds', f'v1/charts/{playlist_id}/tracks', 
-                                params={'limit': 500}, timeout=30)
-             if resp and resp.get('status', {}).get('type') == 'OK':
-                  data = resp.get('data', [])
-                  if data: return data
-        except Exception:
-            pass
-
+        def get_playlist_tracks(self, playlist_id):
+        endpoints = [
+            f'v1/playlists/{playlist_id}/tracks',
+            f'v1/shared-playlists/{playlist_id}/tracks',
+            f'v1/charts/{playlist_id}/tracks'
+        ]
+        
+        for ep in endpoints:
+            tracks = []
+            offset = 0
+            limit = 100  # Kurangi limit menjadi 100 agar server KKBox merespons lebih cepat
+            
+            while True:
+                try:
+                    resp = self.api_call('ds', ep, params={'limit': limit, 'offset': offset}, timeout=15)
+                    
+                    if not resp or resp.get('status', {}).get('type') != 'OK':
+                        break  # Pindah ke endpoint berikutnya jika gagal/kosong
+                        
+                    data = resp.get('data', [])
+                    if not data:
+                        break
+                        
+                    tracks.extend(data)
+                    
+                    if len(data) < limit:
+                        break  # Sudah mencapai akhir halaman
+                        
+                    offset += limit
+                except Exception:
+                    break  # Pindah ke endpoint berikutnya jika terkena timeout
+                    
+            if tracks:
+                return tracks
+                
         LOGGER.error(f"KKBox API: Gagal menemukan tracks di semua endpoint untuk ID {playlist_id}")
         return []
 
