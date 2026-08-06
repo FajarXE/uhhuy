@@ -220,7 +220,7 @@ class KkboxAPI:
             'offset': offset,
         })
         if not resp or resp['status']['type'] != 'OK':
-            raise self.exception('Artist not found')
+            raise self.exception('Gagal mengambil album artis (kemungkinan limit terlalu besar atau ID salah).')
         return resp['data']['album']
 
     def get_playlists(self, ids):
