@@ -241,6 +241,48 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
     
     return metadata
 
+async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
+    """
+    Memproses metadata untuk artis dan mengambil daftar rilis/album mereka.
+    """
+    client = user['bugs_api']
+    metadata = copy.deepcopy(base_meta)
+    metadata['tempfolder'] += f"{r_id}-temp/"
+
+    try:
+        # Mengambil profil artis
+        artist_data_list = await asyncio.to_thread(client.get_artist, artist_id)
+        if not artist_data_list or not artist_data_list[0].get('artist'):
+            raise BugsError("Artis tidak ditemukan.")
+        artist_data = artist_data_list[0].get('artist').get('result')
+
+        # Mengambil daftar album
+        albums_list_data = await asyncio.to_thread(client.get_artist_albums, artist_id)
+        albums_list = []
+        if albums_list_data and albums_list_data[0].get('artist_album_filter_release'):
+            albums_list = albums_list_data[0]['artist_album_filter_release'].get('list', [])
+            
+    except Exception as e:
+        LOGGER.error(f"Bugs: Gagal mendapatkan metadata artist {artist_id}: {e}")
+        raise BugsError(f"Gagal mengambil data artis: {e}")
+
+    metadata['itemid'] = artist_id
+    metadata['title'] = artist_data.get('artist_nm', 'Unknown Artist')
+    metadata['artist'] = metadata['title']
+    metadata['type'] = 'artist'
+    metadata['provider'] = 'Bugs'
+
+    cover_path = artist_data.get('image', {}).get('path')
+    if cover_path:
+        metadata['cover'] = await _process_cover(metadata, cover_path)
+        metadata['thumbnail'] = await _process_thumbnail(metadata, cover_path)
+
+    metadata['releases'] = albums_list
+    if not albums_list:
+        raise BugsError("Artis ini tidak memiliki rilis/album yang dapat diunduh.")
+
+    return metadata
+
 async def process_album_metadata(album_id: str, r_id: str, user: dict):
     """
     Memproses metadata untuk album.
