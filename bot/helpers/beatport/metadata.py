@@ -410,7 +410,9 @@ async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
                 break
             p += 1
             await asyncio.sleep(0.5)
-        except Exception:
+        except Exception as e:
+            # [FIX] Log error API ke konsol agar tidak gagal secara diam-diam
+            LOGGER.error(f"Beatport API Error saat mengambil rilis artis {artist_id} (Page {p}): {e}")
             break
 
     metadata = copy.deepcopy(base_meta)
@@ -428,7 +430,7 @@ async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
 
     metadata['releases'] = releases
     if not releases:
-        raise BeatportError("Artis ini tidak memiliki rilis/album yang dapat diunduh.")
+        raise BeatportError("Artis ini tidak memiliki rilis/album yang dapat diunduh atau API menolak akses.")
         
     return metadata
 
