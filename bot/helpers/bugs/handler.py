@@ -1,4 +1,4 @@
-# [GANTI FILE: bot/helpers/bugs/handler.py]
+# [GANTI SELURUH FILE: bot/helpers/bugs/handler.py]
 
 import aiohttp
 import aiofiles
@@ -10,15 +10,14 @@ import asyncio
 from pathvalidate import sanitize_filepath
 from config import Config
 
-# Impor metadata dan manager Bugs
 from .metadata import (
     process_track_metadata, 
     process_album_metadata,
+    process_artist_metadata,
     custom_url_parse
 )
 from .manager import BugsError, bugs_manager
 
-# Impor helper standar
 from ..uploder import *
 from ..metadata import set_metadata
 from ..message import edit_message
@@ -27,12 +26,10 @@ from ...settings import bot_set
 import bot.helpers.translations as lang
 from bot.logger import LOGGER
 
-# --- TAMBAHAN BARU: IMPOR MANAGER LIRIK ---
 try:
     from bot.helpers.lyrics.manager import lyrics_manager
 except ImportError:
     lyrics_manager = None
-# --- BATAS TAMBAHAN ---
 
 
 async def start_bugs(url: str, user: dict):
@@ -48,18 +45,54 @@ async def start_bugs(url: str, user: dict):
         elif media_type == 'album':
             await start_album(item_id, user)
             
+        elif media_type == 'artist':
+            await start_artist(item_id, user)
+            
         else:
             raise NotImplementedError(f"Tipe media Bugs '{media_type}' belum didukung.")
         
     except Exception as e:
         LOGGER.error(f"Error fatal di Bugs handler: {e}\n{traceback.format_exc()}")
-        # Melempar error agar download.py tahu tugasnya gagal
         raise e 
 
+async def start_artist(artist_id: str, user: dict):
+    """Handler untuk unduhan seluruh diskografi artis."""
+    try:
+        artist_meta = await process_artist_metadata(artist_id, user['r_id'], user)
+    except Exception as e:
+        raise Exception(f"Gagal mendapatkan metadata artist Bugs: {e}")
 
-async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, \
-    filepath=None, disable_link=False):
+    artist_folder = sanitize_filepath(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{artist_meta['provider']}/{artist_meta['title']}")
+    artist_meta['folderpath'] = artist_folder
 
+    upload_album = True
+    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
+    
+    if bot_set.artist_batch: 
+        upload_album = True if bot_set.upload_mode == 'Telegram' else False
+    if artist_zip: 
+        upload_album = False 
+
+    successful_albums = []
+    for album in artist_meta.get('releases', []):
+        album_id = str(album.get('album_id'))
+        if not album_id:
+            continue
+            
+        try:
+            await start_album(album_id, user, upload=upload_album)
+            successful_albums.append(album_id)
+        except Exception as e:
+            LOGGER.warning(f"Bugs: Gagal mengunduh rilis {album_id} milik {artist_meta['title']}: {e}")
+            continue
+
+    if not successful_albums:
+        raise Exception("Tidak ada rilis yang berhasil diunduh untuk artis ini.")
+
+    if not upload_album:
+        await artist_upload(artist_meta, user)
+
+async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
     client = user['bugs_api']
 
     if not track_meta:
@@ -72,7 +105,6 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
         filepath = sanitize_filepath(filepath)
 
-    # --- PERBAIKAN INDENTASI: PASTIKAN BARIS INI SEJAJAR DENGAN 'if not track_meta:' ---
     download_id = track_meta.get('download_id')
     download_quality = track_meta.get('download_quality_key')
     
@@ -80,16 +112,13 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         LOGGER.error(f"Metadata tidak lengkap untuk unduhan Bugs track {item_id}")
         return False
 
-    # --- LOGIKA FOLDER CD UNTUK MULTI-DISC ALBUM BUGS ---
     try:
         total_vol = int(track_meta.get('totalvolume', 1))
-        # Jika total CD/Volume lebih dari 1, buat sub-folder "CD X"
         if total_vol > 1:
             vol_num = track_meta.get('discnumber', '1')
             filepath = f"{filepath}/CD {vol_num}"
     except Exception:
         pass
-    # ----------------------------------------------------
 
     track_meta['folderpath'] = filepath
     
@@ -99,9 +128,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
-    # --- LOGIKA UNDUH BUGS ---
     try:
-        # 1. Dapatkan URL Stream (Async)
         stream_data = await asyncio.to_thread(
             client.get_stream, 
             int(download_id), 
@@ -113,10 +140,8 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
 
         download_url = stream_data.get('url')
             
-        # Pastikan direktori ada
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        # 2. Siapkan Kabel Radar UI Telegram (Hanya aktif untuk Single Track)
         details = None
         if upload and 'bot_msg' in user:
             details = {
@@ -125,7 +150,6 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                 'type': track_meta.get('type', 'Track').capitalize()
             }
 
-        # 3. Lempar tugas unduhan ke mesin Aria2 yang super cepat!
         from bot.helpers.utils import download_file
         err = await download_file(download_url, track_meta['filepath'], details=details)
         
@@ -136,12 +160,9 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     except Exception as e:
         LOGGER.error(f"Bugs dl_track gagal untuk {item_id}: {e}")
         return False
-    # --- BATAS LOGIKA UNDUH ---
 
     try:
-        # --- MODIFIKASI PENTING: Kirim user_id ke set_metadata agar lirik diambil ---
         await set_metadata(track_meta, user['user_id'])
-        # --- BATAS MODIFIKASI ---
     except FileNotFoundError:
         LOGGER.error(f"[Errno 2] File not found setelah download Bugs: {filepath}")
         return False
@@ -160,7 +181,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
 
 async def start_album(album_id: str, user: dict, upload=True):
     """
-    Handler untuk unduhan album (didasarkan pada handler.py provider lain)
+    Handler untuk unduhan album
     """
     try:
         album_meta = await process_album_metadata(album_id, user['r_id'], user)
@@ -175,24 +196,18 @@ async def start_album(album_id: str, user: dict, upload=True):
     if upload:
         album_meta['poster_msg'] = await post_art_poster(user, album_meta)
 
-    # --- TAMBAHAN: Salin Cover ke Folder Album Sebelum Zip ---
     try:
-        # Pastikan folder tujuan ada
         os.makedirs(album_folder, exist_ok=True)
         
-        # Cek apakah ada cover di metadata (ini path ke file temp)
         if album_meta.get('cover') and os.path.exists(album_meta['cover']):
-            # Salin ke folder album dengan nama cover.jpg
             cover_dest = os.path.join(album_folder, "cover.jpg")
             shutil.copy(album_meta['cover'], cover_dest)
             LOGGER.info(f"Berhasil menyalin cover ke: {cover_dest}")
     except Exception as e:
         LOGGER.warning(f"Gagal menyalin cover.jpg ke folder album: {e}")
-    # --- AKHIR TAMBAHAN ---
 
     tasks = []
     for track in album_meta['tracks']:
-        # Kirim track_meta (pre_data) ke start_track agar tidak perlu fetch ulang
         tasks.append(start_track(track['itemid'], user, track, False, album_folder))
 
     update_details = {
@@ -202,7 +217,6 @@ async def start_album(album_id: str, user: dict, upload=True):
         'type': album_meta['type']
     }
     
-    # Server Bugs memutus koneksi jika kita mencoba > 10 koneksi sekaligus
     task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
     
     successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
@@ -212,7 +226,5 @@ async def start_album(album_id: str, user: dict, upload=True):
     if not successful_tracks:
         raise Exception(f"Tidak ada lagu Bugs yang berhasil diunduh untuk album {album_meta['title']}.")
 
-    # Zipping dan upload diurus secara otomatis oleh uploader.py
-    # agar memunculkan Papan Global yang mulus tanpa kedipan!
     if upload:
         await album_upload(album_meta, user)
