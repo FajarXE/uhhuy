@@ -234,7 +234,8 @@ class BeatportAPI:
     async def get_artist(self, artist_id: str): return await self._get(f'catalog/artists/{artist_id}')
 
     async def get_artist_releases(self, artist_id: str, page: int = 1, per_page: int = 100):
-        return await self._get(f'catalog/artists/{artist_id}/releases', params={'page': page, 'per_page': per_page})
+        # Menggunakan endpoint releases dengan filter artist_id
+        return await self._get('catalog/releases/', params={'artist_id': artist_id, 'page': page, 'per_page': per_page})
     
     async def get_artist_tracks(self, artist_id: str, page: int = 1, per_page: int = 100):
         return await self._get(f'catalog/artists/{artist_id}/tracks', params={'page': page, 'per_page': per_page})
