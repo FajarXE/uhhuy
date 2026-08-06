@@ -13,7 +13,6 @@ from config import Config
 from .metadata import (
     process_track_metadata, 
     process_album_metadata,
-    process_playlist_metadata,
     process_artist_metadata,
     custom_url_parse
 )
@@ -45,9 +44,6 @@ async def start_kkbox(url: str, user: dict):
         
         elif media_type == 'album':
             await start_album(item_id, user)
-
-        elif media_type == 'playlist':
-            await start_playlist(item_id, user)
             
         elif media_type == 'artist':
             await start_artist(item_id, user)
@@ -255,66 +251,3 @@ async def start_album(album_id: str, user: dict, upload=True):
 
     if upload:
         await album_upload(album_meta, user)
-
-async def start_playlist(playlist_id: str, user: dict):
-    try:
-        pl_meta = await process_playlist_metadata(playlist_id, user['r_id'], user)
-    except Exception as e:
-        raise Exception(f"Gagal mendapatkan metadata playlist KKBox: {e}")
-
-    pl_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{pl_meta['provider']}/Playlists/{pl_meta['title']}"
-    pl_folder = sanitize_filepath(pl_folder)
-    pl_meta['folderpath'] = pl_folder
-    
-    os.makedirs(pl_folder, exist_ok=True)
-
-    siesta_cover = getattr(Config, 'PROJECT_SIESTA_COVER', None)
-    
-    if siesta_cover: pl_meta['cover'] = siesta_cover
-    elif os.path.exists("assets/project-siesta.png"): pl_meta['cover'] = os.path.abspath("assets/project-siesta.png")
-    elif os.path.exists("assets/project-siesta.jpg"): pl_meta['cover'] = os.path.abspath("assets/project-siesta.jpg")
-    elif not pl_meta.get('cover'):
-        if pl_meta.get('tracks') and len(pl_meta['tracks']) > 0:
-            fallback = pl_meta['tracks'][0].get('cover')
-            if fallback: pl_meta['cover'] = fallback
-
-    if pl_meta.get('cover'):
-        try: pl_meta['poster_msg'] = await post_art_poster(user, pl_meta)
-        except Exception: pass
-
-    tasks = []
-    for track in pl_meta['tracks']:
-        tasks.append(start_track(track['itemid'], user, track, False, pl_folder))
-
-    update_details = {
-        'text': lang.s.DOWNLOAD_PROGRESS,
-        'msg': user['bot_msg'],
-        'title': pl_meta['title'],
-        'type': 'playlist' 
-    }
-    
-    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
-    
-    successful_tracks = [pl_meta['tracks'][i] for i, result in enumerate(task_results) if result]
-    pl_meta['tracks'] = successful_tracks
-    pl_meta['totaltracks'] = len(successful_tracks)
-
-    if not successful_tracks:
-        raise Exception(f"Tidak ada lagu KKBox yang berhasil diunduh untuk playlist {pl_meta['title']}.")
-
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-
-    if pl_meta.get('cover'):
-        try:
-            cover_path = os.path.join(pl_folder, "cover.jpg")
-            if pl_meta['cover'].startswith('http'):
-                 async with aiohttp.ClientSession() as session:
-                    async with session.get(pl_meta['cover']) as resp:
-                        if resp.status == 200:
-                            async with aiofiles.open(cover_path, mode='wb') as f:
-                                await f.write(await resp.read())
-            elif os.path.exists(pl_meta['cover']):
-                await asyncio.to_thread(shutil.copy, pl_meta['cover'], cover_path)
-        except Exception: pass
-
-    await playlist_upload(pl_meta, user)
