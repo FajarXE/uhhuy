@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/genie/handler.py]
+# [GANTI SELURUH FILE: bot/helpers/genie/handler.py]
 
 import os
 import re
@@ -12,9 +12,9 @@ from config import Config
 from bot.logger import LOGGER
 from bot.settings import bot_set
 from bot.helpers.message import send_message, edit_message
-from bot.helpers.utils import format_string, post_art_poster, run_concurrent_tasks
+from bot.helpers.utils import format_string, post_art_poster, run_concurrent_tasks, fetch_zip_settings
 from bot.helpers.aria2_helper import aria2_download
-from bot.helpers.uploder import track_upload, album_upload, playlist_upload
+from bot.helpers.uploder import track_upload, album_upload, playlist_upload, artist_upload
 from bot.helpers.metadata import set_metadata, create_cover_file 
 
 from .manager import genie_manager
@@ -237,6 +237,130 @@ async def process_track(session, track_id, quality_pref, download_dir, details, 
         
     return metadata
 
+async def start_album(session, code, user, quality_pref, download_dir, upload=True):
+    """
+    Fungsi modular untuk mengunduh album agar dapat digunakan di tautan langsung 
+    maupun saat mengunduh dari diskografi artis secara massal.
+    """
+    api_url = f"https://info.genie.co.kr/info/album?axnm={code}"
+    album_data = await fetch_json(session, api_url)
+    
+    album_name = unquote(album_data['album_info']['album_name'])
+    album_artist = unquote(album_data['album_info']['artist_name'])
+    
+    album_dir_name = f"{album_artist} - {album_name}".replace("/", "_")
+    album_dir = os.path.join(download_dir, album_dir_name)
+    os.makedirs(album_dir, exist_ok=True)
+    
+    cover_url = unquote(album_data['album_info'].get("album_img_path600", ""))
+    if cover_url.startswith("//"):
+        cover_url = "https:" + cover_url
+    
+    cover_path = os.path.join(album_dir, "cover.jpg")
+    if cover_url:
+        try:
+            async with session.get(cover_url, headers=HEADERS) as resp:
+                if resp.status == 200:
+                    content = await resp.read()
+                    with open(cover_path, 'wb') as f:
+                        f.write(content)
+        except Exception as e:
+            LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
+
+    album_info_dict = album_data.get('album_info', {})
+    raw_date = str(album_info_dict.get('album_release_dt') or album_info_dict.get('album_date') or album_info_dict.get('record_date') or "")
+    raw_date = raw_date.replace('.', '-').replace('/', '-')
+    if len(raw_date) == 8 and raw_date.replace('-', '').isdigit(): 
+        rd = raw_date.replace('-', '')
+        release_date = f"{rd[:4]}-{rd[4:6]}-{rd[6:]}"
+    else:
+        release_date = raw_date
+        
+    publisher = unquote(album_info_dict.get('publisher_name') or album_info_dict.get('publisher_nm') or album_info_dict.get('agency_name') or "")
+    
+    song_list = album_data.get('album_song_list', [])
+    max_cd = 1
+    for s in song_list:
+        cd_no = str(s.get('album_cd', '1'))
+        if cd_no.isdigit() and int(cd_no) > max_cd:
+            max_cd = int(cd_no)
+    
+    album_metadata = {
+        'title': album_name,
+        'artist': album_artist,
+        'provider': 'Genie',
+        'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()),
+        'type': 'album',
+        'folderpath': album_dir,
+        'tracks': [], 
+        'cover': cover_path if os.path.exists(cover_path) else None,
+        'release_date': release_date, 
+        'date': release_date,
+        'totalvolumes': str(max_cd),   
+        'totalvolume': str(max_cd),    
+        'explicit': 'False'           
+    }
+    
+    if upload:
+        album_metadata['poster_msg'] = await post_art_poster(user, album_metadata)
+
+    user_id = user['user_id']
+    extra_meta_base = {
+        'user_id': user_id,
+        'album': album_name, 
+        'albumartist': album_artist,
+        'totaltracks': str(len(song_list)),
+        'totalvolume': str(max_cd),
+        'date': release_date,
+        'copyright': publisher,
+        'cover': cover_path if os.path.exists(cover_path) else None 
+    }
+    
+    tasks = []
+    for index, song in enumerate(song_list, start=1):
+        track_id = song['song_id']
+        
+        cur_extra = extra_meta_base.copy()
+        cur_extra['tracknumber'] = str(song.get('track_no', index))
+        cur_extra['discnumber'] = str(song.get('album_cd', '1'))
+        
+        tasks.append(process_track(session, track_id, quality_pref, album_dir, None, cur_extra))
+
+    update_details = {
+        'text': "Downloading...",
+        'msg': user.get('bot_msg'),
+        'title': album_name,
+        'type': 'Album',
+        'action': 'Download' 
+    }
+    
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
+    # Filter metadata untuk melewati error individual di Aria2
+    successful_tracks = [res for res in task_results if isinstance(res, dict)]
+
+    if not successful_tracks:
+        raise Exception("Semua lagu dalam album gagal diunduh.")
+
+    qualities_found = [t.get('quality', '') for t in successful_tracks]
+    if any("FLAC-24" in q for q in qualities_found):
+        album_metadata['quality'] = "FLAC-24"
+    elif any("FLAC-16" in q for q in qualities_found):
+        album_metadata['quality'] = "FLAC-16"
+    elif any("320kbps" in q for q in qualities_found):
+        album_metadata['quality'] = "MP3 320kbps"
+    elif any("192kbps" in q for q in qualities_found):
+        album_metadata['quality'] = "MP3 192kbps"
+    else:
+        album_metadata['quality'] = successful_tracks[0].get('quality', album_metadata['quality'])
+
+    album_metadata['tracks'] = successful_tracks
+    album_metadata['totaltracks'] = len(successful_tracks)
+    
+    if upload:
+        await album_upload(album_metadata, user)
+        
+    return album_metadata
+
 async def start_genie(link: str, user: dict):
     user_id = user['user_id']
     quality_pref = genie_manager.get_user_quality(user_id)
@@ -261,6 +385,7 @@ async def start_genie(link: str, user: dict):
 
     async with aiohttp.ClientSession() as session:
         if "xgnm" in link:
+            # --- Pengunduhan Track Tunggal ---
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🚀 Starting task...")
             
@@ -269,124 +394,14 @@ async def start_genie(link: str, user: dict):
             await track_upload(metadata, user)
 
         elif "axnm" in link:
+            # --- Pengunduhan Album ---
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🚀 Starting task...")
                 
-            api_url = f"https://info.genie.co.kr/info/album?axnm={code}"
-            album_data = await fetch_json(session, api_url)
-            
-            album_name = unquote(album_data['album_info']['album_name'])
-            album_artist = unquote(album_data['album_info']['artist_name'])
-            
-            album_dir_name = f"{album_artist} - {album_name}".replace("/", "_")
-            album_dir = os.path.join(download_dir, album_dir_name)
-            os.makedirs(album_dir, exist_ok=True)
-            
-            cover_url = unquote(album_data['album_info'].get("album_img_path600", ""))
-            if cover_url.startswith("//"):
-                cover_url = "https:" + cover_url
-            
-            cover_path = os.path.join(album_dir, "cover.jpg")
-            if cover_url:
-                try:
-                    async with session.get(cover_url, headers=HEADERS) as resp:
-                        if resp.status == 200:
-                            content = await resp.read()
-                            with open(cover_path, 'wb') as f:
-                                f.write(content)
-                except Exception as e:
-                    LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
-
-            album_info_dict = album_data.get('album_info', {})
-            raw_date = str(album_info_dict.get('album_release_dt') or album_info_dict.get('album_date') or album_info_dict.get('record_date') or "")
-            raw_date = raw_date.replace('.', '-').replace('/', '-')
-            if len(raw_date) == 8 and raw_date.replace('-', '').isdigit(): 
-                rd = raw_date.replace('-', '')
-                release_date = f"{rd[:4]}-{rd[4:6]}-{rd[6:]}"
-            else:
-                release_date = raw_date
-                
-            publisher = unquote(album_info_dict.get('publisher_name') or album_info_dict.get('publisher_nm') or album_info_dict.get('agency_name') or "")
-            
-            song_list = album_data.get('album_song_list', [])
-            max_cd = 1
-            for s in song_list:
-                cd_no = str(s.get('album_cd', '1'))
-                if cd_no.isdigit() and int(cd_no) > max_cd:
-                    max_cd = int(cd_no)
-            
-            album_metadata = {
-                'title': album_name,
-                'artist': album_artist,
-                'provider': 'Genie',
-                'quality': QUALITY_MAP_DISPLAY.get(quality_pref, quality_pref.upper()),
-                'type': 'album',
-                'folderpath': album_dir,
-                'tracks': [], 
-                'cover': cover_path if os.path.exists(cover_path) else None,
-                'release_date': release_date, 
-                'date': release_date,
-                'totalvolumes': str(max_cd),   
-                'totalvolume': str(max_cd),    
-                'explicit': 'False'           
-            }
-            
-            album_metadata['poster_msg'] = await post_art_poster(user, album_metadata)
-
-            extra_meta_base = {
-                'user_id': user_id,
-                'album': album_name, 
-                'albumartist': album_artist,
-                'totaltracks': str(len(song_list)),
-                'totalvolume': str(max_cd),
-                'date': release_date,
-                'copyright': publisher,
-                'cover': cover_path if os.path.exists(cover_path) else None 
-            }
-            
-            tasks = []
-            for index, song in enumerate(song_list, start=1):
-                track_id = song['song_id']
-                
-                cur_extra = extra_meta_base.copy()
-                cur_extra['tracknumber'] = str(song.get('track_no', index))
-                cur_extra['discnumber'] = str(song.get('album_cd', '1'))
-                
-                tasks.append(process_track(session, track_id, quality_pref, album_dir, None, cur_extra))
-
-            update_details = {
-                'text': "Downloading...",
-                'msg': user['bot_msg'],
-                'title': album_name,
-                'type': 'Album',
-                'action': 'Download' 
-            }
-            
-            task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
-            # Only keep results that are actual dictionaries (metadata), ignoring Exceptions
-            successful_tracks = [res for res in task_results if isinstance(res, dict)]
-
-            if not successful_tracks:
-                raise Exception("Semua lagu dalam album gagal diunduh.")
-
-            qualities_found = [t.get('quality', '') for t in successful_tracks]
-            if any("FLAC-24" in q for q in qualities_found):
-                album_metadata['quality'] = "FLAC-24"
-            elif any("FLAC-16" in q for q in qualities_found):
-                album_metadata['quality'] = "FLAC-16"
-            elif any("320kbps" in q for q in qualities_found):
-                album_metadata['quality'] = "MP3 320kbps"
-            elif any("192kbps" in q for q in qualities_found):
-                album_metadata['quality'] = "MP3 192kbps"
-            else:
-                album_metadata['quality'] = successful_tracks[0].get('quality', album_metadata['quality'])
-
-            album_metadata['tracks'] = successful_tracks
-            album_metadata['totaltracks'] = len(successful_tracks)
-            
-            await album_upload(album_metadata, user)
+            await start_album(session, code, user, quality_pref, download_dir, upload=True)
 
         elif "plmSeq" in link:
+            # --- Pengunduhan Playlist ---
             if 'bot_msg' in user:
                 await edit_message(user['bot_msg'], "🔍 **Fetching Genie Playlist...**")
                 
@@ -435,7 +450,6 @@ async def start_genie(link: str, user: dict):
             }
 
             task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
-            # Only keep results that are actual dictionaries (metadata), ignoring Exceptions
             successful_tracks = [res for res in task_results if isinstance(res, dict)]
 
             if not successful_tracks:
@@ -456,10 +470,91 @@ async def start_genie(link: str, user: dict):
             pl_metadata['tracks'] = successful_tracks
             pl_metadata['totaltracks'] = len(successful_tracks)
             
-            from bot.helpers.uploder import playlist_upload
             await playlist_upload(pl_metadata, user)
 
         elif "xxnm" in link:
-            raise NotImplementedError("Fitur unduhan Artist Batch untuk Genie belum diterapkan. Harap unduh per-Album.")
+            # --- Pengunduhan Diskografi Artis (Artist Batch) ---
+            if 'bot_msg' in user:
+                await edit_message(user['bot_msg'], "🔍 Mengambil rilis artis Genie...")
+                
+            artist_id = code
+            album_ids = []
+            
+            page = 1
+            artist_name = "Unknown Artist"
+            
+            while True:
+                api_url = f"https://www.genie.co.kr/detail/artistAlbum?xxnm={artist_id}&pg={page}"
+                try:
+                    resp = await session.get(api_url, headers=HEADERS)
+                    html = await resp.text()
+                except Exception as e:
+                    LOGGER.warning(f"Gagal mengambil HTML artis halaman {page}: {e}")
+                    break
+                    
+                # Ekstrak 'axnm' dari format desktop/mobile/JS internal
+                found_albums = re.findall(r"axnm=(\d+)", html)
+                found_albums.extend(re.findall(r"fnViewAlbum\('(\d+)'\)", html))
+                
+                # Ekstrak nama artis (hanya pada page 1)
+                if page == 1:
+                    title_match = re.search(r"<title>(.*?)</title>", html)
+                    if title_match:
+                        # Membersihkan string "Nama Artis - 지니"
+                        artist_name = title_match.group(1).split("-")[0].strip()
+
+                if not found_albums:
+                    break
+                    
+                new_albums = 0
+                for a_id in found_albums:
+                    if a_id not in album_ids:
+                        album_ids.append(a_id)
+                        new_albums += 1
+                        
+                if new_albums == 0:
+                    break
+                    
+                page += 1
+                await asyncio.sleep(0.5)
+                
+            if not album_ids:
+                raise Exception("Artis ini tidak memiliki rilis/album yang dapat diunduh (atau ID tidak valid).")
+                
+            # Evaluasi Logika Zip dan Batch Pengguna
+            playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
+            
+            upload_album = True
+            if bot_set.artist_batch: 
+                upload_album = True if bot_set.upload_mode == 'Telegram' else False
+            if artist_zip: 
+                upload_album = False 
+                
+            artist_folder = os.path.join(download_dir, f"Genie - {artist_name}".replace("/", "_"))
+            os.makedirs(artist_folder, exist_ok=True)
+                
+            artist_meta = {
+                'title': artist_name,
+                'artist': artist_name,
+                'provider': 'Genie',
+                'type': 'artist',
+                'folderpath': artist_folder,
+            }
+                
+            successful_albums = []
+            for a_id in album_ids:
+                try:
+                    await start_album(session, a_id, user, quality_pref, artist_folder, upload=upload_album)
+                    successful_albums.append(a_id)
+                except Exception as e:
+                    LOGGER.warning(f"Genie: Gagal mengunduh album {a_id}: {e}")
+                    continue
+                    
+            if not successful_albums:
+                raise Exception("Tidak ada album yang berhasil diunduh untuk artis ini.")
+                
+            if not upload_album:
+                await artist_upload(artist_meta, user)
+                
         else:
             raise Exception("URL Genie tidak valid atau tidak didukung.")
