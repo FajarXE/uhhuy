@@ -215,15 +215,33 @@ class KkboxAPI:
         return resp['data']
     
     def get_artist_albums(self, artist_id, limit, offset):
-        resp = self.api_call('ds', f'v2/artist/{artist_id}/album', params={
-            'limit': limit,
-            'offset': offset,
-        })
-        if not resp or resp.get('status', {}).get('type') != 'OK':
-            raise self.exception('Gagal mengambil album artis (API menolak request).')
+        endpoints = [
+            (f'v3/artist/{artist_id}/album', True),
+            (f'v2/artist/{artist_id}/album', True),
+            (f'v3/artist/{artist_id}/albums', True),
+            (f'v2/artist/{artist_id}/albums', True),
+            (f'v3/artist/{artist_id}/album', False), # Fallback tanpa parameter paginasi
+        ]
         
-        # Gunakan .get() untuk menghindari KeyError jika artist tidak memiliki album
-        return resp.get('data', {}).get('album', [])
+        for ep, use_pagination in endpoints:
+            params = {'limit': limit, 'offset': offset} if use_pagination else {}
+            try:
+                resp = self.api_call('ds', ep, params=params)
+                if resp and resp.get('status', {}).get('type') == 'OK':
+                    data = resp.get('data', {})
+                    
+                    # Jika data langsung berupa list
+                    if isinstance(data, list):
+                        return data
+                    
+                    # Coba berbagai kemungkinan struktur key dari respons
+                    albums = data.get('album') or data.get('albums') or data.get('data')
+                    if isinstance(albums, list):
+                        return albums
+            except Exception:
+                continue
+                
+        raise self.exception('API KKBox menolak request untuk mengambil daftar album artis di semua endpoint.')
 
     def get_playlists(self, ids):
         resp = self.api_call('ds', f'v1/playlists', params={
