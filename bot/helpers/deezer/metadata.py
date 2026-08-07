@@ -619,6 +619,29 @@ async def process_album_metadata(album_id:int, a_meta:dict, t_meta:list, r_id, u
     metadata['quality'] = metadata['tracks'][0]['quality']
     return metadata
 
+async def process_artist_metadata(artist_data: dict, r_id: str):
+    """Memproses metadata profil artis Deezer."""
+    metadata = copy.deepcopy(base_meta)
+    metadata['tempfolder'] += f"{r_id}-temp/"
+    
+    metadata['itemid'] = artist_data.get('ART_ID')
+    metadata['provider'] = 'Deezer'
+    metadata['type'] = 'artist'
+    
+    # Deezer menyimpan nama artis di parameter ART_NAME
+    metadata['artist'] = artist_data.get('ART_NAME', 'Unknown Artist')
+    metadata['title'] = metadata['artist']
+    
+    # Ekstraksi dan resolusi gambar profil artis
+    cover_id = artist_data.get('ART_PICTURE')
+    final_cover_url = None
+    if cover_id:
+        final_cover_url = f'https://cdn-images.dzcdn.net/images/artist/{cover_id}/1200x0-none-100-0-0.png'
+        
+    metadata['cover'] = await create_cover_file(final_cover_url, metadata)
+    
+    return metadata
+
 # --- Helper Functions (Standard) ---
 async def process_playlist_meta(raw_meta, r_id, user: dict = None):
     if not user: raise DeezerError("User arg required")
