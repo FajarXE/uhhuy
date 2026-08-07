@@ -347,6 +347,7 @@ async def process_album_metadata(album_data: dict, r_id, user: dict):
     return metadata
 
 async def process_artist_metadata(artist_data: dict, r_id, user: dict):
+    client = user['moov_api']
     metadata = copy.deepcopy(base_meta)
     metadata['tempfolder'] += f"{r_id}-temp/"
     
@@ -397,8 +398,27 @@ async def process_artist_metadata(artist_data: dict, r_id, user: dict):
             for item in data:
                 scrape_album_ids(item)
 
-    # Eksekusi sapu bersih ke seluruh JSON payload artis
+    # TAHAP 1: Cari di payload artis bawaan
     scrape_album_ids(artist_data)
+
+    # TAHAP 2: BONGKAR SUB-MODUL MOOV (Jika Tahap 1 kosong)
+    if not metadata['releases']:
+        LOGGER.info(f"Moov Artist: Rilis kosong di payload awal {metadata['title']}. Membongkar sub-modules via API...")
+        modules = artist_data.get('modules', [])
+        for mod in modules:
+            mod_id = mod.get('contentId') or mod.get('profileId') or mod.get('id')
+            if mod_id:
+                try:
+                    # Manfaatkan fungsi get_playlist_meta yang sudah ada untuk membuka setiap modul
+                    mod_data = await client.get_playlist_meta(mod_id)
+                    if mod_data:
+                        scrape_album_ids(mod_data)
+                except Exception as e:
+                    LOGGER.warning(f"Moov Artist: Gagal fetch sub-modul {mod_id}: {e}")
+
+    # Logging diagnostik jika API masih benar-benar menyembunyikan data
+    if not metadata['releases']:
+        LOGGER.error(f"Moov Artist: Gagal menemukan album untuk artis {metadata['title']}. Raw keys: {list(artist_data.keys())}")
 
     return metadata
 
