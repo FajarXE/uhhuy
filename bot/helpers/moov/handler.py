@@ -13,13 +13,12 @@ from mutagen.flac import FLAC, Picture
 from config import Config
 from bot.logger import LOGGER
 from ..message import edit_message
-from .metadata import process_album_metadata, process_playlist_metadata, process_track_metadata, process_artist_metadata
-from ..uploder import album_upload, playlist_upload, artist_upload
+from .metadata import process_album_metadata, process_playlist_metadata, process_track_metadata
+from ..uploder import album_upload, playlist_upload
 from ..utils import (
     format_string, run_concurrent_tasks, zip_handler, 
     fetch_zip_settings, post_art_poster, download_file
 )
-from ...settings import bot_set 
 
 SECRET_SALT = "F4:8E:09:CE:54:F7SeCrEtKkK"
 
@@ -49,12 +48,6 @@ async def start_moov(url: str, user: dict):
         LOGGER.info(f"Moov: Terdeteksi Chart/Playlist ID: {pid}")
         await start_playlist(pid, user)
 
-    # BARU: Deteksi link Artis
-    elif "/artist/" in clean_url:
-        raw_id = clean_url.split("/artist/")[-1]
-        artist_id = raw_id.split("?")[0].split("/")[0]
-        await start_artist(artist_id, user)
-
     elif "/share/" in clean_url and "/ADO/" in clean_url:
         try:
             parts = clean_url.split("/AUDIO/")
@@ -70,53 +63,7 @@ async def start_moov(url: str, user: dict):
             if "Gagal mengunduh" in str(e): raise e
             raise Exception(f"Gagal memparsing/memproses link Share Moov: {e}")
     else:
-        raise Exception("Link Moov tidak dikenali. Mendukung: Album, Lagu, Artis, Chart, Playlist, dan Share Link.")
-
-# BARU: Handler untuk Artis
-async def start_artist(artist_id: str, user: dict):
-    client = user['moov_api']
-    try:
-        raw_data = await client.get_artist_meta(artist_id)
-        if not raw_data: raise Exception("Metadata artis kosong.")
-        artist_meta = await process_artist_metadata(raw_data, user['r_id'], user)
-    except Exception as e:
-        raise Exception(f"Gagal mendapatkan metadata artis Moov: {e}")
-
-    artist_folder = os.path.abspath(os.path.join(
-        Config.DOWNLOAD_BASE_DIR, 
-        str(user['r_id']), 
-        "Moov", 
-        safe_name(artist_meta['title'])
-    ))
-    artist_meta['folderpath'] = artist_folder
-
-    upload_album = True
-    playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-    
-    if bot_set.artist_batch: 
-        upload_album = True if bot_set.upload_mode == 'Telegram' else False
-    if artist_zip: 
-        upload_album = False 
-
-    successful_albums = []
-    
-    for album in artist_meta.get('releases', []):
-        album_id = album.get('id') or album.get('albumId') or album.get('productId')
-        if not album_id: continue
-            
-        try:
-            # Gunakan logika start_album yang sudah ada
-            await start_album(album_id, user, upload=upload_album)
-            successful_albums.append(album_id)
-        except Exception as e:
-            LOGGER.warning(f"Moov: Gagal mengunduh rilis {album_id} milik {artist_meta['title']}: {e}")
-            continue
-
-    if not successful_albums:
-        raise Exception("Tidak ada rilis yang berhasil diunduh untuk artis ini.")
-
-    if not upload_album:
-        await artist_upload(artist_meta, user)
+        raise Exception("Link Moov tidak dikenali. Mendukung: Album, Lagu, Chart, Playlist, dan Share Link.")
 
 async def start_track_single(track_id, user):
     client = user['moov_api']
