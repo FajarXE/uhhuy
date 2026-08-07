@@ -346,6 +346,39 @@ async def process_album_metadata(album_data: dict, r_id, user: dict):
         
     return metadata
 
+async def process_artist_metadata(artist_data: dict, r_id, user: dict):
+    metadata = copy.deepcopy(base_meta)
+    metadata['tempfolder'] += f"{r_id}-temp/"
+    
+    titles = artist_data.get('engTitle', [])
+    if not titles: titles = artist_data.get('title', []) 
+    metadata['title'] = titles[0] if titles else "Unknown Artist"
+    metadata['artist'] = metadata['title']
+    metadata['provider'] = 'Moov'
+    metadata['type'] = 'artist'
+    metadata['itemid'] = artist_data.get('profileId')
+
+    # Cari gambar profil artis
+    images = artist_data.get('images', [])
+    if images:
+        raw_path = images[0].get('path')
+        metadata['cover_url'] = get_moov_cover(raw_path)
+        if metadata.get('cover_url'):
+            metadata['cover'] = await create_cover_file(metadata['cover_url'], metadata)
+
+    metadata['releases'] = []
+    
+    # Kumpulkan semua album (biasanya Moov membagi ke dalam modules)
+    raw_albums = find_products_recursive(artist_data)
+    
+    # Filter hanya produk yang memiliki tipe album
+    for item in raw_albums:
+        item_type = str(item.get('productType', '')).upper()
+        if item_type == 'ALBUM' or 'albumId' in item or 'totaltracks' in item:
+            metadata['releases'].append(item)
+
+    return metadata
+
 async def process_playlist_metadata(pl_data: dict, r_id, user: dict):
     metadata = copy.deepcopy(base_meta)
     metadata['tempfolder'] += f"{r_id}-temp/"
