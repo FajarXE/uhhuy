@@ -367,40 +367,38 @@ async def process_artist_metadata(artist_data: dict, r_id, user: dict):
             metadata['cover'] = await create_cover_file(metadata['cover_url'], metadata)
 
     metadata['releases'] = []
-    
-    # Eksplorasi eksplisit ke dalam struktur 'modules' -> 'products' Moov
-    modules = artist_data.get('modules', [])
-    for mod in modules:
-        products = mod.get('products', [])
-        for item in products:
-            item_type = str(item.get('productType', '')).upper()
-            
-            # Filter hanya item yang merupakan ALBUM atau menampung ID album
-            if item_type == 'ALBUM' or 'albumId' in item or 'album' in item:
-                album_id = item.get('productId') or item.get('albumId') or item.get('id')
-                
-                # Jika ID tersembunyi di dalam sub-objek 'album'
-                if isinstance(item.get('album'), dict):
-                    album_id = item['album'].get('id') or album_id
-                    
-                # Masukkan ke dalam daftar rilis jika belum ada (hindari duplikasi)
-                if album_id and not any(str(x.get('id')) == str(album_id) for x in metadata['releases']):
-                    item['id'] = str(album_id) # Standarisasi ID untuk handler
-                    metadata['releases'].append(item)
+    found_album_ids = set()
 
-    # Fallback: Jika data berada di luar struktur 'modules'
-    if not metadata['releases'] and artist_data.get('products'):
-        for item in artist_data.get('products', []):
-            item_type = str(item.get('productType', '')).upper()
-            if item_type == 'ALBUM' or 'albumId' in item or 'album' in item:
-                album_id = item.get('productId') or item.get('albumId') or item.get('id')
+    # Fungsi pencari ID album super agresif (rekursif)
+    def scrape_album_ids(data):
+        if isinstance(data, dict):
+            album_id = None
+            item_type = str(data.get('productType', '')).upper()
+            
+            # Deteksi ID Album dari berbagai kemungkinan key
+            if item_type == 'ALBUM':
+                album_id = data.get('productId') or data.get('id') or data.get('albumId')
+            elif 'albumId' in data:
+                album_id = data.get('albumId')
+            elif 'album' in data and isinstance(data['album'], dict):
+                album_id = data['album'].get('id') or data['album'].get('productId')
                 
-                if isinstance(item.get('album'), dict):
-                    album_id = item['album'].get('id') or album_id
-                    
-                if album_id and not any(str(x.get('id')) == str(album_id) for x in metadata['releases']):
-                    item['id'] = str(album_id)
-                    metadata['releases'].append(item)
+            # Jika ID valid ditemukan dan belum ada di daftar, tambahkan!
+            if album_id and str(album_id) not in found_album_ids:
+                found_album_ids.add(str(album_id))
+                metadata['releases'].append({'id': str(album_id)})
+                
+            # Lanjutkan pencarian ke seluruh cabang dictionary
+            for value in data.values():
+                scrape_album_ids(value)
+                
+        elif isinstance(data, list):
+            # Lanjutkan pencarian ke seluruh item dalam array
+            for item in data:
+                scrape_album_ids(item)
+
+    # Eksekusi sapu bersih ke seluruh JSON payload artis
+    scrape_album_ids(artist_data)
 
     return metadata
 
