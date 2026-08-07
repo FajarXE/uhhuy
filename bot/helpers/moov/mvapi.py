@@ -180,24 +180,49 @@ class MoovAPI:
             return None
 
     async def get_artist_meta(self, artist_id):
+        """Mengambil metadata artis dengan memindai berbagai alias refType yang digunakan Moov."""
         await self._ensure_active_session()
         session = await self._get_session()
-            
-        params = {
-            'profileId': artist_id,
-            'features': '24bit',
-            'deviceType': 'phones3',
-            'refType': 'ART',
-            'checksum': ''
-        }
-        try:
-            async with session.get(f"{self.base_url}/profile/getProfile", headers=self.headers, params=params) as resp:
-                if resp.status != 200: return None
-                data = await resp.json()
-                return data.get('dataObject')
-        except Exception as e:
-            LOGGER.error(f"Moov API Error (Artist {artist_id}): {e}")
-            return None
+        
+        # Urutan percobaan: Artis Standar, Profile Album, Profile Playlist, Kategori, Playlist Murni
+        attempts = [
+            ("profile/getProfile", "ART"),
+            ("profile/getProfile", "PAB"),
+            ("profile/getProfile", "PP"),
+            ("profile/getProfile", "CAT"),
+            ("playlist/getProfile", "CAT")
+        ]
+        
+        fallback_data = None
+        
+        for endpoint, ref_type in attempts:
+            params = {
+                'profileId': artist_id,
+                'features': '24bit',
+                'deviceType': 'phones3',
+                'refType': ref_type,
+                'checksum': ''
+            }
+            try:
+                async with session.get(f"{self.base_url}/{endpoint}", headers=self.headers, params=params) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        data_obj = data.get('dataObject')
+                        
+                        if data_obj:
+                            # Simpan respons pertama sebagai fallback jika semuanya gagal
+                            if fallback_data is None:
+                                fallback_data = data_obj
+                                
+                            # KUNCI UTAMA: Hanya terima payload jika memiliki array isi yang tidak kosong!
+                            if data_obj.get('modules') or data_obj.get('products') or data_obj.get('tracks'):
+                                return data_obj
+            except Exception as e:
+                LOGGER.warning(f"Moov API Error (Artist {artist_id} - {ref_type}): {e}")
+                continue
+                
+        # Jika semua refType menghasilkan array kosong, kembalikan data fallback
+        return fallback_data
 
     async def get_playlist_meta(self, pid):
         await self._ensure_active_session()
