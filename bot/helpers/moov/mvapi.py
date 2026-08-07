@@ -125,12 +125,20 @@ class MoovAPI:
             await self._get_session()
 
     async def get_module_meta(self, module_id):
-        """Mengambil isi sub-modul artis (album/singles) dengan mencoba berbagai refType."""
+        """Mengambil isi sub-modul artis dengan endpoint yang diperluas."""
         await self._ensure_active_session()
         session = await self._get_session()
         
-        attempts = ['PAB', 'ART', 'PP', 'CAT']
-        for ref_type in attempts:
+        # Tambahkan endpoint playlist/getProfile agar bisa membaca modul tipe daftar lagu
+        attempts = [
+            ("profile/getProfile", "PAB"),
+            ("profile/getProfile", "ART"),
+            ("profile/getProfile", "PP"),
+            ("profile/getProfile", "CAT"),
+            ("playlist/getProfile", "CAT")
+        ]
+        
+        for endpoint, ref_type in attempts:
             params = {
                 'profileId': module_id,
                 'features': '24bit',
@@ -139,11 +147,12 @@ class MoovAPI:
                 'checksum': ''
             }
             try:
-                async with session.get(f"{self.base_url}/profile/getProfile", headers=self.headers, params=params) as resp:
+                async with session.get(f"{self.base_url}/{endpoint}", headers=self.headers, params=params) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         data_obj = data.get('dataObject')
-                        if data_obj:
+                        # Pastikan payload mengembalikan data produk/lagu
+                        if data_obj and (data_obj.get('products') or data_obj.get('tracks') or data_obj.get('modules')):
                             return data_obj
             except Exception:
                 continue
