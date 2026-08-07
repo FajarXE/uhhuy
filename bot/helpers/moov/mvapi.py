@@ -145,6 +145,26 @@ class MoovAPI:
             LOGGER.error(f"Moov API Error (Album {album_id}): {e}")
             return None
 
+    async def get_artist_meta(self, artist_id):
+        await self._ensure_active_session()
+        session = await self._get_session()
+            
+        params = {
+            'profileId': artist_id,
+            'features': '24bit',
+            'deviceType': 'phones3',
+            'refType': 'ART',
+            'checksum': ''
+        }
+        try:
+            async with session.get(f"{self.base_url}/profile/getProfile", headers=self.headers, params=params) as resp:
+                if resp.status != 200: return None
+                data = await resp.json()
+                return data.get('dataObject')
+        except Exception as e:
+            LOGGER.error(f"Moov API Error (Artist {artist_id}): {e}")
+            return None
+
     async def get_playlist_meta(self, pid):
         await self._ensure_active_session()
         session = await self._get_session()
