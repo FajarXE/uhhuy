@@ -368,14 +368,39 @@ async def process_artist_metadata(artist_data: dict, r_id, user: dict):
 
     metadata['releases'] = []
     
-    # Kumpulkan semua album (biasanya Moov membagi ke dalam modules)
-    raw_albums = find_products_recursive(artist_data)
-    
-    # Filter hanya produk yang memiliki tipe album
-    for item in raw_albums:
-        item_type = str(item.get('productType', '')).upper()
-        if item_type == 'ALBUM' or 'albumId' in item or 'totaltracks' in item:
-            metadata['releases'].append(item)
+    # Eksplorasi eksplisit ke dalam struktur 'modules' -> 'products' Moov
+    modules = artist_data.get('modules', [])
+    for mod in modules:
+        products = mod.get('products', [])
+        for item in products:
+            item_type = str(item.get('productType', '')).upper()
+            
+            # Filter hanya item yang merupakan ALBUM atau menampung ID album
+            if item_type == 'ALBUM' or 'albumId' in item or 'album' in item:
+                album_id = item.get('productId') or item.get('albumId') or item.get('id')
+                
+                # Jika ID tersembunyi di dalam sub-objek 'album'
+                if isinstance(item.get('album'), dict):
+                    album_id = item['album'].get('id') or album_id
+                    
+                # Masukkan ke dalam daftar rilis jika belum ada (hindari duplikasi)
+                if album_id and not any(str(x.get('id')) == str(album_id) for x in metadata['releases']):
+                    item['id'] = str(album_id) # Standarisasi ID untuk handler
+                    metadata['releases'].append(item)
+
+    # Fallback: Jika data berada di luar struktur 'modules'
+    if not metadata['releases'] and artist_data.get('products'):
+        for item in artist_data.get('products', []):
+            item_type = str(item.get('productType', '')).upper()
+            if item_type == 'ALBUM' or 'albumId' in item or 'album' in item:
+                album_id = item.get('productId') or item.get('albumId') or item.get('id')
+                
+                if isinstance(item.get('album'), dict):
+                    album_id = item['album'].get('id') or album_id
+                    
+                if album_id and not any(str(x.get('id')) == str(album_id) for x in metadata['releases']):
+                    item['id'] = str(album_id)
+                    metadata['releases'].append(item)
 
     return metadata
 
