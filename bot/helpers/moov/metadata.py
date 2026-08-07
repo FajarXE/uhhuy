@@ -351,34 +351,31 @@ async def process_artist_metadata(artist_data: dict, r_id, user: dict):
     metadata = copy.deepcopy(base_meta)
     metadata['tempfolder'] += f"{r_id}-temp/"
     
-    # 1. Perbaikan Ekstraksi Nama Artis (Pencarian Lebih Luas)
-    metadata['title'] = "Unknown Artist"
-    titles = artist_data.get('engTitle') or artist_data.get('title') or artist_data.get('chiTitle')
+    # 1. Ekstraksi Nama Artis yang Tepat
+    artist_name = "Unknown Artist"
     
-    if titles and isinstance(titles, list) and len(titles) > 0:
-        metadata['title'] = titles[0]
-    elif isinstance(titles, str):
-        metadata['title'] = titles
+    # Cek dari author (objek paling umum untuk endpoint profil artis Moov)
+    author_obj = artist_data.get('author')
+    if isinstance(author_obj, dict):
+        artist_name = author_obj.get('name') or author_obj.get('profileName') or author_obj.get('title') or artist_name
+    elif isinstance(author_obj, str) and author_obj.strip():
+        artist_name = author_obj
         
-    if metadata['title'] == "Unknown Artist":
-        if artist_data.get('profileName'):
-            metadata['title'] = artist_data.get('profileName')
-        else:
-            auth = artist_data.get('author')
-            if isinstance(auth, dict):
-                metadata['title'] = auth.get('name', 'Unknown Artist')
-            elif isinstance(auth, str):
-                metadata['title'] = auth
+    if artist_name == "Unknown Artist":
+        titles = artist_data.get('engTitle') or artist_data.get('title') or artist_data.get('profileName')
+        if titles:
+            artist_name = titles[0] if isinstance(titles, list) else titles
 
+    metadata['title'] = str(artist_name)
     metadata['artist'] = metadata['title']
     metadata['provider'] = 'Moov'
     metadata['type'] = 'artist'
     metadata['itemid'] = artist_data.get('profileId')
 
-    # 2. Ekstraksi Gambar
-    images = artist_data.get('images', [])
+    # 2. Gambar Profil Artis
+    images = artist_data.get('images', []) or artist_data.get('largeImages', [])
     if images:
-        raw_path = images[0].get('path')
+        raw_path = images[0].get('path') if isinstance(images[0], dict) else str(images[0])
         metadata['cover_url'] = get_moov_cover(raw_path)
         if metadata.get('cover_url'):
             metadata['cover'] = await create_cover_file(metadata['cover_url'], metadata)
@@ -386,58 +383,54 @@ async def process_artist_metadata(artist_data: dict, r_id, user: dict):
     metadata['releases'] = []
     found_album_ids = set()
 
-    # 3. Fungsi Scraper yang Diperbarui (Mendukung refType: 'PAB')
+    # 3. Scraper ID Album Rekursif
     def scrape_album_ids(data):
         if isinstance(data, dict):
             album_id = None
             item_type = str(data.get('productType', '')).upper()
             ref_type = str(data.get('refType', '')).upper()
             
-            # A. Deteksi Moov Profile Album (PAB)
+            # Deteksi Album / Profile Album (PAB)
             if item_type == 'ALBUM' or ref_type == 'PAB':
                 album_id = data.get('productId') or data.get('profileId') or data.get('id') or data.get('albumId')
-            
-            # B. Deteksi dari lagu yang menginduk ke album
             elif 'albumId' in data:
                 album_id = data.get('albumId')
-                
-            # C. Deteksi dari sub-objek 'album'
             elif 'album' in data and isinstance(data['album'], dict):
                 album_id = data['album'].get('id') or data['album'].get('productId') or data['album'].get('profileId')
                 
-            # Jika ID ketemu dan belum diproses, simpan!
             if album_id and str(album_id) not in found_album_ids:
                 found_album_ids.add(str(album_id))
                 metadata['releases'].append({'id': str(album_id)})
                 
-            # Teruskan pencarian secara rekursif
             for value in data.values():
-                scrape_album_ids(value)
+                if isinstance(value, (dict, list)):
+                    scrape_album_ids(value)
                 
         elif isinstance(data, list):
             for item in data:
-                scrape_album_ids(item)
+                if isinstance(item, (dict, list)):
+                    scrape_album_ids(item)
 
-    # TAHAP 1: Ekstrak dari payload awal
+    # TAHAP 1: Scrape dari payload awal
     scrape_album_ids(artist_data)
 
-    # TAHAP 2: Jika masih kosong, bongkar sub-modules via API
-    if not metadata['releases']:
-        LOGGER.info(f"Moov Artist: Membongkar sub-modules untuk {metadata['title']}...")
-        modules = artist_data.get('modules', [])
+    # TAHAP 2: Bongkar sub-modul jika payload awal belum menghasilkan album
+    modules = artist_data.get('modules', [])
+    if modules:
+        LOGGER.info(f"Moov Artist ({metadata['title']}): Ditemukan {len(modules)} sub-modul. Membongkar isi modul...")
         for mod in modules:
-            # Perluas pencarian key ID untuk sub-modul (targetId, moduleId, dll)
             mod_id = mod.get('contentId') or mod.get('profileId') or mod.get('id') or mod.get('targetId') or mod.get('moduleId')
             if mod_id:
                 try:
-                    mod_data = await client.get_playlist_meta(mod_id)
+                    # Gunakan get_module_meta baru yang mendukung refType PAB/ART
+                    mod_data = await client.get_module_meta(mod_id)
                     if mod_data:
                         scrape_album_ids(mod_data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    LOGGER.warning(f"Moov Artist: Gagal membongkar sub-modul {mod_id}: {e}")
 
     if not metadata['releases']:
-        LOGGER.error(f"Moov Artist: Gagal menemukan album untuk artis {metadata['title']}. Raw keys: {list(artist_data.keys())}")
+        LOGGER.error(f"Moov Artist: Gagal menemukan album untuk artis {metadata['title']}.")
 
     return metadata
 
