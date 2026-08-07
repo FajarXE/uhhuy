@@ -351,20 +351,24 @@ async def process_artist_metadata(artist_data: dict, r_id, user: dict):
     metadata = copy.deepcopy(base_meta)
     metadata['tempfolder'] += f"{r_id}-temp/"
     
-    # 1. Ekstraksi Nama Artis yang Tepat
+    # 1. Ekstraksi Nama Artis Super Agresif
     artist_name = "Unknown Artist"
+    titles = artist_data.get('engTitle') or artist_data.get('title') or artist_data.get('chiTitle') or artist_data.get('profileName')
     
-    # Cek dari author (objek paling umum untuk endpoint profil artis Moov)
-    author_obj = artist_data.get('author')
-    if isinstance(author_obj, dict):
-        artist_name = author_obj.get('name') or author_obj.get('profileName') or author_obj.get('title') or artist_name
-    elif isinstance(author_obj, str) and author_obj.strip():
-        artist_name = author_obj
-        
-    if artist_name == "Unknown Artist":
-        titles = artist_data.get('engTitle') or artist_data.get('title') or artist_data.get('profileName')
-        if titles:
-            artist_name = titles[0] if isinstance(titles, list) else titles
+    if titles:
+        artist_name = titles[0] if isinstance(titles, list) else titles
+    else:
+        author_obj = artist_data.get('author')
+        if isinstance(author_obj, dict):
+            artist_name = author_obj.get('name') or author_obj.get('profileName') or author_obj.get('title') or "Unknown Artist"
+        elif isinstance(author_obj, str) and author_obj.strip():
+            artist_name = author_obj
+            
+    # Fallback terakhir dari tag jika API menyembunyikannya
+    if artist_name == "Unknown Artist" and artist_data.get('shareHashTags'):
+        tags = artist_data.get('shareHashTags')
+        if isinstance(tags, list) and len(tags) > 0:
+            artist_name = str(tags[0])
 
     metadata['title'] = str(artist_name)
     metadata['artist'] = metadata['title']
@@ -414,7 +418,7 @@ async def process_artist_metadata(artist_data: dict, r_id, user: dict):
     # TAHAP 1: Scrape dari payload awal
     scrape_album_ids(artist_data)
 
-    # TAHAP 2: Bongkar sub-modul jika payload awal belum menghasilkan album
+    # TAHAP 2: Jika kosong, bongkar sub-modul via API
     modules = artist_data.get('modules', [])
     if modules:
         LOGGER.info(f"Moov Artist ({metadata['title']}): Ditemukan {len(modules)} sub-modul. Membongkar isi modul...")
@@ -422,7 +426,6 @@ async def process_artist_metadata(artist_data: dict, r_id, user: dict):
             mod_id = mod.get('contentId') or mod.get('profileId') or mod.get('id') or mod.get('targetId') or mod.get('moduleId')
             if mod_id:
                 try:
-                    # Gunakan get_module_meta baru yang mendukung refType PAB/ART
                     mod_data = await client.get_module_meta(mod_id)
                     if mod_data:
                         scrape_album_ids(mod_data)
