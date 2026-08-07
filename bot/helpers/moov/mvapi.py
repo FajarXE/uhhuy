@@ -124,6 +124,31 @@ class MoovAPI:
             # Jika sesi mati total, coba buat baru tanpa login dulu
             await self._get_session()
 
+    async def get_module_meta(self, module_id):
+        """Mengambil isi sub-modul artis (album/singles) dengan mencoba berbagai refType."""
+        await self._ensure_active_session()
+        session = await self._get_session()
+        
+        attempts = ['PAB', 'ART', 'PP', 'CAT']
+        for ref_type in attempts:
+            params = {
+                'profileId': module_id,
+                'features': '24bit',
+                'deviceType': 'phones3',
+                'refType': ref_type,
+                'checksum': ''
+            }
+            try:
+                async with session.get(f"{self.base_url}/profile/getProfile", headers=self.headers, params=params) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        data_obj = data.get('dataObject')
+                        if data_obj:
+                            return data_obj
+            except Exception:
+                continue
+        return None
+
     async def get_album_meta(self, album_id):
         await self._ensure_active_session()
         # Gunakan lock sebentar untuk mengambil session pointer yang aman
