@@ -36,6 +36,9 @@ class Config:
 
         _free_artist = getenv("FREE_ARTIST_LIMIT")
         FREE_ARTIST_LIMIT = int(_free_artist) if _free_artist else 0  # Default 0 (VIP Only) jika limit aktif
+
+        _free_video = getenv("FREE_VIDEO_LIMIT")
+        FREE_VIDEO_LIMIT = int(_free_video) if _free_video else None
         
         _free_wait = getenv("FREE_WAIT_TIME")
         FREE_WAIT_TIME = int(_free_wait) if _free_wait else None
