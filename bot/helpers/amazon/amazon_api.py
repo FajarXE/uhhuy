@@ -442,24 +442,48 @@ class AmazonApi:
                 "x-amzn-hardware-device-type-id": device_type_id
             }
             
-            async with self.session.post(dmls_url, json=dmls_payload, headers=dmls_headers) as resp:
-                resp_text = await resp.text()
-                if (resp.status == 403 or (resp.status == 400 and "INVALID_TOKEN" in resp_text)) and attempt == 0:
-                    try:
-                        if await self.refresh_access_token(): continue
-                    except Exception as e:
-                        if str(e) == "AUTH_EXPIRED": raise Exception("Sesi kedaluwarsa permanen.")
+            # === IMPLEMENTASI RETRY (ANTI 502/RATE LIMIT) ===
+            mpd_text = ""
+            for dmls_attempt in range(4): # Maksimal 4 kali percobaan (0, 1, 2, 3)
+                async with self.session.post(dmls_url, json=dmls_payload, headers=dmls_headers) as resp:
+                    resp_text = await resp.text()
                     
-                    # --- FIX: Tampilkan error asli ---
-                    raise Exception(f"Gagal mengambil MPD (HTTP {resp.status}): {resp_text}")
+                    # 1. Penanganan Token Kedaluwarsa (Diserahkan ke loop utama)
+                    if (resp.status == 403 or (resp.status == 400 and "INVALID_TOKEN" in resp_text)) and attempt == 0:
+                        try:
+                            # Jika berhasil refresh, BREAK dari loop DMLS agar loop utama mengulang dari awal
+                            if await self.refresh_access_token(): break 
+                        except Exception as e:
+                            if str(e) == "AUTH_EXPIRED": raise Exception("Sesi kedaluwarsa permanen.")
+                        raise Exception(f"Gagal mengambil MPD (HTTP {resp.status}): {resp_text}")
+                        
+                    # 2. Penanganan Bad Gateway / Rate Limit CloudFront (502, 503, 504, 429)
+                    if resp.status in [429, 502, 503, 504]:
+                        if dmls_attempt < 3:
+                            wait_time = 2 ** (dmls_attempt + 1) # Jeda eksponensial: 2s, 4s, 8s
+                            LOGGER.warning(f"Amazon MPD Limit ({resp.status}). Retry {dmls_attempt+1}/3 dalam {wait_time}s untuk {asin}...")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            raise Exception(f"Gagal MPD ({resp.status}) setelah {dmls_attempt+1} percobaan. Terlalu banyak traffic.")
                     
-                if resp.status != 200: raise Exception(f"Gagal MPD ({resp.status}): {resp_text}")
-                
-                dmls_data = json.loads(resp_text)
-                if not dmls_data.get("contentResponseList"): raise Exception("Amazon menolak file.")
-                item_resp = dmls_data["contentResponseList"][0]
-                if item_resp.get("error"): raise Exception(f"Ditolak Amazon: {item_resp.get('error')}")
-                mpd_text = item_resp.get("manifest", "")
+                    # 3. HTTP Error Lainnya
+                    if resp.status != 200: 
+                        raise Exception(f"Gagal MPD ({resp.status}): {resp_text}")
+                    
+                    # 4. Berhasil Mengekstrak Data
+                    dmls_data = json.loads(resp_text)
+                    if not dmls_data.get("contentResponseList"): raise Exception("Amazon menolak file.")
+                    item_resp = dmls_data["contentResponseList"][0]
+                    if item_resp.get("error"): raise Exception(f"Ditolak Amazon: {item_resp.get('error')}")
+                    mpd_text = item_resp.get("manifest", "")
+                    break # Sukses, keluar dari loop retry DMLS
+
+            # Jika mpd_text kosong, berarti terjadi refresh token di atas. 
+            # Kita 'continue' untuk memicu loop utama (attempt) agar mengulang pembuatan header.
+            if not mpd_text:
+                continue 
+            # ================================================
 
             # --- 3. FILTERING KUALITAS & FISIK ---
             target_rank = {"LD": 1, "SD": 2, "HD": 3, "UHD": 4, "EC-3": 5, "AC-4": 6, "MHA1": 7, "MHM1": 8}.get(target_quality.upper(), 4)
