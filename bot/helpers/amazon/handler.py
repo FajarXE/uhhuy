@@ -168,17 +168,30 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
 
     device_id = client.tokens.get('device_id')
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
+    
+    # --- 1. TAMBAHKAN ID PELANGGAN & TOKEN ---
+    customer_id = client.tokens.get('customerId')
+    access_token = client.tokens.get('x-amz-access-token')
+    # -----------------------------------------
+
     lookup_base = client.base_url
     api_loc = client.api_location
-    music_territory = client.region.upper()
+    
+    # --- 2. FIX TERITORI GB ---
+    music_territory = "GB" if client.region.lower() == "uk" else client.region.upper()
 
     lookup_url = f"{lookup_base}{api_loc}/api/muse/legacy/lookup"
     
+    # --- 3. SUNTIKKAN REQUEST-ID & TOKEN KE HEADERS ---
+    import uuid
     lookup_headers = {
+        "x-amzn-requestid": str(uuid.uuid4()),
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
+        "x-amz-access-token": access_token,
         "x-amzn-device-type-id": device_type_id,
         "x-amzn-hardware-device-type-id": device_type_id
     }
+    # --------------------------------------------------
     
     track_asins = []
     playlist_title = "Unknown Playlist"
@@ -188,7 +201,9 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
     enum_options = ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]
     
     for req_content in enum_options:
+        # --- 4. SUNTIKKAN CUSTOMER ID KE PAYLOAD ---
         lookup_payload = {
+            "customerId": customer_id,
             "asins": [playlist_asin],
             "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
             "requestedContent": req_content, 
@@ -199,25 +214,45 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
         
         try:
             async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
+                resp_text = await resp.text()
+                
+                # --- 5. BONGKAR SILENT FAIL & AUTO-REFRESH TOKEN ---
+                if resp.status in [400, 401, 403]:
+                    LOGGER.info("Amazon: Token API Playlist kedaluwarsa, mencoba refresh...")
+                    if await client.refresh_access_token():
+                        lookup_headers["x-amz-access-token"] = client.tokens.get('x-amz-access-token')
+                        async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as retry_resp:
+                            resp_text = await retry_resp.text()
+                            if retry_resp.status != 200:
+                                LOGGER.error(f"Amazon API Error (Retry): {retry_resp.status} - {resp_text}")
+                                continue
+                    else:
+                        continue
+                elif resp.status != 200:
+                    LOGGER.error(f"Amazon API Error: {resp.status} - {resp_text}")
+                    continue
+                # ---------------------------------------------------
+
+                import json
+                data = json.loads(resp_text)
+                
+                # Targetkan playlistList (bukan albumList)
+                for pl in data.get("playlistList", []):
+                    playlist_title = pl.get("title", playlist_title)
+                    playlist_owner = pl.get("author", pl.get("owner", playlist_owner))
+                    playlist_cover = pl.get("image", playlist_cover)
                     
-                    # Targetkan playlistList, bukan albumList
-                    for pl in data.get("playlistList", []):
-                        playlist_title = pl.get("title", playlist_title)
-                        playlist_owner = pl.get("author", pl.get("owner", playlist_owner))
-                        playlist_cover = pl.get("image", playlist_cover)
-                        
-                        for track in pl.get("tracks", []):
-                            if isinstance(track, dict) and track.get("asin"):
-                                track_asins.append(track["asin"])
-                                
+                    for track in pl.get("tracks", []):
+                        if isinstance(track, dict) and track.get("asin"):
+                            track_asins.append(track["asin"])
+                            
             track_asins = list(dict.fromkeys(track_asins))
             
             if track_asins:
                 LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu Playlist dari Region {music_territory} ({req_content})")
                 break
         except Exception as e:
+            LOGGER.error(f"Amazon Lookup Error: {e}")
             continue
             
     if not track_asins:
@@ -322,23 +357,27 @@ async def start_album(album_asin: str, user: dict, url: str):
     device_id = client.tokens.get('device_id')
     device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
     
-    domain = urlparse.urlparse(url).netloc.lower()
+    # --- 1. TAMBAHKAN ID PELANGGAN & TOKEN ---
+    customer_id = client.tokens.get('customerId')
+    access_token = client.tokens.get('x-amz-access-token')
+    # -----------------------------------------
     
-    # --- FIX: PERCAYAKAN 100% PADA REGION AKUN (JANGAN TERTIPU DOMAIN URL) ---
     lookup_base = client.base_url
     api_loc = client.api_location
-    music_territory = client.region.upper()
-    
-    # (Seluruh blok 'if amazon.fr in domain' hingga 'elif amazon.com in domain' DIHAPUS)
-    # ------------------------------------------------------------------------
+    music_territory = "GB" if client.region.lower() == "uk" else client.region.upper()
 
     lookup_url = f"{lookup_base}{api_loc}/api/muse/legacy/lookup"
     
+    # --- 2. SUNTIKKAN REQUEST-ID & TOKEN KE HEADERS ---
+    import uuid
     lookup_headers = {
+        "x-amzn-requestid": str(uuid.uuid4()),
         "X-Amz-Target": "com.amazon.musicensembleservice.MusicEnsembleService.lookup",
+        "x-amz-access-token": access_token,
         "x-amzn-device-type-id": device_type_id,
         "x-amzn-hardware-device-type-id": device_type_id
     }
+    # --------------------------------------------------
     
     track_asins = []
     album_title = "Unknown Album"
@@ -348,7 +387,9 @@ async def start_album(album_asin: str, user: dict, url: str):
     enum_options = ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]
     
     for req_content in enum_options:
+        # --- 3. SUNTIKKAN CUSTOMER ID KE PAYLOAD ---
         lookup_payload = {
+            "customerId": customer_id,
             "asins": [album_asin],
             "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
             "requestedContent": req_content, 
@@ -359,29 +400,51 @@ async def start_album(album_asin: str, user: dict, url: str):
         
         try:
             async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
+                resp_text = await resp.text()
+                
+                # --- 4. BONGKAR SILENT FAIL & AUTO-REFRESH TOKEN ---
+                if resp.status in [400, 401, 403]:
+                    LOGGER.info("Amazon: Token API Album kedaluwarsa, mencoba refresh...")
+                    if await client.refresh_access_token():
+                        lookup_headers["x-amz-access-token"] = client.tokens.get('x-amz-access-token')
+                        # Ulangi request setelah token baru didapatkan
+                        async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as retry_resp:
+                            resp_text = await retry_resp.text()
+                            if retry_resp.status != 200:
+                                LOGGER.error(f"Amazon API Error (Retry): {retry_resp.status} - {resp_text}")
+                                continue
+                    else:
+                        continue
+                elif resp.status != 200:
+                    LOGGER.error(f"Amazon API Error: {resp.status} - {resp_text}")
+                    continue
+                # ---------------------------------------------------
+                
+                import json
+                data = json.loads(resp_text)
+                
+                for album in data.get("albumList", []):
+                    album_title = album.get("title", album_title)
+                    album_artist = album.get("primaryArtistName", album_artist)
+                    album_cover = album.get("image", album_cover)
                     
-                    for album in data.get("albumList", []):
-                        album_title = album.get("title", album_title)
-                        album_artist = album.get("primaryArtistName", album_artist)
-                        album_cover = album.get("image", album_cover)
-                        
-                        for track in album.get("tracks", []):
-                            if isinstance(track, dict) and track.get("asin"):
-                                track_asins.append(track["asin"])
-                                
-                    if not track_asins:
-                        for track in data.get("trackList", []):
-                            if isinstance(track, dict) and track.get("asin"):
-                                track_asins.append(track["asin"])
-                                
+                    for track in album.get("tracks", []):
+                        if isinstance(track, dict) and track.get("asin"):
+                            track_asins.append(track["asin"])
+                            
+                if not track_asins:
+                    for track in data.get("trackList", []):
+                        if isinstance(track, dict) and track.get("asin"):
+                            track_asins.append(track["asin"])
+                            
             track_asins = list(dict.fromkeys(track_asins))
             
             if track_asins:
                 LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu dari Region {music_territory} ({req_content})")
                 break
+                
         except Exception as e:
+            LOGGER.error(f"Amazon Lookup Error: {e}")
             continue
             
     if not track_asins:
