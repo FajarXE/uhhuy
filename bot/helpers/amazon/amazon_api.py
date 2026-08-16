@@ -236,7 +236,7 @@ class AmazonApi:
                     "spellCorrection": {"allowCorrection": True},
                     "upsell": {"allowUpsellForCatalogContent": False}
                 },
-                "musicTerritory": self.region.upper(),
+                "musicTerritory": "GB" if self.region.lower() == "uk" else self.region.upper(),
                 "query": album_title,
                 "locale": "en_US",
                 "resultSpecs": [{
@@ -305,7 +305,7 @@ class AmazonApi:
             
             if not customer_id: raise Exception("Missing 'customerId' di memori. Login ulang diperlukan.")
             marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
-            music_territory = self.region.upper()
+            music_territory = "GB" if self.region.lower() == "uk" else self.region.upper()
             
             lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
             lookup_payload = {
