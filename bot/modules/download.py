@@ -420,7 +420,7 @@ async def run_download_task(link: str, user: dict):
                         link_type = "album"
                     elif re.search(r'/(playlist|mix|chart)/', link_lower) or "playlist" in link_lower:
                         link_type = "playlist"
-                    elif re.search(r'/(artist|creator|user)/', link_lower):
+                    elif re.search(r'/(artist|creator|user|artistInfo)/', link_lower):
                         link_type = "artist"
                     # --- [TAMBAHAN: DETEKSI VIDEO] ---
                     elif re.search(r'/(video|mv)/', link_lower):
