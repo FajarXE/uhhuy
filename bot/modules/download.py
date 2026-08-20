@@ -416,14 +416,14 @@ async def run_download_task(link: str, user: dict):
                     
                     # 3. Identifikasi jenis tautan berdasarkan pola URL
                     link_type = "track" # Default ke track (Tanpa Limit)
-                    if re.search(r'/(album|release|ep|master|albumInfo)/', link_lower):
+                    if re.search(r'/(album|release|ep|master|albuminfo)(/|\?|$)', link_lower):
                         link_type = "album"
-                    elif re.search(r'/(playlist|mix|chart)/', link_lower) or "playlist" in link_lower:
+                    elif re.search(r'/(playlist|mix|chart)(/|\?|$)', link_lower) or "playlist" in link_lower:
                         link_type = "playlist"
-                    elif re.search(r'/(artist|creator|user|artistInfo)/', link_lower):
+                    elif re.search(r'/(artist|creator|user|artistinfo)(/|\?|$)', link_lower):
                         link_type = "artist"
                     # --- [TAMBAHAN: DETEKSI VIDEO] ---
-                    elif re.search(r'/(video|mv)/', link_lower):
+                    elif re.search(r'/(video|mv)(/|\?|$)', link_lower):
                         link_type = "video"
                     
                     # 4. Bersihkan riwayat lama yang sudah melewati batas tunggu dinamis
