@@ -416,7 +416,7 @@ async def run_download_task(link: str, user: dict):
                     
                     # 3. Identifikasi jenis tautan berdasarkan pola URL
                     link_type = "track" # Default ke track (Tanpa Limit)
-                    if re.search(r'/(album|release|ep|master|albuminfo)(/|\?|$)', link_lower):
+                    if re.search(r'/(album|release|ep|master|albuminfo|sets)(/|\?|$)', link_lower):
                         link_type = "album"
                     elif re.search(r'/(playlist|mix|chart)(/|\?|$)', link_lower) or "playlist" in link_lower:
                         link_type = "playlist"
