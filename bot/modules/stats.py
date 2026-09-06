@@ -201,7 +201,7 @@ async def stats_handler(client, message):
     if not bot_set.bot_public and user_id not in bot_set.auth_users and user_id not in bot_set.admins:
         return
 
-    msg = await message.reply_text("🔄 **Mengumpulkan Data...**", quote=True)
+    msg = await message.reply_text("🔄 **Mengumpulkan Data...**")
     
     final_text = generate_stats_text()
     
