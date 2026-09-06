@@ -123,7 +123,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
 
     if type == 'text':
         try:
-            msg = await client.send_message(chat_id, text, reply_markup=markup, disable_web_page_preview=True)
+            msg = await client.send_message(chat_id, text, reply_markup=markup)
             from bot.helpers.message import copy_to_channel
             await copy_to_channel(client, msg)
             return msg
@@ -454,8 +454,7 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
         if msg._client and msg._client.is_connected:
             return await msg.edit_text(
                 text=text,
-                reply_markup=markup,
-                disable_web_page_preview=True
+                reply_markup=markup
             )
         
         # Fallback ke Klien Global (aio)
@@ -464,8 +463,7 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
                 chat_id=msg.chat.id,
                 message_id=msg.id,
                 text=text,
-                reply_markup=markup,
-                disable_web_page_preview=True
+                reply_markup=markup
             )
 
     except MessageNotModified:
