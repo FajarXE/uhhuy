@@ -40,7 +40,7 @@ async def task_command(client: Client, message: Message):
         await asyncio.sleep(e.value)
         # Coba kirim lagi setelah tidur sejenak
         try:
-            sent_msg = await message.reply(text, reply_markup=markup)
+            sent_msg = await message.reply_text(text, reply_markup=markup)
             GLOBAL_UI_MSG[chat_id] = sent_msg
         except Exception:
             pass
