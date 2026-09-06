@@ -30,7 +30,7 @@ async def task_command(client: Client, message: Message):
     
     try:
         # Menyimpan pesan yang dikirim bot ke dalam variabel
-        sent_msg = await message.reply(text, reply_markup=markup, disable_web_page_preview=True)
+        sent_msg = await message.reply_text(text, reply_markup=markup)
         
         # Mendaftarkan pesan ini ke dalam memori Radar agar diperbarui secara real-time
         GLOBAL_UI_MSG[chat_id] = sent_msg
@@ -40,7 +40,7 @@ async def task_command(client: Client, message: Message):
         await asyncio.sleep(e.value)
         # Coba kirim lagi setelah tidur sejenak
         try:
-            sent_msg = await message.reply(text, reply_markup=markup, disable_web_page_preview=True)
+            sent_msg = await message.reply_text(text, reply_markup=markup)
             GLOBAL_UI_MSG[chat_id] = sent_msg
         except Exception:
             pass
@@ -68,7 +68,7 @@ async def status_callback(client: Client, query: CallbackQuery):
         
         text, markup = get_status_text(page=page)
         try:
-            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+            await query.message.edit_text(text, reply_markup=markup)
             try: await query.answer()
             except Exception: pass
         except FloodWait as e:
@@ -98,7 +98,7 @@ async def status_callback(client: Client, query: CallbackQuery):
         
         text, markup = get_status_text(page=page)
         try:
-            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+            await query.message.edit_text(text, reply_markup=markup)
             await query.answer("Status diperbarui!", show_alert=False)
         except FloodWait as e:
             # --- [FIX SPAM TOMBOL] JANGAN DITIDURKAN, TOLAK KLIKNYA! ---
