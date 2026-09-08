@@ -28,6 +28,9 @@ class Config:
 
         # --- [TAMBAHAN: VARIABEL LIMIT PENGGUNA GRATIS] ---
         # Jika tidak diisi di server/ .env, nilainya menjadi None (Fitur Mati)
+        _free_track = getenv("FREE_TRACK_LIMIT")
+        FREE_TRACK_LIMIT = int(_free_track) if _free_track else None
+        
         _free_album = getenv("FREE_ALBUM_LIMIT")
         FREE_ALBUM_LIMIT = int(_free_album) if _free_album else None
         
