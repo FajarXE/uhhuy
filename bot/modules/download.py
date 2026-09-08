@@ -436,56 +436,56 @@ async def run_download_task(link: str, user: dict):
                     # 5. Cek aturan limitasi
                     if link_type == "artist":
                         if Config.FREE_ARTIST_LIMIT <= 0:
-                            raise Exception("🔒 VIP Access Required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                            raise Exception("🔒 vip access required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
                         elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['artist']) >= Config.FREE_ARTIST_LIMIT:
                             oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['artist'][0]
                             wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
                             mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of {Config.FREE_ARTIST_LIMIT} Artist link(s). Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_ARTIST_LIMIT} Artist link(s). Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                         else:
                             USER_DOWNLOAD_HISTORY[user['user_id']]['artist'].append(current_time)
                             
                     elif link_type == "video":
                         if Config.FREE_VIDEO_LIMIT <= 0:
-                             raise Exception("🔒 VIP Access Required!\nDownloading Video links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                             raise Exception("🔒 vip access required!\nDownloading Video links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
                         elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['video']) >= Config.FREE_VIDEO_LIMIT:
                             oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['video'][0]
                             wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
                             mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of {Config.FREE_VIDEO_LIMIT} Video. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_VIDEO_LIMIT} Video. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                         else:
                             USER_DOWNLOAD_HISTORY[user['user_id']]['video'].append(current_time)
                     
                     elif link_type == "album":
                         if Config.FREE_ALBUM_LIMIT <= 0:
-                             raise Exception("🔒 VIP Access Required!\nDownloading Album links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                             raise Exception("🔒 vip access required!\nDownloading Album links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
                         elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['album']) >= Config.FREE_ALBUM_LIMIT:
                             oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['album'][0]
                             wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
                             mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of {Config.FREE_ALBUM_LIMIT} Albums. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_ALBUM_LIMIT} Albums. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                         else:
                             USER_DOWNLOAD_HISTORY[user['user_id']]['album'].append(current_time)
                             
                     elif link_type == "playlist":
                         if Config.FREE_PLAYLIST_LIMIT <= 0:
-                             raise Exception("🔒 VIP Access Required!\nDownloading Playlist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                             raise Exception("🔒 vip access required!\nDownloading Playlist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
                         elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['playlist']) >= Config.FREE_PLAYLIST_LIMIT:
                             oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'][0]
                             wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
                             mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of {Config.FREE_PLAYLIST_LIMIT} Playlist. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_PLAYLIST_LIMIT} Playlist. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                         else:
                             USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'].append(current_time)
                             
                     elif link_type == "track":
                         if Config.FREE_TRACK_LIMIT <= 0:
-                             raise Exception("🔒 VIP Access Required!\nDownloading Track links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                             raise Exception("🔒 vip access required!\nDownloading Track links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
                         elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['track']) >= Config.FREE_TRACK_LIMIT:
                             oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['track'][0]
                             wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
                             mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ Limit Reached!\nYou have reached the limit of {Config.FREE_TRACK_LIMIT} Tracks. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_TRACK_LIMIT} Tracks. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                         else:
                             USER_DOWNLOAD_HISTORY[user['user_id']]['track'].append(current_time)
             # =======================================================================
