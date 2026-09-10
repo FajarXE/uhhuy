@@ -78,7 +78,12 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     track_meta['folderpath'] = filepath
     
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
+    
+    # --- FIX FILE NAME TOO LONG ---
     safe_filename = sanitize_filepath(raw_filename)
+    # Potong nama file lagu maksimal 120 karakter
+    safe_filename = safe_filename[:120].strip()
+    
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
@@ -218,7 +223,12 @@ async def start_album(album_url: str, user: dict, upload=True):
     except Exception as e:
         raise Exception(f"Gagal mendapatkan metadata album HighResAudio: {e}")
 
-    album_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{album_meta['artist']}/{album_meta['title']}"
+    # --- FIX FILE NAME TOO LONG ---
+    # Batasi nama folder artis dan album maksimal 60 karakter
+    safe_artist = album_meta['artist'][:60].strip()
+    safe_title = album_meta['title'][:60].strip()
+    
+    album_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{safe_artist}/{safe_title}"
     album_folder = sanitize_filepath(album_folder)
     album_meta['folderpath'] = album_folder 
 
