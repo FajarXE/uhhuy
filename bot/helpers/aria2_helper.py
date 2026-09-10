@@ -59,7 +59,13 @@ async def aria2_download(url, filepath, details=None):
 
     # --- FIX AKAMAI 403: Pasangkan Proxy ke Aria2 ---
     if details and 'proxy' in details and details['proxy']:
-        options["all-proxy"] = details['proxy']
+        proxy_string = details['proxy']
+        
+        # Sanitasi scheme socks5h ke socks5 untuk kompatibilitas daemon Aria2c
+        if proxy_string.startswith("socks5h://"):
+            proxy_string = proxy_string.replace("socks5h://", "socks5://", 1)
+            
+        options["all-proxy"] = proxy_string
     # ------------------------------------------------
     
     payload_add = {
