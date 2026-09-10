@@ -2,7 +2,6 @@ aiofiles
 aiohttp
 aiolimiter
 motor
-gevent
 gunicorn
 flask
 mutagen
