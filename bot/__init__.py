@@ -14,7 +14,7 @@ plugins = dict(
 
 PORT = int(os.getenv("PORT", "0"))
 
-subprocess.Popen([f"gunicorn server:app --bind 0.0.0.0:{PORT} --worker-class gevent"], shell=True)
+subprocess.Popen([f"gunicorn server:app --bind 0.0.0.0:{PORT} --threads 4"], shell=True)
 
 class CMD(object):
     START = ["start"]
