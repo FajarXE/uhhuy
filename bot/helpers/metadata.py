@@ -805,64 +805,68 @@ async def get_audio_extension(path):
     except:
         return 'mp3'
 
-async def _download_cover_with_headers(url: str, destination: str):
+async def _download_cover_with_headers(url: str, destination: str, proxy: str = None):
     if not url: return
     
-    # --- [FIX] SANITASI URL TANPA PROTOKOL ---
     if url.startswith("//"):
         url = "https:" + url
         
-    # User-Agent browser agar tidak diblokir server gambar
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     
+    # Konfigurasi proxy untuk aiohttp jika disediakan
+    connector = None
+    client_proxy = None
+    if proxy:
+        if proxy.startswith('socks'):
+            try:
+                from aiohttp_socks import ProxyConnector
+                safe_proxy = proxy.replace('socks5h://', 'socks5://').replace('socks4a://', 'socks4://')
+                connector = ProxyConnector.from_url(safe_proxy)
+            except Exception:
+                pass
+        else:
+            client_proxy = proxy
+
     try:
-        # Pastikan folder tujuan benar-benar ada
         dir_path = os.path.dirname(destination)
         os.makedirs(dir_path, exist_ok=True)
         
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=30) as resp:
+        async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
+            get_kwargs = {}
+            if client_proxy:
+                get_kwargs['proxy'] = client_proxy
+                
+            async with session.get(url, timeout=30, **get_kwargs) as resp:
                 if resp.status == 200:
                     async with aiofiles.open(destination, 'wb') as f:
                         await f.write(await resp.read())
                 else:
-                    # Menangkap error 403 / 404 dari CDN (Menggunakan LOGGER global)
-                    LOGGER.error(f"Gagal download cover: HTTP {resp.status} dari CDN. URL: {url}")
+                    LOGGER.error(f"Gagal download cover: HTTP {resp.status} | URL: {url}")
     except Exception as e:
-        # Menangkap nama Exception jika isi 'e' kosong (seperti InvalidURL)
         LOGGER.error(f"Gagal download cover: {type(e).__name__} {e} | URL: {url}")
 
-async def create_cover_file(url:str, meta:dict, thumbnail=False): 
-    # 1. Validasi URL
+async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = None): 
     if not url: return './project-siesta.png'
 
-    # --- [FIX] SANITASI URL UNTUK HASH ---
     if url.startswith("//"):
         url = "https:" + url
 
-    # 2. [FIX] Gunakan MD5 Hash dari URL untuk nama file
     try:
         import hashlib
         url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
         filename = f"{url_hash}.jpg"
     except Exception:
-        # Fallback jika error hashing
         from datetime import datetime
         filename = f"temp_cover_{datetime.now().timestamp()}.jpg"
     
-    # 3. Tentukan Folder Temp
     temp_dir = meta.get('tempfolder', '.')
-    
-    # 4. Gabungkan Path
     cover_path = os.path.join(temp_dir, filename)
     
-    # 5. Download jika file belum ada
     if not os.path.exists(cover_path):
-        await _download_cover_with_headers(url, cover_path)
+        await _download_cover_with_headers(url, cover_path, proxy=proxy)
     
-    # 6. Cek hasil download
     if os.path.exists(cover_path) and os.path.getsize(cover_path) > 0:
         return cover_path
         
