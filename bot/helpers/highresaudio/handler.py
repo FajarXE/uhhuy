@@ -324,7 +324,6 @@ async def start_album(album_url: str, user: dict, upload=True):
                 await user['bot_msg'].reply_document(
                     document=booklet_path,
                     caption=f"**Booklet**\n{album_meta['title']} - {album_meta['artist']}",
-                    quote=True
                 )
             except Exception as e:
                 LOGGER.error(f"HighResAudio: Gagal mengunggah booklet: {e}")
