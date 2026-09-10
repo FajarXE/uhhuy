@@ -14,7 +14,7 @@ from config import Config
 from bot.logger import LOGGER
 from ..message import edit_message
 from .metadata import process_album_metadata, process_playlist_metadata, process_track_metadata
-from ..uploder import album_upload, playlist_upload
+from ..uploder import album_upload, playlist_upload, track_upload
 from ..utils import (
     format_string, run_concurrent_tasks, zip_handler, 
     fetch_zip_settings, post_art_poster, download_file
@@ -122,7 +122,7 @@ async def start_album(album_id, user, upload=True, filter_track_id=None):
         # [FIX] Hapus turbo_mode karena sekarang menggunakan Aria2 murni
         tasks.append(download_track(track, user, album_folder))
 
-    dl_type = 'Single Track' if filter_track_id else 'Album'
+    dl_type = 'Track' if filter_track_id else 'Album'
     
     ui_template = (
         "╭─ ᴘʀᴏɢʀᴇss\n"
@@ -154,14 +154,19 @@ async def start_album(album_id, user, upload=True, filter_track_id=None):
             track_data = successful_tracks[0]
             album_meta.update(track_data)
             album_meta['tracks'] = successful_tracks
-            album_meta['type'] = 'album'
+            # PERBAIKAN: Pastikan ini 'track', bukan 'album'
+            album_meta['type'] = 'track' 
     else:
         raise Exception("Gagal mengunduh lagu (Stream key kosong atau region blocked).")
 
     # Zipping dan upload diurus secara otomatis oleh uploader.py
     # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload:
-        await album_upload(album_meta, user)
+        # PERBAIKAN: Rute ke track_upload jika itu lagu tunggal
+        if filter_track_id and len(successful_tracks) == 1:
+            await track_upload(album_meta, user)
+        else:
+            await album_upload(album_meta, user)
 
 async def enrich_and_download_chart_track(shallow_track_meta, user, folderpath, album_cache):
     client = user['moov_api']
