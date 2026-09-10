@@ -808,6 +808,10 @@ async def get_audio_extension(path):
 async def _download_cover_with_headers(url: str, destination: str):
     if not url: return
     
+    # --- [FIX] SANITASI URL TANPA PROTOKOL ---
+    if url.startswith("//"):
+        url = "https:" + url
+        
     # User-Agent browser agar tidak diblokir server gambar
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -823,21 +827,29 @@ async def _download_cover_with_headers(url: str, destination: str):
                 if resp.status == 200:
                     async with aiofiles.open(destination, 'wb') as f:
                         await f.write(await resp.read())
+                else:
+                    # Menangkap error 403 / 404 dari CDN (Menggunakan LOGGER global)
+                    LOGGER.error(f"Gagal download cover: HTTP {resp.status} dari CDN. URL: {url}")
     except Exception as e:
-        LOGGER.error(f"Gagal download cover: {e}")
+        # Menangkap nama Exception jika isi 'e' kosong (seperti InvalidURL)
+        LOGGER.error(f"Gagal download cover: {type(e).__name__} {e} | URL: {url}")
 
 async def create_cover_file(url:str, meta:dict, thumbnail=False): 
     # 1. Validasi URL
     if not url: return './project-siesta.png'
 
+    # --- [FIX] SANITASI URL UNTUK HASH ---
+    if url.startswith("//"):
+        url = "https:" + url
+
     # 2. [FIX] Gunakan MD5 Hash dari URL untuk nama file
-    # Ini menjamin setiap URL gambar yang beda akan punya file sendiri
-    # tanpa tergantung pada itemid yang sering kosong.
     try:
+        import hashlib
         url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
         filename = f"{url_hash}.jpg"
     except Exception:
         # Fallback jika error hashing
+        from datetime import datetime
         filename = f"temp_cover_{datetime.now().timestamp()}.jpg"
     
     # 3. Tentukan Folder Temp
@@ -847,7 +859,6 @@ async def create_cover_file(url:str, meta:dict, thumbnail=False):
     cover_path = os.path.join(temp_dir, filename)
     
     # 5. Download jika file belum ada
-    # Logic ini sekarang aman karena nama file berdasarkan konten URL unik
     if not os.path.exists(cover_path):
         await _download_cover_with_headers(url, cover_path)
     
