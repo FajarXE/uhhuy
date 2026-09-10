@@ -102,7 +102,6 @@ async def process_album_metadata(album_url: str, r_id: str, user: dict):
                 cover_url_str = f"https://{raw_url.lstrip('/')}"
                 
     except Exception as e: 
-        from bot.logger import LOGGER
         LOGGER.warning(f"HighResAudio: Gagal mem-parsing URL cover: {e}")
 
     metadata['cover'] = await _process_cover(metadata, cover_url_str)
