@@ -19,10 +19,11 @@ def custom_url_parse(link: str):
     else:
         raise HighResAudioError('URL HighResAudio tidak valid atau tidak didukung.')
 
-async def _process_cover(metadata: dict, url: str):
+async def _process_cover(metadata: dict, url: str, proxy: str = None):
     if not url:
         return metadata['tempfolder'] + "cover.jpg"
-    return await create_cover_file(url, metadata)
+    # Teruskan proxy ke fungsi global
+    return await create_cover_file(url, metadata, proxy=proxy)
 
 async def process_album_metadata(album_url: str, r_id: str, user: dict):
     metadata = copy.deepcopy(base_meta)
@@ -104,7 +105,9 @@ async def process_album_metadata(album_url: str, r_id: str, user: dict):
     except Exception as e: 
         LOGGER.warning(f"HighResAudio: Gagal mem-parsing URL cover: {e}")
 
-    metadata['cover'] = await _process_cover(metadata, cover_url_str)
+    # Ambil proxy dari client jika ada
+    client_proxy = getattr(client, 'proxy', None)
+    metadata['cover'] = await _process_cover(metadata, cover_url_str, proxy=client_proxy)
     metadata['thumbnail'] = metadata['cover']
 
     metadata['tracks'] = []
