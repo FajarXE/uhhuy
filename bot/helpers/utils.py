@@ -593,11 +593,13 @@ async def progress_message(done, total, details):
         return
     import time
     import math
+    import random
     now = time.time()
     
-    # ANTI FLOODWAIT: Edit delay minimum 10.0 detik
+    # ANTI FLOODWAIT: Edit delay minimum 10.0 detik + jitter
     if 'last_updated' in details:
-        if now - details['last_updated'] < 10.0 and done < total:
+        delay = 10.0 + random.uniform(0, 1.5) # <-- Jeda acak 10 hingga 11.5 detik
+        if now - details['last_updated'] < delay and done < total:
             return
     details['last_updated'] = now
 
@@ -702,8 +704,9 @@ async def progress_message(done, total, details):
         
         for cid, m in targets.items():
             msg_id = m.id
-            # Rem Per-Pesan: Blokir update jika pesan baru diedit < 10 detik yang lalu
-            if msg_id in GLOBAL_UI_LAST_UPDATE and (now - GLOBAL_UI_LAST_UPDATE[msg_id] < 10.0) and done < total:
+            # Rem Per-Pesan: Blokir update dengan jeda acak
+            delay_ui = 10.0 + random.uniform(0, 1.0)
+            if msg_id in GLOBAL_UI_LAST_UPDATE and (now - GLOBAL_UI_LAST_UPDATE[msg_id] < delay_ui) and done < total:
                 continue
                 
             GLOBAL_UI_LAST_UPDATE[msg_id] = now
