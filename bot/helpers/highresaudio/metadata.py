@@ -83,12 +83,27 @@ async def process_album_metadata(album_url: str, r_id: str, user: dict):
     cover_url_str = None
     try:
         cover_data = data.get('cover') 
+        
+        # Ekstrak URL mentah terlebih dahulu
+        raw_url = None
         if isinstance(cover_data, dict):
-            file_url = cover_data.get('master', {}).get('file_url')
-            if file_url: cover_url_str = f"https://{file_url}"
+            raw_url = cover_data.get('master', {}).get('file_url')
         elif isinstance(cover_data, str):
-            cover_url_str = cover_data
-    except: pass 
+            raw_url = cover_data
+            
+        # Sanitasi URL agar tidak dobel 'https://' atau kehilangan protokol
+        if raw_url:
+            if raw_url.startswith("http"):
+                cover_url_str = raw_url
+            elif raw_url.startswith("//"):
+                cover_url_str = f"https:{raw_url}"
+            else:
+                # Pastikan tidak ada slash berlebih di awal string
+                cover_url_str = f"https://{raw_url.lstrip('/')}"
+                
+    except Exception as e: 
+        from bot.logger import LOGGER
+        LOGGER.warning(f"HighResAudio: Gagal mem-parsing URL cover: {e}")
 
     metadata['cover'] = await _process_cover(metadata, cover_url_str)
     metadata['thumbnail'] = metadata['cover']
