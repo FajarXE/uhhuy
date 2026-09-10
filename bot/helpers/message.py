@@ -197,6 +197,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 return 
 
             now = time.time()
+            import random
+            delay = 10.0 + random.uniform(0, 1.5) # <-- Jeda acak
             if msg and (now - last_update_time > 10.0 or current == total):
                 diff = now - start_time
                 if diff < 1: diff = 1
@@ -294,8 +296,9 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     
                     for cid, m in targets.items():
                         msg_id = m.id
-                        # Pasang rem yang sama saat proses upload
-                        if msg_id in GLOBAL_UI_LAST_UPDATE and (now - GLOBAL_UI_LAST_UPDATE[msg_id] < 10.0) and current < total:
+                        # Pasang rem yang sama dengan jeda acak
+                        delay_ui = 10.0 + random.uniform(0, 1.0)
+                        if msg_id in GLOBAL_UI_LAST_UPDATE and (now - GLOBAL_UI_LAST_UPDATE[msg_id] < delay_ui) and current < total:
                             continue
                             
                         GLOBAL_UI_LAST_UPDATE[msg_id] = now
