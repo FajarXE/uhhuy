@@ -131,6 +131,23 @@ class KKBoxLoginManager:
         except Exception as e:
             return False, str(e)
 
+    async def get_user_clients(self, user_id: int) -> list:
+        """Mendapatkan daftar klien privat milik user dengan Lazy-Loading."""
+        # Jika belum ada di memori RAM, muat dari database
+        if user_id not in self.user_clients:
+            user_data = await database.get_user_settings(user_id)
+            if user_data:
+                accounts_list = user_data.get('kkbox_accounts', [])
+                if accounts_list:
+                    LOGGER.info(f"KKBox Manager: Memuat ulang {len(accounts_list)} sesi privat untuk User {user_id}...")
+                    for auth_data in accounts_list:
+                        await self.add_user_account(user_id, auth_data)
+                        
+        pool = self.user_clients.get(user_id)
+        if pool and pool['clients']:
+            return pool['clients']
+        return []
+
     async def remove_specific_user_account(self, user_id: int, target_email: str):
         """Menghapus akun spesifik dari pool Private Session."""
         if user_id in self.user_clients:
