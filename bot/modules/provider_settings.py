@@ -322,6 +322,67 @@ async def tidal_remove_specific_cb(c: Client, cb: CallbackQuery):
         # Refresh tampilan menu untuk update daftar
         await tidal_auth_cb(c, cb)
 
+# --- TAMBAHKAN DI BAGIAN BAWAH FILE ---
+@Client.on_message(filters.command("tidal_global"))
+async def td_global_auth_cmd(client, message):
+    if not await check_user(message.from_user.id, restricted=True): return
+    
+    args = message.text.split()
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/tidal_global user_id refresh_token [country_code]</code>\n\n"
+            "Contoh: <code>/tidal_global 12345678 token_abcd... US</code>"
+        )
+    
+    t_uid = args[1].strip()
+    t_token = args[2].strip()
+    t_cc = args[3].upper() if len(args) > 3 else "US"
+    
+    status_msg = await message.reply_text("🔄 **Verifying Tidal Global Account...**")
+    
+    auth_data = {
+        'refresh_token': t_token,
+        'country_code': t_cc,
+        'user_id': t_uid
+    }
+    
+    try:
+        # Load database 
+        all_settings = await database.get_variable()
+        if not all_settings:
+            all_settings = {}
+        accounts_list = all_settings.get("TIDAL_ACCOUNTS_LIST", [])
+        
+        # Cek Duplikasi
+        if any(str(acc.get('user_id')) == str(t_uid) for acc in accounts_list):
+            return await status_msg.edit_text("⚠️ Akun ini sudah ada di daftar Global.")
+            
+        # Uji Coba Login dengan Tidal API
+        from bot.helpers.tidal.tidal_api import TidalApi
+        temp_client = TidalApi()
+        await temp_client.login_from_saved(auth_data)
+        sub_type = getattr(temp_client, 'sub_type', 'UNKNOWN')
+        await temp_client.close()
+        
+        # Simpan ke Database
+        accounts_list.append(auth_data)
+        await database.set_variable('TIDAL_ACCOUNTS_LIST', accounts_list)
+        
+        # Reload Manager agar load balancing langsung memutar akun baru
+        await tidal_manager.initialize_clients()
+        
+        await status_msg.edit_text(
+            f"✅ **Login Global Berhasil!**\n\n"
+            f"ID: <code>{t_uid}</code>\n"
+            f"Region: {t_cc}\n"
+            f"Tipe: {sub_type}\n\n"
+            f"Akun ini sekarang masuk dalam Load Balancing Global bot."
+        )
+        
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Login Gagal:**\n<code>{str(e)}</code>")
+
 
 #----------------
 # BEATPORT
