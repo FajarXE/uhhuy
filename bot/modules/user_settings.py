@@ -2040,10 +2040,20 @@ async def uset_kkbox(client, query):
     to_set = qual_map_display.get(to_set_display)
     if not to_set:
         return await query.answer("Kualitas tidak valid.", True)
-    if not kkbox_manager or not kkbox_manager.clients:
+        
+    user_id = query.from_user.id
+    has_client = False
+    if kkbox_manager:
+        if getattr(kkbox_manager, 'clients', []):
+            has_client = True
+        else:
+            user_dict = bot_set.user_data.get(user_id, {})
+            if user_dict.get('kkbox_accounts'):
+                has_client = True
+
+    if not has_client:
         await query.answer("Layanan KKBox tidak aktif!", show_alert=True)
         return
-    user_id = query.from_user.id
     
     await kkbox_manager.setup_quality(user_id, to_set) 
     bot_set.user_data.setdefault(user_id, {})['kkbox_qual'] = to_set 
