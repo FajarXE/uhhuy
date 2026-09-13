@@ -169,13 +169,15 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                 break 
             else:
                 LOGGER.warning(f"KKBox: CDN 404 untuk {track_meta['title']}. Mencoba tiket baru ({attempt + 1}/{max_retries})...")
-                await asyncio.sleep(2.5) 
+                # Gunakan jeda dinamis: 4 detik, lalu 6 detik, dst.
+                await asyncio.sleep(4.0 + (attempt * 2.0)) 
 
         except Exception as e:
             LOGGER.error(f"KKBox dl_track error untuk {item_id}: {e}")
             if attempt == max_retries - 1:
                 return False
-            await asyncio.sleep(2)
+            # Jeda sebelum retry berikutnya
+            await asyncio.sleep(3.0)
 
     if err or not os.path.exists(temp_filepath):
         LOGGER.error(f"KKBox: Aria2 gagal mengunduh {track_meta['title']} setelah {max_retries} percobaan.")
@@ -242,7 +244,7 @@ async def start_album(album_id: str, user: dict, upload=True):
         'type': album_meta['type']
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=4)
     
     successful_tracks = [album_meta['tracks'][i] for i, result in enumerate(task_results) if result]
     album_meta['tracks'] = successful_tracks
