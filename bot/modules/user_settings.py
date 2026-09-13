@@ -1137,6 +1137,105 @@ async def uset_amz_instr_handler(client, query):
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
+# --- COMMAND LOGIN KKBOX ---
+@Client.on_message(filters.command("kkbox_login"))
+async def uset_kkb_login_cmd(client, message):
+    if not await check_user(msg=message): return
+
+    user_id = message.from_user.id
+    args = message.text.split()
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/kkbox_login email password [proxy]</code>\n\n"
+            "Contoh: <code>/kkbox_login myemail@gmail.com pass123 http://proxy:port</code>"
+        )
+    
+    email = args[1].strip()
+    password = args[2].strip()
+    proxy = args[3].strip() if len(args) > 3 else None
+    
+    status_msg = await message.reply_text("🔄 **Verifying KKBox Account...**")
+    auth_data = {'email': email, 'password': password, 'proxy': proxy}
+    
+    try:
+        user_data_mem = bot_set.user_data.setdefault(user_id, {})
+        accounts_list = user_data_mem.get('kkbox_accounts', [])
+        
+        if any(acc.get('email') == email for acc in accounts_list):
+            return await status_msg.edit_text("⚠️ Akun ini sudah ada di daftar Private Session Anda.")
+            
+        success, info = await kkbox_manager.add_user_account(user_id, auth_data)
+        
+        if success:
+            accounts_list.append(auth_data)
+            user_data_mem['kkbox_accounts'] = accounts_list
+            await database.save_user_settings(user_id, {'kkbox_accounts': accounts_list})
+            await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun <code>{email}</code> ditambahkan ke sesi privat Anda.")
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+
+# --- CALLBACK MENU AUTH KKBOX ---
+@Client.on_callback_query(filters.regex("^ukk_auth_menu"))
+async def uset_kkb_auth_handler(client, query):
+    if not await check_user(msg=query.message): return
+    
+    user_id = query.from_user.id
+    accounts_list = bot_set.user_data.get(user_id, {}).get('kkbox_accounts', [])
+    
+    text = "🔐 **KKBOX PRIVATE SESSION (MULTI-ACCOUNT)**\n\n"
+    
+    if accounts_list:
+        text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
+        text += "Bot akan menggunakan akun-akun ini secara bergantian (Load Balancing).\n\n"
+        for i, acc in enumerate(accounts_list):
+            proxy_status = "Aktif" if acc.get('proxy') else "Tidak"
+            text += f"**{i+1}. Email:** `{acc['email']}` | Proxy: {proxy_status}\n"
+    else:
+        text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot menggunakan akun Global (Shared) jika tersedia.\n"
+
+    from bot.helpers.buttons.settings import kkbox_user_auth_buttons
+    await edit_message(query.message, text, markup=kkbox_user_auth_buttons(accounts_list))
+
+# --- CALLBACK HAPUS AKUN KKBOX ---
+@Client.on_callback_query(filters.regex(r"^ukk_rm_(.+)"))
+async def uset_kkb_remove_specific(client, query):
+    if not await check_user(msg=query.message): return
+    
+    user_id = query.from_user.id
+    target_email = query.matches[0].group(1)
+    
+    accounts_list = bot_set.user_data.get(user_id, {}).get('kkbox_accounts', [])
+    new_list = [acc for acc in accounts_list if acc.get('email') != target_email]
+    
+    bot_set.user_data[user_id]['kkbox_accounts'] = new_list
+    await database.save_user_settings(user_id, {'kkbox_accounts': new_list})
+    await kkbox_manager.remove_specific_user_account(user_id, target_email)
+    
+    await query.answer(f"✅ Akun berhasil dihapus.", True)
+    await uset_kkb_auth_handler(client, query)
+
+# --- CALLBACK INSTRUKSI KKBOX ---
+@Client.on_callback_query(filters.regex("^ukk_instr"))
+async def uset_kkb_instr_handler(client, query):
+    if not await check_user(msg=query.message): return
+    text = (
+        "📝 **CARA LOGIN KKBOX**\n\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/kkbox_login email password [proxy]</code>\n\n"
+        "*(Proxy bersifat opsional, isi jika Anda butuh bypass region tertentu)*"
+    )
+    from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from pyrogram.enums import ButtonStyle
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="ukk_auth_menu", style=ButtonStyle.PRIMARY)]]
+    await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
+
+
 # ==================================
 # MENU PENGATURAN UTAMA
 # ==================================
