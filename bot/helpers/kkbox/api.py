@@ -98,6 +98,7 @@ class KkboxAPI:
             return None
 
     def login(self, email, password):
+        self.email = email
         md5 = MD5.new()
         md5.update(password.encode('utf-8'))
         pswd = md5.hexdigest()
