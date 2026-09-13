@@ -884,16 +884,24 @@ async def start_link(link: str, user: dict) -> None:
     elif link.startswith(tuple(kkbox)):
         user['provider'] = 'KKBox'
         
-        if not kkbox_manager.clients:
-            raise Exception("Maaf, tidak ada akun KKBox bot yang aktif saat ini.")
+        user_clients = []
+        if kkbox_manager and kkbox_manager.has_private_session(user['user_id']):
+            user_clients = kkbox_manager.user_clients[user['user_id']]['clients']
+            
+        global_clients = kkbox_manager.clients if kkbox_manager else []
+        all_clients = list(user_clients) + list(global_clients)
+        
+        if not all_clients:
+            raise Exception("Maaf, tidak ada akun KKBox bot (Pribadi/Global) yang aktif saat ini.")
 
-        clients_list = random.sample(kkbox_manager.clients, len(kkbox_manager.clients))
         last_error = None
-        for client in clients_list:
+        for client in all_clients:
             try:
                 user['kkbox_api'] = client
                 await start_kkbox(link, user)
-                LOGGER.info(f"KKBox: Unduhan berhasil menggunakan akun.") 
+                
+                email_label = getattr(client, 'email', 'Global Account')
+                LOGGER.info(f"KKBox: Unduhan berhasil menggunakan akun {email_label}.") 
                 return
             except Exception as e:
                 error_str = str(e).lower()
@@ -908,8 +916,9 @@ async def start_link(link: str, user: dict) -> None:
                 else:
                     LOGGER.error(f"KKBox: Akun gagal (Fatal): {e}")
                     raise e
+                    
         if last_error:
-            raise Exception(f"Item tidak tersedia di semua ({len(clients_list)}) akun KKBox yang dicoba. Error terakhir: {last_error}")
+            raise Exception(f"Item tidak tersedia di semua ({len(all_clients)}) akun KKBox yang dicoba. Error terakhir: {last_error}")
         else:
             raise Exception("Gagal mengunduh KKBox karena alasan yang tidak diketahui setelah mencoba semua akun.")
 
