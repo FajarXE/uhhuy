@@ -214,6 +214,7 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
         final_date = track_date
         
     metadata['date'] = final_date
+    metadata['release_date'] = final_date
     metadata['year'] = final_date[:4] if final_date else ""
 
     # --- PERBAIKAN: ZERO PADDING (01, 02...) ---
@@ -360,6 +361,7 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
     metadata['albumartist'] = alb_info.get('artist_name')
     
     metadata['date'] = final_date
+    metadata['release_date'] = final_date
     metadata['year'] = final_date[:4] if final_date else ""
     
     metadata['totaltracks'] = str(alb_info.get('num_tracks', 1))
