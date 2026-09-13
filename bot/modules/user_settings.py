@@ -1543,7 +1543,17 @@ async def uset_cb(client, query, datatype=""):
             "hifi": "FLAC 16-bit",
             "hires": "FLAC 24-bit"
         }
-        if not kkbox_manager or not kkbox_manager.clients:
+        
+        has_client = False
+        if kkbox_manager:
+            if getattr(kkbox_manager, 'clients', []):
+                has_client = True
+            else:
+                user_dict = bot_set.user_data.get(user_id, {})
+                if user_dict.get('kkbox_accounts'):
+                    has_client = True
+
+        if not has_client:
             return await edit_message(query.message, "Layanan KKBox tidak aktif (tidak ada klien yang login).")
 
         main_user_dict = bot_set.user_data.get(user_id, {})
