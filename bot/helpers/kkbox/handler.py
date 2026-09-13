@@ -163,7 +163,65 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                 'msg': user['bot_msg'], 'title': track_meta['title'], 'type': 'Track', 'headers': headers_dict
             }
 
+            # --- [FIX BUG PROXY & 404 CDN KKBOX] ---
+            client_proxy = client.s.proxies.get('http') or client.s.proxies.get('https')
+            if client_proxy and not client_proxy.startswith('socks'):
+                details_aria['proxy'] = client_proxy
+
             err = await download_file(download_url, temp_filepath, retries=1, details=details_aria)
+
+            if err or not os.path.exists(temp_filepath):
+                LOGGER.warning(f"KKBox: Aria2 ditolak (404) untuk {track_meta['title']}. Mengaktifkan AIOHTTP Fallback...")
+                
+                aria2_file = temp_filepath + '.aria2'
+                if os.path.exists(aria2_file):
+                    try: os.remove(aria2_file)
+                    except: pass
+                if os.path.exists(temp_filepath):
+                    try: os.remove(temp_filepath)
+                    except: pass
+                
+                connector = None
+                if client_proxy and client_proxy.startswith('socks'):
+                    try:
+                        from aiohttp_socks import ProxyConnector
+                        safe_proxy = client_proxy.replace('socks5h://', 'socks5://').replace('socks4a://', 'socks4://')
+                        connector = ProxyConnector.from_url(safe_proxy)
+                    except ImportError: pass
+                    
+                import time
+                import yarl
+                try:
+                    async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
+                        get_kwargs = {}
+                        if client_proxy and not client_proxy.startswith('socks'):
+                            get_kwargs['proxy'] = client_proxy
+                            
+                        safe_url = yarl.URL(download_url, encoded=True)
+                        async with session.get(safe_url, **get_kwargs) as r:
+                            r.raise_for_status()
+                            total_size = int(r.headers.get('content-length', 0))
+                            downloaded = 0
+                            start_time = time.time()
+                            last_update = start_time
+                            
+                            async with aiofiles.open(temp_filepath, 'wb') as f:
+                                async for chunk in r.content.iter_chunked(256 * 1024):
+                                    if chunk:
+                                        await f.write(chunk)
+                                        downloaded += len(chunk)
+                                        
+                                        if upload and 'bot_msg' in user:
+                                            now = time.time()
+                                            if now - last_update > 2.0 or downloaded == total_size:
+                                                last_update = now
+                                                from bot.helpers.utils import progress_message
+                                                await progress_message(downloaded, total_size, details_aria)
+                    err = False 
+                except Exception as fallback_e:
+                    LOGGER.error(f"KKBox AIOHTTP Fallback gagal: {fallback_e}")
+                    err = True
+            # ---------------------------------------------
 
             if not err and os.path.exists(temp_filepath):
                 break 
