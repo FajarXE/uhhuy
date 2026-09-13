@@ -876,6 +876,16 @@ def kk_button(quality: dict, user_id: int = None):
         if (i + 1) % 2 == 0 or i == len(quality) - 1:
             buttons.append(row)
             row = []
+
+    if usetting:
+        # Tambahkan ini sebelum tombol Back
+        buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="ukk_auth_menu", style=ButtonStyle.PRIMARY)])
+        
+        buttons.append(
+            [
+                InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
+            ]
+        )
             
     if usetting:
         buttons.append(
@@ -887,6 +897,23 @@ def kk_button(quality: dict, user_id: int = None):
         
     main_button, close_button = fetch_base_buttons()
     buttons += main_button + close_button
+    return InlineKeyboardMarkup(buttons)
+
+def kkbox_user_auth_buttons(accounts_list: list):
+    buttons = []
+    
+    if accounts_list:
+        buttons.append([InlineKeyboardButton("🔻 CLICK BELOW TO DELETE 🔻", callback_data="ignore")])
+        for acc in accounts_list:
+            email = acc.get('email', 'Unknown')
+            # Batasi panjang email agar muat di tombol jika terlalu panjang
+            display_email = email if len(email) < 25 else email[:22] + "..."
+            btn_text = f"🗑️ {display_email}"
+            buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"ukk_rm_{email}", style=ButtonStyle.DANGER)])
+            
+    buttons.append([InlineKeyboardButton("➕ ADD ACCOUNT", callback_data="ukk_instr", style=ButtonStyle.SUCCESS)])
+    buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="uset_kkbox", style=ButtonStyle.PRIMARY)])
+    
     return InlineKeyboardMarkup(buttons)
 
 def id_button(quality: dict, user_id: int = None):
