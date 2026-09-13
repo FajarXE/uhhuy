@@ -885,8 +885,9 @@ async def start_link(link: str, user: dict) -> None:
         user['provider'] = 'KKBox'
         
         user_clients = []
-        if kkbox_manager and kkbox_manager.has_private_session(user['user_id']):
-            user_clients = kkbox_manager.user_clients[user['user_id']]['clients']
+        if kkbox_manager:
+            # Menggunakan fungsi baru yang mendukung lazy-loading dari database
+            user_clients = await kkbox_manager.get_user_clients(user['user_id'])
             
         global_clients = kkbox_manager.clients if kkbox_manager else []
         all_clients = list(user_clients) + list(global_clients)
