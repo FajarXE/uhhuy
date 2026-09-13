@@ -649,6 +649,15 @@ async def uset_tidal_auth_menu(client, query):
         )
     ])
 
+    # Tambahkan tombol INSTRUKSI TOKEN tepat di bawahnya:
+    buttons.append([
+        InlineKeyboardButton(
+            "➕ LOGIN VIA TOKEN", 
+            callback_data="utd_instr_token", 
+            style=ButtonStyle.SUCCESS
+        )
+    ])
+
     buttons.append([
         InlineKeyboardButton(
             "🔙 Back", 
@@ -799,6 +808,82 @@ async def uset_tidal_remove_specific(client, query):
     await query.answer(f"✅ Akun berhasil dihapus.", True)
         
     await uset_tidal_auth_menu(client, query)
+
+# Tambahkan bersamaan dengan perintah login provider lainnya (misalnya di bawah deezer_login)
+@Client.on_message(filters.command("tidal_login"))
+async def uset_td_login_cmd(client, message):
+    if not await check_user(msg=message):
+        return
+
+    user_id = message.from_user.id
+    args = message.text.split()
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/tidal_login user_id refresh_token [country_code]</code>\n\n"
+            "Contoh: <code>/tidal_login 12345678 xX_TokenAnda_Xx US</code>\n"
+            "*(Country code akan otomatis ke US jika dikosongkan)*"
+        )
+    
+    t_uid = args[1].strip()
+    t_token = args[2].strip()
+    t_cc = args[3].upper() if len(args) > 3 else "US"
+    
+    status_msg = await message.reply_text("🔄 **Verifying Tidal Account...**")
+    
+    auth_data = {
+        'refresh_token': t_token,
+        'country_code': t_cc,
+        'user_id': t_uid
+    }
+    
+    try:
+        user_data_mem = bot_set.user_data.setdefault(user_id, {})
+        accounts_list = user_data_mem.get('tidal_accounts', [])
+        
+        # Migrasi darurat untuk akun format tunggal yang lama
+        if not accounts_list and user_data_mem.get('tidal_auth'):
+            accounts_list = [user_data_mem['tidal_auth']]
+            
+        if any(str(acc.get('user_id')) == str(t_uid) for acc in accounts_list):
+            return await status_msg.edit_text("⚠️ Akun ini sudah ada di daftar Private Session Anda.")
+        
+        # Tes login dan daftarkan ke Manager
+        success, info = await tidal_manager.add_user_account(user_id, auth_data)
+        
+        if success:
+            accounts_list.append(auth_data)
+            
+            # Update memory dan DB secara permanen
+            user_data_mem['tidal_accounts'] = accounts_list
+            user_data_mem['tidal_auth'] = None
+            
+            await database.save_user_settings(user_id, {
+                'tidal_accounts': accounts_list,
+                'tidal_auth': None
+            })
+            
+            await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun ID <code>{t_uid}</code> ({t_cc}) ditambahkan ke sesi privat Anda.")
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+
+@Client.on_callback_query(filters.regex("^utd_instr_token"))
+async def uset_tidal_instr_token(client, query):
+    if not await check_user(msg=query.message): return
+    text = (
+        "📝 **CARA LOGIN TIDAL (USER ID & TOKEN)**\n\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/tidal_login user_id refresh_token [country_code]</code>\n\n"
+        "Contoh:\n"
+        "<code>/tidal_login 12345678 d41d8cd98f0... US</code>\n\n"
+        "*Country code (kode negara) opsional dan akan menggunakan US sebagai *default* jika dikosongkan."
+    )
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="utd_auth_menu", style=ButtonStyle.PRIMARY)]]
+    await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
 
 
 # ==================================
