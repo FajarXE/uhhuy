@@ -649,6 +649,15 @@ async def uset_tidal_auth_menu(client, query):
         )
     ])
 
+    # Tambahkan tombol INSTRUKSI TOKEN tepat di bawahnya:
+    buttons.append([
+        InlineKeyboardButton(
+            "➕ LOGIN VIA TOKEN", 
+            callback_data="utd_instr_token", 
+            style=ButtonStyle.SUCCESS
+        )
+    ])
+
     buttons.append([
         InlineKeyboardButton(
             "🔙 Back", 
@@ -799,6 +808,82 @@ async def uset_tidal_remove_specific(client, query):
     await query.answer(f"✅ Akun berhasil dihapus.", True)
         
     await uset_tidal_auth_menu(client, query)
+
+# Tambahkan bersamaan dengan perintah login provider lainnya (misalnya di bawah deezer_login)
+@Client.on_message(filters.command("tidal_login"))
+async def uset_td_login_cmd(client, message):
+    if not await check_user(msg=message):
+        return
+
+    user_id = message.from_user.id
+    args = message.text.split()
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/tidal_login user_id refresh_token [country_code]</code>\n\n"
+            "Contoh: <code>/tidal_login 12345678 xX_TokenAnda_Xx US</code>\n"
+            "*(Country code akan otomatis ke US jika dikosongkan)*"
+        )
+    
+    t_uid = args[1].strip()
+    t_token = args[2].strip()
+    t_cc = args[3].upper() if len(args) > 3 else "US"
+    
+    status_msg = await message.reply_text("🔄 **Verifying Tidal Account...**")
+    
+    auth_data = {
+        'refresh_token': t_token,
+        'country_code': t_cc,
+        'user_id': t_uid
+    }
+    
+    try:
+        user_data_mem = bot_set.user_data.setdefault(user_id, {})
+        accounts_list = user_data_mem.get('tidal_accounts', [])
+        
+        # Migrasi darurat untuk akun format tunggal yang lama
+        if not accounts_list and user_data_mem.get('tidal_auth'):
+            accounts_list = [user_data_mem['tidal_auth']]
+            
+        if any(str(acc.get('user_id')) == str(t_uid) for acc in accounts_list):
+            return await status_msg.edit_text("⚠️ Akun ini sudah ada di daftar Private Session Anda.")
+        
+        # Tes login dan daftarkan ke Manager
+        success, info = await tidal_manager.add_user_account(user_id, auth_data)
+        
+        if success:
+            accounts_list.append(auth_data)
+            
+            # Update memory dan DB secara permanen
+            user_data_mem['tidal_accounts'] = accounts_list
+            user_data_mem['tidal_auth'] = None
+            
+            await database.save_user_settings(user_id, {
+                'tidal_accounts': accounts_list,
+                'tidal_auth': None
+            })
+            
+            await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun ID <code>{t_uid}</code> ({t_cc}) ditambahkan ke sesi privat Anda.")
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+
+@Client.on_callback_query(filters.regex("^utd_instr_token"))
+async def uset_tidal_instr_token(client, query):
+    if not await check_user(msg=query.message): return
+    text = (
+        "📝 **CARA LOGIN TIDAL (USER ID & TOKEN)**\n\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/tidal_login user_id refresh_token [country_code]</code>\n\n"
+        "Contoh:\n"
+        "<code>/tidal_login 12345678 d41d8cd98f0... US</code>\n\n"
+        "*Country code (kode negara) opsional dan akan menggunakan US sebagai *default* jika dikosongkan."
+    )
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="utd_auth_menu", style=ButtonStyle.PRIMARY)]]
+    await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
 
 
 # ==================================
@@ -1050,6 +1135,105 @@ async def uset_amz_instr_handler(client, query):
     )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)]]
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
+
+
+# --- COMMAND LOGIN KKBOX ---
+@Client.on_message(filters.command("kkbox_login"))
+async def uset_kkb_login_cmd(client, message):
+    if not await check_user(msg=message): return
+
+    user_id = message.from_user.id
+    args = message.text.split()
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/kkbox_login email password [proxy]</code>\n\n"
+            "Contoh: <code>/kkbox_login myemail@gmail.com pass123 http://proxy:port</code>"
+        )
+    
+    email = args[1].strip()
+    password = args[2].strip()
+    proxy = args[3].strip() if len(args) > 3 else None
+    
+    status_msg = await message.reply_text("🔄 **Verifying KKBox Account...**")
+    auth_data = {'email': email, 'password': password, 'proxy': proxy}
+    
+    try:
+        user_data_mem = bot_set.user_data.setdefault(user_id, {})
+        accounts_list = user_data_mem.get('kkbox_accounts', [])
+        
+        if any(acc.get('email') == email for acc in accounts_list):
+            return await status_msg.edit_text("⚠️ Akun ini sudah ada di daftar Private Session Anda.")
+            
+        success, info = await kkbox_manager.add_user_account(user_id, auth_data)
+        
+        if success:
+            accounts_list.append(auth_data)
+            user_data_mem['kkbox_accounts'] = accounts_list
+            await database.save_user_settings(user_id, {'kkbox_accounts': accounts_list})
+            await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun <code>{email}</code> ditambahkan ke sesi privat Anda.")
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+
+# --- CALLBACK MENU AUTH KKBOX ---
+@Client.on_callback_query(filters.regex("^ukk_auth_menu"))
+async def uset_kkb_auth_handler(client, query):
+    if not await check_user(msg=query.message): return
+    
+    user_id = query.from_user.id
+    accounts_list = bot_set.user_data.get(user_id, {}).get('kkbox_accounts', [])
+    
+    text = "🔐 **KKBOX PRIVATE SESSION (MULTI-ACCOUNT)**\n\n"
+    
+    if accounts_list:
+        text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
+        text += "Bot akan menggunakan akun-akun ini secara bergantian (Load Balancing).\n\n"
+        for i, acc in enumerate(accounts_list):
+            proxy_status = "Aktif" if acc.get('proxy') else "Tidak"
+            text += f"**{i+1}. Email:** `{acc['email']}` | Proxy: {proxy_status}\n"
+    else:
+        text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot menggunakan akun Global (Shared) jika tersedia.\n"
+
+    from bot.helpers.buttons.settings import kkbox_user_auth_buttons
+    await edit_message(query.message, text, markup=kkbox_user_auth_buttons(accounts_list))
+
+# --- CALLBACK HAPUS AKUN KKBOX ---
+@Client.on_callback_query(filters.regex(r"^ukk_rm_(.+)"))
+async def uset_kkb_remove_specific(client, query):
+    if not await check_user(msg=query.message): return
+    
+    user_id = query.from_user.id
+    target_email = query.matches[0].group(1)
+    
+    accounts_list = bot_set.user_data.get(user_id, {}).get('kkbox_accounts', [])
+    new_list = [acc for acc in accounts_list if acc.get('email') != target_email]
+    
+    bot_set.user_data[user_id]['kkbox_accounts'] = new_list
+    await database.save_user_settings(user_id, {'kkbox_accounts': new_list})
+    await kkbox_manager.remove_specific_user_account(user_id, target_email)
+    
+    await query.answer(f"✅ Akun berhasil dihapus.", True)
+    await uset_kkb_auth_handler(client, query)
+
+# --- CALLBACK INSTRUKSI KKBOX ---
+@Client.on_callback_query(filters.regex("^ukk_instr"))
+async def uset_kkb_instr_handler(client, query):
+    if not await check_user(msg=query.message): return
+    text = (
+        "📝 **CARA LOGIN KKBOX**\n\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/kkbox_login email password [proxy]</code>\n\n"
+        "*(Proxy bersifat opsional, isi jika Anda butuh bypass region tertentu)*"
+    )
+    from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from pyrogram.enums import ButtonStyle
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="ukk_auth_menu", style=ButtonStyle.PRIMARY)]]
+    await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
 
 
 # ==================================
@@ -1359,7 +1543,17 @@ async def uset_cb(client, query, datatype=""):
             "hifi": "FLAC 16-bit",
             "hires": "FLAC 24-bit"
         }
-        if not kkbox_manager or not kkbox_manager.clients:
+        
+        has_client = False
+        if kkbox_manager:
+            if getattr(kkbox_manager, 'clients', []):
+                has_client = True
+            else:
+                user_dict = bot_set.user_data.get(user_id, {})
+                if user_dict.get('kkbox_accounts'):
+                    has_client = True
+
+        if not has_client:
             return await edit_message(query.message, "Layanan KKBox tidak aktif (tidak ada klien yang login).")
 
         main_user_dict = bot_set.user_data.get(user_id, {})
@@ -1846,10 +2040,20 @@ async def uset_kkbox(client, query):
     to_set = qual_map_display.get(to_set_display)
     if not to_set:
         return await query.answer("Kualitas tidak valid.", True)
-    if not kkbox_manager or not kkbox_manager.clients:
+        
+    user_id = query.from_user.id
+    has_client = False
+    if kkbox_manager:
+        if getattr(kkbox_manager, 'clients', []):
+            has_client = True
+        else:
+            user_dict = bot_set.user_data.get(user_id, {})
+            if user_dict.get('kkbox_accounts'):
+                has_client = True
+
+    if not has_client:
         await query.answer("Layanan KKBox tidak aktif!", show_alert=True)
         return
-    user_id = query.from_user.id
     
     await kkbox_manager.setup_quality(user_id, to_set) 
     bot_set.user_data.setdefault(user_id, {})['kkbox_qual'] = to_set 
