@@ -878,16 +878,8 @@ def kk_button(quality: dict, user_id: int = None):
             row = []
 
     if usetting:
-        # Tambahkan ini sebelum tombol Back
         buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT (Multi-Login)", callback_data="ukk_auth_menu", style=ButtonStyle.PRIMARY)])
         
-        buttons.append(
-            [
-                InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
-            ]
-        )
-            
-    if usetting:
         buttons.append(
             [
                 InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
