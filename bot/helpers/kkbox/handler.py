@@ -126,43 +126,62 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
-    try:
-        format_key = {
-            '128k': 'mp3_128k_chromecast',
-            '192k': 'mp3_192k_kkdrm1',
-            '320k': 'aac_320k_m4a_kkdrm1',
-            'hifi': 'flac_16_download_kkdrm',
-            'hires': 'flac_24_download_kkdrm',
-        }[download_quality]
-        
-        play_mode = 'chromecast' if format_key == 'mp3_128k_chromecast' else None
-
-        urls_list = await asyncio.to_thread(client.get_ticket, download_id, play_mode)
-        
-        download_url = None
-        for fmt in urls_list:
-            if fmt['name'] == format_key:
-                download_url = fmt['url']
-                break
-        
-        if not download_url:
-            raise KKBoxError(f"Format {format_key} tidak ditemukan di tiket.")
+    max_retries = 3
+    err = True
+    temp_filepath = ""
+    is_drm = False
+    
+    for attempt in range(max_retries):
+        try:
+            format_key = {
+                '128k': 'mp3_128k_chromecast',
+                '192k': 'mp3_192k_kkdrm1',
+                '320k': 'aac_320k_m4a_kkdrm1',
+                'hifi': 'flac_16_download_kkdrm',
+                'hires': 'flac_24_download_kkdrm',
+            }[download_quality]
             
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            play_mode = 'chromecast' if format_key == 'mp3_128k_chromecast' else None
 
-        is_drm = format_key != 'mp3_128k_chromecast'
-        temp_filepath = track_meta['filepath'] + ".enc" if is_drm else track_meta['filepath']
+            urls_list = await asyncio.to_thread(client.get_ticket, download_id, play_mode)
+            
+            download_url = None
+            for fmt in urls_list:
+                if fmt['name'] == format_key:
+                    download_url = fmt['url']
+                    break
+            
+            if not download_url:
+                raise KKBoxError(f"Format {format_key} tidak ditemukan di tiket.")
+                
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-        headers_dict = {'User-Agent': 'okhttp/3.14.9'}
-        details_aria = {'msg': None, 'headers': headers_dict} if not upload else {
-            'msg': user['bot_msg'], 'title': track_meta['title'], 'type': 'Track', 'headers': headers_dict
-        }
+            is_drm = format_key != 'mp3_128k_chromecast'
+            temp_filepath = track_meta['filepath'] + ".enc" if is_drm else track_meta['filepath']
 
-        err = await download_file(download_url, temp_filepath, retries=1, details=details_aria)
+            headers_dict = {'User-Agent': 'okhttp/3.14.9'}
+            details_aria = {'msg': None, 'headers': headers_dict} if not upload else {
+                'msg': user['bot_msg'], 'title': track_meta['title'], 'type': 'Track', 'headers': headers_dict
+            }
 
-        if err or not os.path.exists(temp_filepath):
-            LOGGER.error(f"KKBox: Aria2 gagal mengunduh {track_meta['title']}")
-            return False
+            # Eksekusi Aria2
+            err = await download_file(download_url, temp_filepath, retries=1, details=details_aria)
+
+            if not err and os.path.exists(temp_filepath):
+                break # Berhasil mengunduh, keluar dari loop retry
+            else:
+                LOGGER.warning(f"KKBox: CDN 404 untuk {track_meta['title']}. Mencoba tiket baru ({attempt + 1}/{max_retries})...")
+                await asyncio.sleep(2.5) # Beri jeda agar CDN tidak memblokir IP
+                
+        except Exception as e:
+            LOGGER.error(f"KKBox dl_track error untuk {item_id}: {e}")
+            if attempt == max_retries - 1:
+                return False
+            await asyncio.sleep(2)
+
+    if err or not os.path.exists(temp_filepath):
+        LOGGER.error(f"KKBox: Aria2 gagal mengunduh {track_meta['title']} setelah {max_retries} percobaan.")
+        return False
 
         if is_drm:
             def _decrypt_kkbox():
