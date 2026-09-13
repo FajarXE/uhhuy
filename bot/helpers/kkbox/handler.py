@@ -98,7 +98,6 @@ async def start_artist(artist_id: str, user: dict):
     if not upload_album:
         await artist_upload(artist_meta, user)
 
-
 async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
     client = user['kkbox_api']
 
@@ -130,7 +129,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     err = True
     temp_filepath = ""
     is_drm = False
-    
+
     for attempt in range(max_retries):
         try:
             format_key = {
@@ -164,15 +163,14 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                 'msg': user['bot_msg'], 'title': track_meta['title'], 'type': 'Track', 'headers': headers_dict
             }
 
-            # Eksekusi Aria2
             err = await download_file(download_url, temp_filepath, retries=1, details=details_aria)
 
             if not err and os.path.exists(temp_filepath):
-                break # Berhasil mengunduh, keluar dari loop retry
+                break 
             else:
                 LOGGER.warning(f"KKBox: CDN 404 untuk {track_meta['title']}. Mencoba tiket baru ({attempt + 1}/{max_retries})...")
-                await asyncio.sleep(2.5) # Beri jeda agar CDN tidak memblokir IP
-                
+                await asyncio.sleep(2.5) 
+
         except Exception as e:
             LOGGER.error(f"KKBox dl_track error untuk {item_id}: {e}")
             if attempt == max_retries - 1:
@@ -183,7 +181,8 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         LOGGER.error(f"KKBox: Aria2 gagal mengunduh {track_meta['title']} setelah {max_retries} percobaan.")
         return False
 
-        if is_drm:
+    if is_drm:
+        try:
             def _decrypt_kkbox():
                 from Cryptodome.Cipher import ARC4
                 rc4 = ARC4.new(client.lic_content_key, drop=512)
@@ -196,10 +195,9 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                 os.remove(temp_filepath) 
 
             await asyncio.to_thread(_decrypt_kkbox)
-
-    except Exception as e:
-        LOGGER.error(f"KKBox dl_track gagal untuk {item_id}: {e}")
-        return False
+        except Exception as e:
+            LOGGER.error(f"KKBox decrypt gagal untuk {item_id}: {e}")
+            return False
 
     try:
         await set_metadata(track_meta, user['user_id'])
