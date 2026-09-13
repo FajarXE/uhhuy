@@ -1363,7 +1363,16 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     if show_deezer:
         buttons.append([InlineKeyboardButton(text=f"Deezer Quality", callback_data=f"uset_deezer")])
     
-    if kkbox_manager and kkbox_manager.clients:
+    show_kkbox = False
+    if kkbox_manager:
+        if getattr(kkbox_manager, 'clients', []):
+            show_kkbox = True
+        else:
+            user_dict = bot_set.user_data.get(user_id, {})
+            if user_dict.get('kkbox_accounts'):
+                show_kkbox = True
+                
+    if show_kkbox:
         buttons.append([InlineKeyboardButton(text=f"KKBox Quality", callback_data=f"uset_kkbox")])
     
     if idagio_manager and idagio_manager.clients:
