@@ -43,6 +43,7 @@ class KKBoxLoginManager:
         self.account_configs = account_configs
         self.clients = [] 
         self._client_cycler = None
+        self.user_clients = {}
         
         if not Config.KKBOX_KC1_KEY or not Config.KKBOX_SECRET_KEY:
             LOGGER.error("KKBox Manager: Kunci KC1 atau Secret tidak diatur di Config!")
@@ -101,6 +102,63 @@ class KKBoxLoginManager:
 
         LOGGER.info(f"KKBox Manager: Berhasil login ke {len(self.clients)} dari {len(self.account_configs)} akun.")
         self._client_cycler = itertools.cycle(self.clients)
+
+    async def add_user_account(self, user_id: int, auth_data: dict):
+        """Menyimpan sesi KKBox privat milik pengguna."""
+        email = auth_data.get('email')
+        password = auth_data.get('password')
+        proxy = auth_data.get('proxy')
+
+        client = KkboxAPI(
+            exception=KKBoxError,
+            kc1_key=self.kc1_key,
+            secret_key=self.secret_key
+        )
+        
+        if proxy:
+            client.s.proxies.update({'http': proxy, 'https': proxy})
+
+        try:
+            await asyncio.to_thread(client.login, email, password)
+            
+            if user_id not in self.user_clients:
+                self.user_clients[user_id] = {'clients': [], 'cycler': None}
+                
+            self.user_clients[user_id]['clients'].append(client)
+            self.user_clients[user_id]['cycler'] = itertools.cycle(self.user_clients[user_id]['clients'])
+            
+            return True, "Login Berhasil"
+        except Exception as e:
+            return False, str(e)
+
+    async def remove_specific_user_account(self, user_id: int, target_email: str):
+        """Menghapus akun spesifik dari pool Private Session."""
+        if user_id in self.user_clients:
+            pool = self.user_clients[user_id]
+            client_to_close = next((c for c in pool['clients'] if getattr(c, 'email', '') == target_email), None)
+            
+            if client_to_close:
+                try: await asyncio.to_thread(client_to_close.close_session)
+                except: pass
+                
+                pool['clients'].remove(client_to_close)
+                
+                if pool['clients']:
+                    pool['cycler'] = itertools.cycle(pool['clients'])
+                else:
+                    del self.user_clients[user_id]
+            return True
+        return False
+
+    def has_private_session(self, user_id: int) -> bool:
+        return user_id in self.user_clients and len(self.user_clients[user_id]['clients']) > 0
+
+    def get_user_client(self, user_id: int) -> KkboxAPI | None:
+        """Mendapatkan klien KHUSUS milik user dengan Load Balancing."""
+        pool = self.user_clients.get(user_id)
+        if pool and pool['clients']:
+            return next(pool['cycler'])
+        return None
 
     async def _login_task(self, account: dict):
         """Tugas login untuk satu akun (menggunakan asyncio.to_thread)."""
