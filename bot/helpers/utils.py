@@ -151,6 +151,14 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
                 return None 
             else:
                 LOGGER.warning(f"Aria2 attempt {attempt} gagal/dibatalkan...")
+                
+                # --- TAMBAHKAN BLOK INI: Bersihkan file korup sebelum retry ---
+                try:
+                    if os.path.exists(path): os.remove(path)
+                    if os.path.exists(f"{path}.aria2"): os.remove(f"{path}.aria2")
+                except: pass
+                # --------------------------------------------------------------
+                
         except Exception as e:
             LOGGER.error(f"Download gagal: {e}")
             
