@@ -245,10 +245,9 @@ class TidalApi:
 
 
     async def login_from_saved(self, data):
-        # --- MODIFIKASI: Inisialisasi sesi di sini ---
+        # Inisialisasi sesi
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
-        # --- MODIFIKASI SELESAI ---
 
         self.tv_session = TvSession(
             Config.TIDAL_TV_TOKEN,
@@ -260,27 +259,33 @@ class TidalApi:
         self.tv_session.country_code = data['country_code']
         self.tv_session.user_id = data['user_id']
         
-        # --- MODIFIKASI: Simpan user_id ke instance ---
         self.user_id = data['user_id']
         self.country_code = data['country_code']
-        # --- MODIFIKASI SELESAI ---
 
         try:
             await self.tv_session.refresh()
             self.saved.append(self.tv_session)
         except Exception as e:
+            import logging
+            from traceback import format_exc
             logging.error(format_exc())
             self.tv_session = None
-            LOGGER.error("TIDAL : Coudn't load TV/Auto - " + str(e))
+            from bot.logger import LOGGER
+            LOGGER.error("TIDAL : Couldn't load TV/Auto - " + str(e))
 
-        # even if tv login failes check for mobile (if set to use mobile)
-        await self.refresh_mobile()
+        # --- PERBAIKAN 1: PASS DATA TOKEN LANGSUNG KE MOBILE ---
+        await self.refresh_mobile(data)
+
+        # --- PERBAIKAN 2: BLOKIR KLIEN JIKA SEMUA SESI (TV & MOBILE) MATI ---
+        if not self.saved:
+            raise Exception("Semua sesi (TV & Mobile) gagal diperbarui. Token kedaluwarsa atau metode login tidak valid.")
 
         if any([self.tv_session, self.mobile_hires, self.mobile_atmos]):
             self.sub_type = await self.get_subscription()
         else:
             self.sub_type = 'UNKNOWN'
 
+        from bot.logger import LOGGER
         LOGGER.info(f"TIDAL : Loaded account - {self.sub_type}")
     
 
@@ -289,26 +294,34 @@ class TidalApi:
             return
 
         if Config.TIDAL_MOBILE_TOKEN:
-            self.mobile_hires = await self._init_mobile_session(Config.TIDAL_MOBILE_TOKEN, 'Hires')
-
+            # --- PERBAIKAN 3: TERUSKAN DATA KE INIT MOBILE ---
+            self.mobile_hires = await self._init_mobile_session(Config.TIDAL_MOBILE_TOKEN, 'Hires', data)
 
         if Config.TIDAL_ATMOS_MOBILE_TOKEN:
-            self.mobile_atmos = await self._init_mobile_session(Config.TIDAL_ATMOS_MOBILE_TOKEN, 'Atmos')
+            self.mobile_atmos = await self._init_mobile_session(Config.TIDAL_ATMOS_MOBILE_TOKEN, 'Atmos', data)
 
 
-    async def _init_mobile_session(self, token: str, device: str) -> "MobileSession | None":
+    async def _init_mobile_session(self, token: str, device: str, data: dict = None) -> "MobileSession | None":
         session = MobileSession(token, self.session)
-        session.copy_from(self.tv_session)
+        
+        # --- PERBAIKAN 4: PRIORITASKAN DATA MENTAH DARIPADA TV SESSION ---
+        if data:
+            session.refresh_token = data['refresh_token']
+            session.country_code = data['country_code']
+            session.user_id = data['user_id']
+        elif self.tv_session:
+            session.copy_from(self.tv_session)
+            
         try:
             await session.refresh()
             self.saved.append(session)
             return session
         except Exception as e:
+            from bot.logger import LOGGER
             LOGGER.error(f"TIDAL: Couldn't load Mobile {device} session - {e}")
             return None
 
 
-    
     async def get_subscription(self) -> str:
         if self.saved != []:
             usersess = self.saved[0]
