@@ -17,6 +17,10 @@ from Cryptodome.Cipher import Blowfish
 from config import Config 
 from bot.logger import LOGGER
 
+# --- GLOBAL RATE LIMITER UNTUK SEMUA AKUN DEEZER ---
+GLOBAL_DZ_LIMITER = aiolimiter.AsyncLimiter(30, 60)
+# ---------------------------------------------------
+
 class APIError(Exception):
     def __init__(self, type, msg, payload):
         self.type = type
@@ -31,7 +35,6 @@ class DeezerAPI:
         self.api_token = ''
         self.client_id = '447462'
         self.client_secret = 'a83bf7f38ad2f137e444727cfc3775cf'
-        self.ratelimit = aiolimiter.AsyncLimiter(30, 60)
         self.quality = 'MP3_128'
         self.session = None 
         self.user = None
@@ -72,7 +75,7 @@ class DeezerAPI:
             'cid': randint(0, 1_000_000_000),
         }
 
-        async with self.ratelimit:
+        async with GLOBAL_DZ_LIMITER:
             async with self.session.post(self.gw_light_url, params=params, json=payload) as r:
                 resp = await r.json()
 
@@ -124,7 +127,7 @@ class DeezerAPI:
         return True
 
     async def login_via_email(self, email, password):
-        async with self.ratelimit:
+        async with GLOBAL_DZ_LIMITER:
             await self._api_call('deezer.getUserData') 
         
         password = MD5.new(password.encode()).hexdigest()
@@ -136,7 +139,7 @@ class DeezerAPI:
             'hash': MD5.new((self.client_id + email + password + self.client_secret).encode()).hexdigest(),
         }
 
-        async with self.ratelimit:
+        async with GLOBAL_DZ_LIMITER:
             async with self.session.get('https://connect.deezer.com/oauth/user_auth.php', params=params) as r:
                 json_data = await r.json()
 
@@ -162,7 +165,7 @@ class DeezerAPI:
     async def custom_url_parse(self, link) -> (str, int):
         url = urlparse(link)
         if url.hostname == 'link.deezer.com':
-            async with self.ratelimit:
+            async with GLOBAL_DZ_LIMITER:
                 if not self.session:
                     raise Exception("Sesi Deezer belum diinisialisasi sebelum parsing URL")
                 
@@ -201,7 +204,7 @@ class DeezerAPI:
             'media': [{'type': 'FULL','formats': [{'cipher': 'BF_CBC_STRIPE', 'format': format}]}],
             'track_tokens': [track_token]
         }
-        async with self.ratelimit:
+        async with GLOBAL_DZ_LIMITER:
             async with self.session.post('https://media.deezer.com/v1/get_url', json=json_payload) as r:
                 resp = await r.json()
         return resp['data'][0]['media'][0]['sources'][0]['url']
