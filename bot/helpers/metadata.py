@@ -203,31 +203,45 @@ async def get_track_metadata(track_id, track_data, user_id, cover=None, thumbnai
     return meta
 # ------------------------------------------------------------------------
 
-
 async def set_metadata(metadata:dict, user_id: int = None):
     audio_path = str(metadata['filepath'])
     
     # --- 1. INISIALISASI MUTAGEN ---
+    def _load_audio_sync(path):
+        import os
+        from mutagen import File
+        from mutagen.wave import WAVE
+        from mutagen.mp3 import MP3
+        from mutagen.flac import FLAC
+        from mutagen.oggvorbis import OggVorbis
+        from mutagen.oggopus import OggOpus
+        from mutagen.mp4 import MP4
+        
+        h = File(path)
+        # Fallback manual jika deteksi otomatis gagal
+        if h is None:
+            ext = os.path.splitext(path)[1].lower().strip()
+            if '.wav' in ext: h = WAVE(path)
+            elif '.mp3' in ext: h = MP3(path)
+            elif '.flac' in ext: h = FLAC(path)
+            elif '.ogg' in ext: h = OggVorbis(path)
+            elif '.opus' in ext: h = OggOpus(path)
+            elif ext in ['.m4a', '.mp4', '.m4b']: h = MP4(path)
+        return h
+
     handle = None
     try:
-        # Deteksi otomatis
-        handle = File(audio_path)
-        
-        # Fallback manual jika gagal
-        if handle is None:
-            ext = os.path.splitext(audio_path)[1].lower().strip()
-            if '.wav' in ext: handle = WAVE(audio_path)
-            elif '.mp3' in ext: handle = MP3(audio_path)
-            elif '.flac' in ext: handle = FLAC(audio_path)
-            elif '.ogg' in ext: handle = OggVorbis(audio_path)
-            elif '.opus' in ext: handle = OggOpus(audio_path)
-            elif ext in ['.m4a', '.mp4', '.m4b']: handle = MP4(audio_path)
-                
+        import asyncio
+        # Membaca header file audio secara asinkron di thread terpisah
+        handle = await asyncio.to_thread(_load_audio_sync, audio_path)
+            
     except Exception as e:
+        from bot.logger import LOGGER
         LOGGER.error(f"Gagal membuka file {audio_path}: {e}")
         return
 
     if handle is None:
+         from bot.logger import LOGGER
          LOGGER.error(f"File tidak dikenali formatnya: {audio_path}")
          return
     
@@ -417,7 +431,8 @@ async def set_flac(data, handle, dur_ms=0):
         handle.tags['ORIGINALSAMPLERATE'] = str(mqa_file.original_sample_rate)
     
     await savePic(handle, data)
-    handle.save()
+    import asyncio
+    await asyncio.to_thread(handle.save)
     return True
 
 
@@ -522,7 +537,8 @@ async def set_m4a(data, handle):
         handle.tags['----:com.apple.iTunes:SAMPLERATE'] = str(int(data['sample_rate'] * 1000)).encode('utf-8')
     
     await savePic(handle, data)
-    handle.save()
+    import asyncio
+    await asyncio.to_thread(handle.save)
     return True
 
 
@@ -591,7 +607,8 @@ async def set_mp3(data, handle, dur_ms=0):
         handle.tags.add(TXXX(encoding=3, desc='SAMPLERATE', text=str(int(data['sample_rate'] * 1000))))
     
     await savePic(handle, data)
-    handle.save()
+    import asyncio
+    await asyncio.to_thread(handle.save)
     return True
 
 
@@ -637,7 +654,8 @@ async def set_wav(data, handle, dur_ms=0):
         tags.add(USLT(encoding=3, lang=u'eng', desc=u'desc', text=data['lyrics']))
     
     await savePic(handle, data)
-    handle.save()
+    import asyncio
+    await asyncio.to_thread(handle.save)
     return True
 
 
@@ -723,8 +741,8 @@ async def set_vorbis(data, handle, dur_ms=0):
     # --- 10. Cover Art ---
     # Memanggil fungsi helper savePic yang sudah ada di file Anda
     await savePic(handle, data)
-    
-    handle.save()
+    import asyncio
+    await asyncio.to_thread(handle.save)
     return True
 
 
@@ -748,8 +766,10 @@ async def savePic(handle, metadata):
         return
 
     try:
-        with open(album_art, "rb") as f:
-            data = f.read()
+        # Membaca gambar secara asinkron
+        import aiofiles
+        async with aiofiles.open(album_art, "rb") as f:
+            data = await f.read()
     except Exception as e:
         LOGGER.error(f"Error membaca file cover art: {e}")
         return
