@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 from pyrogram.errors import MessageNotModified
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from pyrogram.errors import FloodWait
 
 from config import Config
@@ -409,7 +409,7 @@ async def zip_handler(folderpath):
 
     if user_mode == 'Telegram':
         LOGGER.info(f"[ZIP] Mode Telegram: Menggunakan Split Zip (.zip, .part2.zip)")
-        with ThreadPoolExecutor() as pool:
+        with ProcessPoolExecutor() as pool:
             zips = await loop.run_in_executor(pool, split_zip_folder, folderpath)
         return zips
     else:
@@ -431,11 +431,11 @@ async def create_zip_system(folderpath):
         await process.communicate()
         if process.returncode == 0: return zip_path
         else:
-            with ThreadPoolExecutor() as pool:
+            with ProcessPoolExecutor() as pool:
                 loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(pool, zip_folder, folderpath)
     except:
-        with ThreadPoolExecutor() as pool:
+        with ProcessPoolExecutor() as pool:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(pool, zip_folder, folderpath)
 
