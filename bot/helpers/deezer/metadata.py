@@ -271,50 +271,50 @@ async def process_track_metadata(track_id, r_id, cover=None,
     
     # GUNAKAN SESSION GLOBAL ALIH-ALIH MEMBUAT BARU
     session = get_meta_session()
-        
-        # A. PUBLIC TRACK (Composer Fallback)
-        # Jika internal kosong, tembak Public API Track
-        if not composers:
-            pub_track = await fetch_deezer_public_track(track_id, session)
-            if pub_track.get('contributors'):
-                for c in pub_track['contributors']:
-                    role = c.get('role', '').lower()
-                    name = c.get('name')
-                    if not name: continue
-                    if role == 'composer': composers.append(name)
-                    elif role == 'producer': producers.append(name)
+    
+    # A. PUBLIC TRACK (Composer Fallback)
+    # Jika internal kosong, tembak Public API Track
+    if not composers:
+        pub_track = await fetch_deezer_public_track(track_id, session)
+        if pub_track.get('contributors'):
+            for c in pub_track['contributors']:
+                role = c.get('role', '').lower()
+                name = c.get('name')
+                if not name: continue
+                if role == 'composer': composers.append(name)
+                elif role == 'producer': producers.append(name)
 
-        # B. UPC Extraction (Priority: Internal -> Nested -> Public Album)
-        found_upc = get_val('UPC')
-        if not found_upc and t_meta_page.get('ALBUM'):
-            found_upc = t_meta_page['ALBUM'].get('UPC')
-        
-        # C. GENRE Preparation
-        # Ambil ID Album untuk fetch Public Album jika UPC atau Genre kosong
-        alb_id = get_val('ALB_ID')
-        if not alb_id and t_meta_page.get('ALBUM'): alb_id = t_meta_page['ALBUM'].get('ALB_ID')
+    # B. UPC Extraction (Priority: Internal -> Nested -> Public Album)
+    found_upc = get_val('UPC')
+    if not found_upc and t_meta_page.get('ALBUM'):
+        found_upc = t_meta_page['ALBUM'].get('UPC')
+    
+    # C. GENRE Preparation
+    # Ambil ID Album untuk fetch Public Album jika UPC atau Genre kosong
+    alb_id = get_val('ALB_ID')
+    if not alb_id and t_meta_page.get('ALBUM'): alb_id = t_meta_page['ALBUM'].get('ALB_ID')
 
-        # D. PUBLIC ALBUM FETCH (Genre & UPC Savior)
-        if alb_id and (not found_upc or not album_genre):
-            pub_album_data = await fetch_deezer_public_album(alb_id, session)
-            if not found_upc:
-                found_upc = pub_album_data.get('upc')
+    # D. PUBLIC ALBUM FETCH (Genre & UPC Savior)
+    if alb_id and (not found_upc or not album_genre):
+        pub_album_data = await fetch_deezer_public_album(alb_id, session)
+        if not found_upc:
+            found_upc = pub_album_data.get('upc')
 
-        # SET UPC/EAN/BARCODE
-        metadata['upc'] = found_upc or ''
-        if metadata['upc']:
-            metadata['ean'] = metadata['upc']
-            metadata['barcode'] = metadata['upc']
+    # SET UPC/EAN/BARCODE
+    metadata['upc'] = found_upc or ''
+    if metadata['upc']:
+        metadata['ean'] = metadata['upc']
+        metadata['barcode'] = metadata['upc']
 
-        # E. iTunes & MB Lookup
+    # E. iTunes & MB Lookup
+    try:
+        itunes_info = await get_extended_itunes_info(metadata, session)
+    except: pass
+    
+    if not itunes_info.get('label') or not itunes_info.get('genre'):
         try:
-            itunes_info = await get_extended_itunes_info(metadata, session)
+            mb_info = await get_musicbrainz_info(metadata, session)
         except: pass
-        
-        if not itunes_info.get('label') or not itunes_info.get('genre'):
-            try:
-                mb_info = await get_musicbrainz_info(metadata, session)
-            except: pass
 
     # SET COMPOSER & PRODUCER
     if composers: metadata['composer'] = ', '.join(list(dict.fromkeys(composers)))
@@ -477,21 +477,22 @@ async def process_album_metadata(album_id:int, a_meta:dict, t_meta:list, r_id, u
     # GUNAKAN SESSION GLOBAL ALIH-ALIH MEMBUAT BARU
     session = get_meta_session()
 
-        # UPC / GENRE FALLBACK (PUBLIC API)
-        # Jika UPC internal kosong, atau kita ingin genre yang lebih akurat
-        if not metadata['upc'] or not a_meta.get('genres'):
-             pub_album_data = await fetch_deezer_public_album(album_id, session)
-             
-             if not metadata['upc'] and pub_album_data.get('upc'):
-                 metadata['upc'] = pub_album_data['upc']
+    # UPC / GENRE FALLBACK (PUBLIC API)
+    # Jika UPC internal kosong, atau kita ingin genre yang lebih akurat
+    if not metadata['upc'] or not a_meta.get('genres'):
+        pub_album_data = await fetch_deezer_public_album(album_id, session)
+         
+        if not metadata['upc'] and pub_album_data.get('upc'):
+            metadata['upc'] = pub_album_data['upc']
 
+    try:
+        itunes_info = await get_extended_itunes_info(metadata, session)
+    except: pass
+    
+    if not itunes_info.get('label') or not itunes_info.get('genre'):
         try:
-            itunes_info = await get_extended_itunes_info(metadata, session)
+            mb_info = await get_musicbrainz_info(metadata, session)
         except: pass
-        if not itunes_info.get('label') or not itunes_info.get('genre'):
-             try:
-                mb_info = await get_musicbrainz_info(metadata, session)
-             except: pass
 
     # SET UPC/BARCODE
     if metadata['upc']:
