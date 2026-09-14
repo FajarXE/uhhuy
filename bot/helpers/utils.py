@@ -376,18 +376,28 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
     return results
 
 async def create_link(path, basepath):
+    from pathlib import Path
+    from urllib.parse import quote
+    
     if isinstance(path, list): path = Path(path[0]).parent
     path = str(Path(path).relative_to(basepath))
     rclone_link, index_link = None, None
 
-    if bot_set.link_options == 'RCLONE' or bot_set.link_options=='Both':
-        cmd = f'rclone link --config ./rclone.conf "{Config.RCLONE_DEST}/{path}"'
-        task = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    if bot_set.link_options == 'RCLONE' or bot_set.link_options == 'Both':
+        target_dest = f"{Config.RCLONE_DEST}/{path}"
+        
+        # MENGGUNAKAN EXEC ALIH-ALIH SHELL
+        task = await asyncio.create_subprocess_exec(
+            "rclone", "link", "--config", "./rclone.conf", target_dest,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
         stdout, stderr = await task.communicate()
-        if task.returncode == 0: rclone_link = stdout.decode().strip()
+        if task.returncode == 0: 
+            rclone_link = stdout.decode().strip()
             
-    if bot_set.link_options == 'Index' or bot_set.link_options=='Both':
-        if Config.INDEX_LINK: index_link =  Config.INDEX_LINK + '/' + quote(path)
+    if bot_set.link_options == 'Index' or bot_set.link_options == 'Both':
+        if Config.INDEX_LINK: 
+            index_link = Config.INDEX_LINK + '/' + quote(path)
 
     return rclone_link, index_link
 
