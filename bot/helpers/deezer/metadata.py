@@ -414,7 +414,7 @@ async def process_track_metadata(track_id, r_id, cover=None,
         final_cover_url = itunes_info.get('cover_url')
     elif cover_source == "musicbrainz":
         session = get_meta_session()
-            final_cover_url = await get_musicbrainz_cover_url(metadata, session)
+        final_cover_url = await get_musicbrainz_cover_url(metadata, session)
 
     # Fallback ke Original jika API pihak ketiga gagal / disetel ke original
     if not final_cover_url and cover_id:
