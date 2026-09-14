@@ -277,7 +277,8 @@ class QoClient:
             self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
 
     async def login(self):
-        self.get_tokens()
+        # Lempar fungsi yang mengandung scraping 'requests' sinkron ke thread lain
+        await asyncio.to_thread(self.get_tokens)
         
         # --- LOGIKA SOCKS PROXY CONNECTOR GLOBAL ---
         connector = None
