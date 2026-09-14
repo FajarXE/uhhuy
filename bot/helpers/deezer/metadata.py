@@ -22,6 +22,18 @@ from .manager import deezer_manager, DeezerError
 
 FALLBACK_IMAGE_PATH = os.path.join(Config.WORK_DIR, "project-siesta.png")
 
+# --- GLOBAL SESSION UNTUK METADATA EXTERNAL ---
+_META_SESSION = None
+
+def get_meta_session():
+    global _META_SESSION
+    if _META_SESSION is None or _META_SESSION.closed:
+        _META_SESSION = aiohttp.ClientSession(
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
+        )
+    return _META_SESSION
+# ----------------------------------------------
+
 # --- 1. CLEANING UTILS ---
 
 def clean_string_simple(text):
@@ -179,7 +191,8 @@ async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSessi
     try:
         if metadata.get('upc') and metadata['upc'] not in ["0", ""]:
             mb_url = f"https://musicbrainz.org/ws/2/release?query=barcode:{metadata['upc']}&fmt=json"
-            async with session.get(mb_url, headers={'User-Agent': 'SiestaBot/2.0'}) as resp:
+            # Hapus header custom di sini karena sudah ada di Global Session
+            async with session.get(mb_url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get('releases') and len(data['releases']) > 0:
@@ -256,7 +269,9 @@ async def process_track_metadata(track_id, r_id, cover=None,
     mb_info = {}
     pub_album_data = {} 
     
-    async with aiohttp.ClientSession() as session:
+    # GUNAKAN SESSION GLOBAL ALIH-ALIH MEMBUAT BARU
+    session = get_meta_session()
+        
         # A. PUBLIC TRACK (Composer Fallback)
         # Jika internal kosong, tembak Public API Track
         if not composers:
@@ -398,7 +413,7 @@ async def process_track_metadata(track_id, r_id, cover=None,
     if cover_source == "itunes":
         final_cover_url = itunes_info.get('cover_url')
     elif cover_source == "musicbrainz":
-        async with aiohttp.ClientSession() as session:
+        session = get_meta_session()
             final_cover_url = await get_musicbrainz_cover_url(metadata, session)
 
     # Fallback ke Original jika API pihak ketiga gagal / disetel ke original
@@ -459,7 +474,9 @@ async def process_album_metadata(album_id:int, a_meta:dict, t_meta:list, r_id, u
     mb_info = {}
     pub_album_data = {}
     
-    async with aiohttp.ClientSession() as session:
+    # GUNAKAN SESSION GLOBAL ALIH-ALIH MEMBUAT BARU
+    session = get_meta_session()
+
         # UPC / GENRE FALLBACK (PUBLIC API)
         # Jika UPC internal kosong, atau kita ingin genre yang lebih akurat
         if not metadata['upc'] or not a_meta.get('genres'):
@@ -564,7 +581,7 @@ async def process_album_metadata(album_id:int, a_meta:dict, t_meta:list, r_id, u
     if cover_source == "itunes":
         final_cover_url = itunes_info.get('cover_url')
     elif cover_source == "musicbrainz":
-        async with aiohttp.ClientSession() as session:
+        session = get_meta_session()
             final_cover_url = await get_musicbrainz_cover_url(metadata, session)
 
     # Fallback
