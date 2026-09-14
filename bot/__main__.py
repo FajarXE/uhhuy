@@ -151,6 +151,58 @@ async def load_all_bot_qobuz_clients():
     await asyncio.gather(*tasks)
 
 
+async def periodic_garbage_collector():
+    """
+    Tugas latar belakang untuk membersihkan file yatim (orphan files) 
+    di DOWNLOAD_BASE_DIR yang berumur lebih dari 24 jam.
+    Berjalan otomatis setiap 6 jam.
+    """
+    import time
+    import shutil
+    import os
+    
+    while True:
+        # Tunggu 6 jam (21600 detik) sebelum setiap siklus
+        await asyncio.sleep(21600)
+        
+        logging.info("GC: Memulai pembersihan sampah berkala...")
+        if not os.path.isdir(Config.DOWNLOAD_BASE_DIR):
+            continue
+            
+        now = time.time()
+        deleted_count = 0
+        
+        try:
+            for filename in os.listdir(Config.DOWNLOAD_BASE_DIR):
+                file_path = os.path.join(Config.DOWNLOAD_BASE_DIR, filename)
+                
+                # Abaikan file sistem tersembunyi
+                if filename.startswith('.'):
+                    continue
+                    
+                try:
+                    # Ambil waktu modifikasi terakhir file/folder
+                    mtime = os.path.getmtime(file_path)
+                    age_seconds = now - mtime
+                    
+                    # Jika umur melampaui 24 jam (86400 detik)
+                    if age_seconds > 86400:
+                        if os.path.isfile(file_path) or os.path.islink(file_path):
+                            os.remove(file_path)
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                            
+                        deleted_count += 1
+                        logging.debug(f"GC: Menghapus file yatim -> {filename}")
+                except Exception as e:
+                    logging.warning(f"GC: Gagal memeriksa/menghapus {file_path}: {e}")
+                    
+            if deleted_count > 0:
+                logging.info(f"GC Selesai: Berhasil menghapus {deleted_count} item lama dari penyimpanan.")
+        except Exception as e:
+            logging.error(f"GC Fatal Error: {e}")
+
+
 async def start_services():
     logging.info("------------------------------------------------")
     logging.info("Main: Memulai Inisialisasi Layanan...")
@@ -201,6 +253,8 @@ async def start_services():
     logging.info(f"------------------------------------------------")
     logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
     logging.info(f"------------------------------------------------")
+
+    asyncio.create_task(periodic_garbage_collector
     
     stop_event = asyncio.Event()
     
