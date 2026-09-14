@@ -583,7 +583,7 @@ async def process_album_metadata(album_id:int, a_meta:dict, t_meta:list, r_id, u
         final_cover_url = itunes_info.get('cover_url')
     elif cover_source == "musicbrainz":
         session = get_meta_session()
-            final_cover_url = await get_musicbrainz_cover_url(metadata, session)
+        final_cover_url = await get_musicbrainz_cover_url(metadata, session)
 
     # Fallback
     if not final_cover_url and cover_id:
