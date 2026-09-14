@@ -25,17 +25,26 @@ async def aria2_download(url, filepath, details=None):
         "split": "1",
         "min-split-size": "5M",
         "allow-overwrite": "true",
-        
-        # 1. SAMARKAN IDENTITAS ARIA2 MENJADI BROWSER CHROME
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
         
-        # 2. MATIKAN RESUME AGAR TIDAK DIBLOKIR SAAT RETRY
-        "continue": "false",
+        # --- PENAMBAHAN BYPASS CDN ---
+        "header": [
+            "Accept: */*",
+            "Accept-Encoding: gzip, deflate, br",
+            "Connection: keep-alive"
+        ],
+        "disable-ipv6": "true",       
+        "check-certificate": "false", 
+        # -----------------------------
         
+        "continue": "false",
         "max-tries": "3",
         "retry-wait": "2",
-        "timeout": "30",
-        "lowest-speed-limit": "10K",
+        "timeout": "45",
+        
+        # Hapus atau beri komentar pada baris lowest-speed-limit
+        # "lowest-speed-limit": "10K", 
+        
         "content-disposition-default-utf8": "true" 
     }
     
