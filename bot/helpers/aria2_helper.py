@@ -158,10 +158,7 @@ async def aria2_download(url, filepath, details=None):
                         LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
                         return False
                         
-                # --- [PROPER FIX CPU OVERLOAD & SPEED UNLOCK] ---
-                # Titik ideal: 0.05 detik (20x request/detik).
-                # CPU server tetap sangat rileks, tapi potongan DASH Tidal akan dieksekusi secepat kilat!
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.5)
  
     except Exception as e:
         LOGGER.error(f"Aria2 RPC Exception: {e}")
