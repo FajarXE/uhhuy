@@ -505,8 +505,11 @@ async def rclone_upload(user, realpath):
     elif isinstance(realpath, str) and realpath.endswith('.zip'): path_to_upload = realpath
     else: path_to_upload = realpath 
     path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
-    cmd = f'rclone copy --config ./rclone.conf "{path}" "{Config.RCLONE_DEST}"'
-    task = await asyncio.create_subprocess_shell(cmd)
+    
+    # MENGGUNAKAN EXEC ALIH-ALIH SHELL UNTUK KEAMANAN STRING
+    task = await asyncio.create_subprocess_exec(
+        "rclone", "copy", "--config", "./rclone.conf", path, Config.RCLONE_DEST
+    )
     await task.wait()
     r_link, i_link = await create_link(realpath, base_path)
     return r_link, i_link
