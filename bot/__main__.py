@@ -254,7 +254,7 @@ async def start_services():
     logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
     logging.info(f"------------------------------------------------")
 
-    asyncio.create_task(periodic_garbage_collector
+    asyncio.create_task(periodic_garbage_collector())
     
     stop_event = asyncio.Event()
     
