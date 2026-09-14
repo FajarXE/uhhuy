@@ -99,29 +99,40 @@ def get_real_timezone():
     except: pass
     return time.tzname[0]
 
+# --- CACHE DATA STATIS (HANYA BERJALAN 1x SAAT BOT START) ---
+STATIC_OS_NAME = get_distro_name()
+STATIC_CPU_MODEL = get_cpu_model()
+STATIC_HOST_NAME = get_host_info()
+STATIC_TIMEZONE = get_real_timezone()
+STATIC_UNAME = platform.uname()
+STATIC_KERNEL = STATIC_UNAME.release
+STATIC_ARCH = STATIC_UNAME.machine
+STATIC_PACKAGES = get_packages_count()
+STATIC_SHELL = os.environ.get("SHELL", "/bin/bash").split("/")[-1]
+# -------------------------------------------------------------
+
 # --- CORE LOGIC (GENERATOR TEXT) ---
 def generate_stats_text():
     """
     Fungsi ini dipisahkan agar bisa dipanggil oleh Command dan Tombol Refresh
     tanpa menulis ulang kode yang sama.
     """
-    # 1. System Info
-    uname = platform.uname()
-    os_name = get_distro_name()
-    kernel = uname.release
-    arch = uname.machine
-    host_name = get_host_info()
-    timezone = get_real_timezone()
-    shell = os.environ.get("SHELL", "/bin/bash").split("/")[-1]
-    packages = get_packages_count()
+    # 1. System Info (MENGGUNAKAN CACHE STATIS)
+    os_name = STATIC_OS_NAME
+    kernel = STATIC_KERNEL
+    arch = STATIC_ARCH
+    host_name = STATIC_HOST_NAME
+    timezone = STATIC_TIMEZONE
+    shell = STATIC_SHELL
+    packages = STATIC_PACKAGES
     
     # Uptime
     boot_time_timestamp = psutil.boot_time()
     os_uptime = get_readable_time(int(time.time() - boot_time_timestamp))
     bot_uptime = get_readable_time(int(time.time() - BOT_START_TIME))
     
-    # 2. Resources
-    cpu_model = get_cpu_model()
+    # 2. Resources (TETAP DINAMIS KARENA BERUBAH-UBAH)
+    cpu_model = STATIC_CPU_MODEL
     cpu_count = psutil.cpu_count(logical=True)
     cpu_usage = psutil.cpu_percent()
     cpu_bar = make_progress_bar(cpu_usage)
@@ -191,8 +202,6 @@ All BW    : {total_bw}
 </code>
 """
     return text
-
-# --- MAIN COMMAND ---
 
 @Client.on_message(filters.command(["stats", "status"]))
 async def stats_handler(client, message):
