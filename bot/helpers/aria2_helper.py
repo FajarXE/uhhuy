@@ -6,9 +6,9 @@ import aiohttp
 from bot.logger import LOGGER
 
 ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc"
-
-# Dictionary untuk menyimpan ID unduhan yang sedang berjalan
 ACTIVE_DOWNLOADS = {}
+
+_ARIA2_SESSION = None
 
 async def aria2_download(url, filepath, details=None):
     # Import di dalam fungsi untuk menghindari circular import
@@ -167,8 +167,8 @@ async def aria2_download(url, filepath, details=None):
         LOGGER.error(f"Aria2 RPC Exception: {e}")
         return False
 
-# FUNGSI BARU: Untuk membatalkan unduhan (Force Remove)
 async def aria2_cancel(gid):
+    global _ARIA2_SESSION
     payload = {
         "jsonrpc": "2.0",
         "id": "bot_cancel",
@@ -176,18 +176,22 @@ async def aria2_cancel(gid):
         "params": [gid]
     }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(ARIA2_RPC_URL, json=payload) as resp:
-                res = await resp.json()
-                if "error" not in res:
-                    ACTIVE_DOWNLOADS.pop(gid, None)
-                    return True
+        if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
+            _ARIA2_SESSION = aiohttp.ClientSession()
+            
+        async with _ARIA2_SESSION.post(ARIA2_RPC_URL, json=payload) as resp:
+            res = await resp.json()
+            if "error" not in res:
+                ACTIVE_DOWNLOADS.pop(gid, None)
+                return True
     except:
         pass
     return False
 
 async def get_aria2_global_stat():
-    """Mengambil total kecepatan download Aria2 secara realtime"""
+    """Mengambil total kecepatan download Aria2 secara realtime (Tanpa Memory Leak)"""
+    global _ARIA2_SESSION
+    
     payload = {
         "jsonrpc": "2.0",
         "id": "bot_global_stat",
@@ -195,19 +199,16 @@ async def get_aria2_global_stat():
         "params": []
     }
     
-    # Pastikan URL di dalam fungsi juga menggunakan IP statis
-    ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc" 
-    
     try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.post(ARIA2_RPC_URL, json=payload) as resp:
-                res = await resp.json()
-                if "error" not in res:
-                    return res["result"]
+        # Jika sesi belum ada atau tertutup, buat baru SATU KALI SAJA
+        if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
+            _ARIA2_SESSION = aiohttp.ClientSession()
+            
+        async with _ARIA2_SESSION.post(ARIA2_RPC_URL, json=payload) as resp:
+            res = await resp.json()
+            if "error" not in res:
+                return res["result"]
     except Exception:
-        # [FIX] Hapus/Bungkam LOGGER.error di sini agar tidak membanjiri log 
-        # saat Aria2 sedang dimuat ulang atau gagal berjalan.
         pass
         
     return None
