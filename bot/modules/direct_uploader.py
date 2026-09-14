@@ -73,10 +73,6 @@ class DirectUpload:
         self.path = path
         self.listener = listener
         self.user_dict = listener.user_dict if listener else {}
-        
-        self.session = requests.Session()
-        retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 504])
-        self.session.mount('https://', HTTPAdapter(max_retries=retries))
 
     # ============================
     # GOFILE HANDLER (AIOHTTP)
@@ -109,16 +105,27 @@ class DirectUpload:
 
     async def gofile_get_root(self, token):
         try:
-            acc_id = await asyncio.to_thread(self._get_gofile_account, token)
-            if acc_id:
-                r = await asyncio.to_thread(self.session.get, f"https://api.gofile.io/accounts/{acc_id}?token={token}")
-                data = r.json()['data']
-                return data['rootFolder']
-        except: pass
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://api.gofile.io/accounts/getid?token={token}", timeout=10) as r1:
+                    res1 = await r1.json()
+                    if res1.get('status') == 'ok':
+                        acc_id = res1['data']['id']
+                        async with session.get(f"https://api.gofile.io/accounts/{acc_id}?token={token}", timeout=10) as r2:
+                            res2 = await r2.json()
+                            return res2['data']['rootFolder']
+        except Exception as e:
+            LOGGER.error(f"Gofile Get Root Error: {e}")
         return None
 
     async def gofile_create_folder_async(self, token, parent_id, name):
-        return await asyncio.to_thread(self._gofile_create_folder, token, parent_id, name)
+        try:
+            data = {'token': token, 'parentFolderId': parent_id, 'folderName': name}
+            async with aiohttp.ClientSession() as session:
+                async with session.post("https://api.gofile.io/contents/createFolder", data=data, timeout=15) as r:
+                    res = await r.json()
+                    if res.get('status') == 'ok': return res['data']
+        except: pass
+        return None
 
     async def _upload_gofile_aiohttp(self, filepath, token, folder_id, details):
         server = await asyncio.to_thread(self._get_gofile_server)
@@ -187,10 +194,28 @@ class DirectUpload:
         return None
 
     async def buzzheavier_get_root(self, token):
-         return await asyncio.to_thread(self._buzzheavier_get_root, token)
-
+        try:
+            headers = {"Authorization": f"Bearer {token}"}
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://buzzheavier.com/api/fs", headers=headers, timeout=10) as r:
+                    res = await r.json()
+                    if res.get('code') == 200: return res['data']['id']
+        except: pass
+        return None
+    
     async def buzzheavier_create_folder_async(self, token, parent_id, name):
-         return await asyncio.to_thread(self._buzzheavier_create_folder, token, parent_id, name)
+        try:
+            url = f"https://buzzheavier.com/api/fs/{parent_id}"
+            headers = {"Authorization": f"Bearer {token}"}
+            data = {"name": name, "parentId": parent_id}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=data, timeout=15) as r:
+                    res = await r.json()
+                    if res.get('code') == 200: return res['data']['id']
+                    # Logika fallback nama duplikat (code 409) bisa disederhanakan
+                    # atau ditambahkan jika perlu.
+        except: pass
+        return None
 
     async def _upload_buzzheavier_aiohttp(self, filepath, token, folder_id, details):
         filename = os.path.basename(filepath)
@@ -228,10 +253,15 @@ class DirectUpload:
     # VIKINGFILES HANDLER (AIOHTTP)
     # ============================
     async def _upload_viking_aiohttp(self, filepath, token, details):
-        def get_srv():
-            try: return self.session.get("https://vikingfile.com/api/get-server", timeout=10).json()['server']
-            except: return None
-        srv = await asyncio.to_thread(get_srv)
+        # Ganti fungsi get_srv sinkron menjadi ini:
+        srv = None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://vikingfile.com/api/get-server", timeout=10) as r:
+                    res = await r.json()
+                    srv = res.get('server')
+        except: pass
+
         if not srv: 
             LOGGER.error("Viking Upload: Gagal mendapatkan server dari API.")
             return None
