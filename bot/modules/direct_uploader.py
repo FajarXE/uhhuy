@@ -77,31 +77,15 @@ class DirectUpload:
     # ============================
     # GOFILE HANDLER (AIOHTTP)
     # ============================
-    def _get_gofile_server(self):
+    async def gofile_get_server(self):
         try:
-            r = self.session.get("https://api.gofile.io/servers", timeout=10)
-            if r.status_code == 200:
-                return r.json()['data']['servers'][0]['name']
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://api.gofile.io/servers", timeout=10) as r:
+                    res = await r.json()
+                    if res.get('status') == 'ok':
+                        return res['data']['servers'][0]['name']
         except: pass
         return "store1"
-
-    def _get_gofile_account(self, token):
-        try:
-            r = self.session.get(f"https://api.gofile.io/accounts/getid?token={token}", timeout=10)
-            if r.status_code == 200 and r.json()['status'] == 'ok':
-                return r.json()['data']['id']
-        except: pass
-        return None
-
-    def _gofile_create_folder(self, token, parent_id, name):
-        try:
-            data = {'token': token, 'parentFolderId': parent_id, 'folderName': name}
-            r = self.session.post("https://api.gofile.io/contents/createFolder", data=data, timeout=15)
-            if r.status_code == 200 and r.json()['status'] == 'ok':
-                return r.json()['data']
-        except Exception as e:
-            LOGGER.error(f"Gofile Create Folder Error: {e}")
-        return None
 
     async def gofile_get_root(self, token):
         try:
@@ -114,6 +98,7 @@ class DirectUpload:
                             res2 = await r2.json()
                             return res2['data']['rootFolder']
         except Exception as e:
+            from bot.logger import LOGGER
             LOGGER.error(f"Gofile Get Root Error: {e}")
         return None
 
@@ -128,7 +113,8 @@ class DirectUpload:
         return None
 
     async def _upload_gofile_aiohttp(self, filepath, token, folder_id, details):
-        server = await asyncio.to_thread(self._get_gofile_server)
+        # MENGGUNAKAN FUNGSI ASINKRON BARU
+        server = await self.gofile_get_server()
         url = f"https://{server}.gofile.io/uploadFile"
         
         data = aiohttp.FormData(quote_fields=False)
@@ -142,7 +128,6 @@ class DirectUpload:
         
         try:
             async with aiohttp.ClientSession() as session:
-                # Timeout dinaikkan ke 3600 agar file besar tidak terputus
                 async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
                     res = await resp.json()
                     wrapper.close()
@@ -151,70 +136,69 @@ class DirectUpload:
         except Exception as e:
             wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
+                from bot.logger import LOGGER
                 LOGGER.warning(f"Gofile Upload dibatalkan oleh pengguna: {filename}")
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
                         await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                 except: pass
-                # Membunuh rantai Fallback dan Loop secara total!
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
+                from bot.logger import LOGGER
                 LOGGER.error(f"Gofile Upload Error: {e}")
         return None
 
     # ============================
     # BUZZHEAVIER HANDLER (AIOHTTP)
     # ============================
-    def _buzzheavier_get_root(self, token):
-        try:
-            headers = {"Authorization": f"Bearer {token}"}
-            r = self.session.get("https://buzzheavier.com/api/fs", headers=headers, timeout=10)
-            if r.json().get('code') == 200: return r.json()['data']['id']
-        except: pass
-        return None
-    
-    def _buzzheavier_create_folder(self, token, parent_id, name):
-        try:
-            url = f"https://buzzheavier.com/api/fs/{parent_id}"
-            headers = {"Authorization": f"Bearer {token}"}
-            data = {"name": name, "parentId": parent_id}
-            r = self.session.post(url, headers=headers, json=data, timeout=15)
-            res = r.json()
-            if res.get('code') == 200: return res['data']['id']
-            elif res.get('code') == 409:
-                match = re.search(r"\((\d+)\)$", name)
-                if match:
-                    num = int(match.group(1)) + 1
-                    new_name = re.sub(r"\(\d+\)$", f"({num})", name)
-                else:
-                    new_name = f"{name} (1)"
-                return self._buzzheavier_create_folder(token, parent_id, new_name)
-        except: pass
-        return None
-
     async def buzzheavier_get_root(self, token):
         try:
             headers = {"Authorization": f"Bearer {token}"}
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://buzzheavier.com/api/fs", headers=headers, timeout=10) as r:
                     res = await r.json()
-                    if res.get('code') == 200: return res['data']['id']
-        except: pass
+                    if res.get('code') == 200: 
+                        return res['data']['id']
+        except Exception as e: 
+            from bot.logger import LOGGER
+            LOGGER.error(f"Buzzheavier Get Root Error: {e}")
         return None
     
     async def buzzheavier_create_folder_async(self, token, parent_id, name):
+        if not parent_id:
+            return None
+            
         try:
             url = f"https://buzzheavier.com/api/fs/{parent_id}"
             headers = {"Authorization": f"Bearer {token}"}
             data = {"name": name, "parentId": parent_id}
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers, json=data, timeout=15) as r:
                     res = await r.json()
-                    if res.get('code') == 200: return res['data']['id']
-                    # Logika fallback nama duplikat (code 409) bisa disederhanakan
-                    # atau ditambahkan jika perlu.
-        except: pass
+                    
+                    if res.get('code') == 200 or res.get('code') == 201: 
+                        return res['data']['id']
+                        
+                    # --- KEMBALIKAN LOGIKA 409: FOLDER SUDAH ADA ---
+                    elif res.get('code') == 409:
+                        import re
+                        # Deteksi apakah sudah ada angka di belakang nama, misal "(1)"
+                        match = re.search(r"\s\((\d+)\)$", name)
+                        if match:
+                            num = int(match.group(1)) + 1
+                            new_name = re.sub(r"\s\(\d+\)$", f" ({num})", name)
+                        else:
+                            new_name = f"{name} (1)"
+                        
+                        # Coba buat ulang dengan nama baru
+                        return await self.buzzheavier_create_folder_async(token, parent_id, new_name)
+                    # -----------------------------------------------
+                    
+        except Exception as e:
+            from bot.logger import LOGGER
+            LOGGER.error(f"Buzzheavier Create Folder Error: {e}")
         return None
 
     async def _upload_buzzheavier_aiohttp(self, filepath, token, folder_id, details):
@@ -237,15 +221,16 @@ class DirectUpload:
         except Exception as e:
             wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
+                from bot.logger import LOGGER
                 LOGGER.warning(f"Buzzheavier Upload dibatalkan oleh pengguna: {filename}")
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
                         await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
                 except: pass
-                # Membunuh rantai Fallback dan Loop secara total!
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
+                from bot.logger import LOGGER
                 LOGGER.error(f"Buzzheavier Upload Error: {e}")
         return None
 
