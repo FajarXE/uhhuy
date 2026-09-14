@@ -17,6 +17,9 @@ from bot.logger import LOGGER
 from bot.helpers.database.mongo_async import database
 from bot.settings import bot_set
 
+# TAMBAHKAN BARIS INI: Limiter berbagi untuk semua akun
+GLOBAL_QOBUZ_LIMITER = aiolimiter.AsyncLimiter(30, 60)
+
 class QoClient:
     def __init__(self, email=None, password=None, user_id=None, user_token=None, app_id=None, app_secret=None):
         self.email = email
@@ -35,7 +38,8 @@ class QoClient:
         self.id = None
         self.secrets = None
         self.session = None
-        self.ratelimit = aiolimiter.AsyncLimiter(30, 60)
+        # MATIKAN BARIS INI:
+        # self.ratelimit = aiolimiter.AsyncLimiter(30, 60)
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.quality = 6 # Default 6 (Lossless)
 
@@ -138,7 +142,8 @@ class QoClient:
         return await self.session_call(epoint, params)
 
     async def session_call(self, epoint, params):
-        async with self.ratelimit:
+        # GANTI self.ratelimit MENJADI GLOBAL_QOBUZ_LIMITER
+        async with GLOBAL_QOBUZ_LIMITER:
             async with self.session.get(self.base + epoint, params=params) as r:
                 if epoint == "user/login":
                     if r.status == 401:
@@ -241,7 +246,8 @@ class QoClient:
         }
         
         try:
-            async with self.ratelimit:
+            # GANTI self.ratelimit MENJADI GLOBAL_QOBUZ_LIMITER
+            async with GLOBAL_QOBUZ_LIMITER:
                 async with self.session.get(self.base + test_epoint, params=params) as r:
                     if r.status == 200:
                         return True
