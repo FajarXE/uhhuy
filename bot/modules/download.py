@@ -432,6 +432,13 @@ async def run_download_task(link: str, user: dict):
                     USER_DOWNLOAD_HISTORY[user['user_id']]['artist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['artist'] if current_time - ts < Config.FREE_WAIT_TIME]
                     USER_DOWNLOAD_HISTORY[user['user_id']]['video'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['video'] if current_time - ts < Config.FREE_WAIT_TIME]
                     USER_DOWNLOAD_HISTORY[user['user_id']]['track'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['track'] if current_time - ts < Config.FREE_WAIT_TIME]
+
+                    # --- TAMBAHKAN PEMBERSIHAN KUNCI KOSONG DI SINI ---
+                    # Periksa apakah seluruh daftar riwayat (album, playlist, dll) sudah kosong
+                    is_history_empty = all(not history_list for history_list in USER_DOWNLOAD_HISTORY[user['user_id']].values())
+                    if is_history_empty:
+                        USER_DOWNLOAD_HISTORY.pop(user['user_id'], None)
+                    # --------------------------------------------------
                     
                     # 5. Cek aturan limitasi
                     if link_type == "artist":
@@ -561,6 +568,14 @@ async def run_download_task(link: str, user: dict):
             import bot.helpers.utils as utils
             # Catatan: Pastikan fungsi cleanup ada di file/import Anda
             await cleanup(user)
+
+            # --- TAMBAHKAN PEMBERSIHAN SEMAPHORE DI SINI ---
+            # Hapus kunci dari memori jika tidak ada lagi antrean yang mengunci
+            current_sem = USER_SEMAPHORES.get(chat_id)
+            if current_sem and not current_sem.locked():
+                USER_SEMAPHORES.pop(chat_id, None)
+            # -----------------------------------------------
+            
             try:
                 if 'bot_msg' in user:
                     import hashlib
