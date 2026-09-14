@@ -316,6 +316,15 @@ async def shutdown_all_services():
         logging.error(f"Main: Peringatan saat menutup koneksi MongoDB: {e}")
     # ---------------------------------------------
 
+    # --- PENAMBAHAN GRACEFUL SHUTDOWN GUNICORN ---
+    try:
+        from bot import gunicorn_process
+        gunicorn_process.terminate()
+        logging.info("Main: Proses Gunicorn berhasil dimatikan.")
+    except Exception: 
+        pass
+    # ---------------------------------------------
+
 
 if __name__ == "__main__":
     import shutil
