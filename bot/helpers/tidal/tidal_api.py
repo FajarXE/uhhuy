@@ -409,8 +409,10 @@ class MobileSession(BaseSession):
                 self.access_token = json_resp['access_token']
                 self.expires = datetime.now() + timedelta(seconds=json_resp['expires_in'])
                 self.refresh_token = json_resp.get("refresh_token", self.refresh_token)
-            elif r.status == 401:
-                raise Exception('TIDAL : ' + json_resp['userMessage'])
+            else:
+                # --- PERBAIKAN: Tangkap semua error selain 200 dengan rapi ---
+                error_msg = json_resp.get('userMessage') or json_resp.get('error_description') or str(json_resp)
+                raise Exception(f"TIDAL : {error_msg}")
 
 
     def auth_headers(self):
