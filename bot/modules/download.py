@@ -358,6 +358,10 @@ async def run_download_task(link: str, user: dict):
                     pass
             utils.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
             # -----------------------------------------------------------------
+            # --- [SINKRONISASI KE MONGODB] ---
+            from bot.helpers.database.mongo_async import database
+            await database.save_ui_state(chat_id, user['bot_msg'].id, 1)
+            # ---------------------------------
             
             import hashlib
             import time
@@ -613,6 +617,10 @@ async def run_download_task(link: str, user: dict):
                         if task_successful:
                             utils.GLOBAL_UI_MSG.pop(user['chat_id'], None)
                             utils.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
+                            # --- [HAPUS DARI MONGODB] ---
+                            from bot.helpers.database.mongo_async import database
+                            await database.remove_ui_state(user['chat_id'])
+                            # ----------------------------
                     # ---------------------------------------------------------
             except:
                 pass
