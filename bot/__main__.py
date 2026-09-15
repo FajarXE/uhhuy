@@ -266,6 +266,36 @@ async def start_services():
     logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
     logging.info(f"------------------------------------------------")
 
+    # --- TAMBAHKAN BLOK INI TEPAT DI BAWAHNYA ---
+    logging.info("Main: Memuat State Radar UI dari Database...")
+    try:
+        from bot.helpers.database.mongo_async import database
+        import bot.helpers.utils as utils
+        ui_states = await database.load_all_ui_states()
+        
+        restored_count = 0
+        for chat_id, data in ui_states.items():
+            msg_id = data['message_id']
+            page = data['page']
+            try:
+                # Ambil kembali wujud objek pesan secara live dari Telegram
+                msg = await aio.get_messages(chat_id, msg_id)
+                # Pastikan pesan benar-benar masih ada (tidak dihapus manual oleh user)
+                if msg and getattr(msg, 'empty', False) is False:
+                    utils.GLOBAL_UI_MSG[chat_id] = msg
+                    utils.GLOBAL_UI_PAGES[chat_id] = page
+                    restored_count += 1
+                else:
+                    await database.remove_ui_state(chat_id)
+            except Exception:
+                pass
+        
+        if restored_count > 0:
+            logging.info(f"Main: Berhasil memulihkan {restored_count} panel Radar UI dari memori.")
+    except Exception as e:
+        logging.warning(f"Main: Gagal memuat Radar UI: {e}")
+    # --------------------------------------------
+
     asyncio.create_task(periodic_garbage_collector())
     
     stop_event = asyncio.Event()
