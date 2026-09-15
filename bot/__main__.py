@@ -246,6 +246,18 @@ async def start_services():
     await bot_set.initialize_users()
     await load_all_user_settings_into_managers()
 
+    # --- TAMBAHKAN BLOK INI ---
+    logging.info("Main: Memuat State Sinyal Batal dari Database...")
+    import bot.helpers.utils as utils
+    try:
+        saved_cancels = await database.load_all_cancels()
+        if saved_cancels:
+            utils.GLOBAL_CANCEL_DICT.update(saved_cancels)
+            logging.info(f"Main: Berhasil memulihkan {len(saved_cancels)} sinyal batal dari memori.")
+    except Exception as e:
+        logging.warning(f"Main: Gagal memuat sinyal batal: {e}")
+    # --------------------------
+
     logging.info("Main: Menghubungkan ke Telegram...")
     await aio.start()
     
