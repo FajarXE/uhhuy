@@ -306,6 +306,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         global_text, global_markup = get_status_text(page=current_page)
                         try: 
                             await edit_message(m, global_text, global_markup, False)
+                            # --- [ANTI-FLOODWAIT] JEDA ANTAR CHAT ---
+                            await asyncio.sleep(0.15)
                         except Exception: 
                             pass
                     # ------------------------------------------------------------------
