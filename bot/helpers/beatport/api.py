@@ -82,7 +82,7 @@ class BeatportAPI:
         self.email = token_data.get('email')
         self.expires = datetime.now() - timedelta(seconds=10)
 
-        async def login(self, email: str, password: str):
+    async def login(self, email: str, password: str):
         self.email = email
         self.password_cache = password
         await self._init_session()
