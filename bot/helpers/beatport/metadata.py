@@ -30,10 +30,7 @@ QUALITY_MAP = {
 
 def truncate_artist_list(artist_str: str, max_len: int = 200) -> str: 
     if len(artist_str) > max_len: return artist_str[:max_len] + "..."
-    return artist_str
-
-async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
-    return None 
+    return artist_str 
 
 def custom_url_parse(link: str):
     match = re.search(r"beatport\.com/(?:[a-z]{2}/)?(?P<type>track|release|artist|playlists|chart)/.+?/(?P<id>\d+)", link)
@@ -59,9 +56,9 @@ async def _process_cover(metadata: dict, beatport_url: str):
     return await create_cover_file(final, metadata)
 
 # --- FUNGSI TAGGING LOKAL ---
-async def write_extended_tags(filepath: str, meta: dict):
+def _write_extended_tags_sync(filepath: str, meta: dict):
     """
-    Menulis tag khusus: BPM, Key, CatNo, Label, UPC, ISRC, Barcode, Producer, Copyright.
+    Fungsi sinkron murni untuk mengeksekusi Mutagen di background thread.
     """
     try:
         ext = os.path.splitext(filepath)[1].lower()
@@ -113,32 +110,23 @@ async def write_extended_tags(filepath: str, meta: dict):
         # 2. Handler FLAC
         elif ext == '.flac':
             audio = FLAC(filepath)
-            
             if meta.get('bpm'): audio.tags['BPM'] = str(meta['bpm'])
-            
             if meta.get('key'): 
                 audio.tags['INITIALKEY'] = str(meta['key'])
                 audio.tags['KEY'] = str(meta['key'])
-            
             if meta.get('catalog_number'): audio.tags['CATALOGNUMBER'] = str(meta['catalog_number'])
-            
             if meta.get('copyright'):
                 audio.tags['COPYRIGHT'] = str(meta['copyright'])
                 audio.tags['cpr'] = str(meta['copyright'])
-
             if meta.get('label'): 
                 audio.tags['LABEL'] = meta['label']
                 audio.tags['ORGANIZATION'] = meta['label']
                 audio.tags['PUBLISHER'] = meta['label']
-            
             if meta.get('isrc'): audio.tags['ISRC'] = str(meta['isrc'])
-            
             if meta.get('upc'):
                 audio.tags['UPC'] = str(meta['upc'])
                 audio.tags['BARCODE'] = str(meta['upc'])
-
             if meta.get('remixer'): audio.tags['REMIXER'] = str(meta['remixer'])
-
             audio.save()
 
         # 3. Handler MP3
@@ -155,14 +143,20 @@ async def write_extended_tags(filepath: str, meta: dict):
             if meta.get('isrc'): tags.add(TSRC(encoding=3, text=str(meta['isrc'])))
             if meta.get('remixer'): tags.add(TPE4(encoding=3, text=str(meta['remixer'])))
             if meta.get('upc'): tags.add(TXXX(encoding=3, desc='BARCODE', text=str(meta['upc'])))
-            
             tags.save()
 
     except Exception as e:
+        from bot.logger import LOGGER
         LOGGER.warning(f"Gagal menulis extended tags Beatport: {e}")
 
-# --- PROSES METADATA UTAMA ---
+async def write_extended_tags(filepath: str, meta: dict):
+    """
+    Wrapper asinkron yang mendelegasikan tugas berat disk I/O ke thread terpisah, 
+    sehingga event loop Telegram tetap responsif.
+    """
+    await asyncio.to_thread(_write_extended_tags_sync, filepath, meta)
 
+# --- PROSES METADATA UTAMA ---
 async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data: dict = None, fetch_stream: bool = True, album_pre_data: dict = None):
     user_id = user.get('user_id')
     active_client = beatport_manager.get_client(user_id)
