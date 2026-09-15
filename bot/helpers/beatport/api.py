@@ -1,6 +1,6 @@
 import aiohttp
 import asyncio
-import random
+import aiolimiter
 from datetime import timedelta, datetime
 from bot.logger import LOGGER
 
@@ -12,6 +12,9 @@ except ImportError:
 
 BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 APP_USER_AGENT = "Serato DJ Lite/3.2.1 (Windows NT 10.0; Win64; x64)"
+
+# Set batas aman untuk Beatport: misal 10 request per 5 detik
+BP_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 
 class BeatportError(Exception):
     def __init__(self, message):
@@ -79,7 +82,7 @@ class BeatportAPI:
         self.email = token_data.get('email')
         self.expires = datetime.now() - timedelta(seconds=10)
 
-    async def login(self, email: str, password: str):
+        async def login(self, email: str, password: str):
         self.email = email
         self.password_cache = password
         await self._init_session()
@@ -90,39 +93,36 @@ class BeatportAPI:
             "redirect_uri": self.redirect_uri,
         }
         
-        await asyncio.sleep(random.uniform(1.0, 2.0))
-        
-        async with self.session.get(f"{self.API_URL}auth/o/authorize/", params=params_auth, allow_redirects=False) as r:
-            if r.status != 302:
-                try: err_text = await r.text()
-                except: err_text = "Unknown"
-                raise BeatportError(f"Auth step 1 gagal ({r.status}): {err_text}")
-            
-            base_url = str(r.url).replace(r.request_info.url.path_qs, '')
-            referer = base_url + r.headers['location']
+        async with BP_LIMITER:
+            async with self.session.get(f"{self.API_URL}auth/o/authorize/", params=params_auth, allow_redirects=False) as r:
+                if r.status != 302:
+                    try: err_text = await r.text()
+                    except: err_text = "Unknown"
+                    raise BeatportError(f"Auth step 1 gagal ({r.status}): {err_text}")
+                
+                base_url = str(r.url).replace(r.request_info.url.path_qs, '')
+                referer = base_url + r.headers['location']
 
         json_login = {"username": email, "password": password}
         
-        await asyncio.sleep(random.uniform(1.5, 2.5))
+        async with BP_LIMITER:
+            async with self.session.post(f"{self.API_URL}auth/login/", json=json_login, headers={"Referer": referer}) as r:
+                if r.status != 200:
+                    try:
+                        err_json = await r.json()
+                    except: pass
+                    raise BeatportError(f"Login gagal (Cek password / Captcha): {r.status}")
         
-        async with self.session.post(f"{self.API_URL}auth/login/", json=json_login, headers={"Referer": referer}) as r:
-            if r.status != 200:
-                try:
-                    err_json = await r.json()
-                except: pass
-                raise BeatportError(f"Login gagal (Cek password / Captcha): {r.status}")
-
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-        
-        async with self.session.get(f"{self.API_URL}auth/o/authorize/", params=params_auth, allow_redirects=False) as r:
-            if r.status != 302:
-                raise BeatportError(f"Auth step 3 gagal ({r.status})")
-            
-            location = r.headers.get('location')
-            if not location or 'code=' not in location:
-                 raise BeatportError("Gagal mendapatkan Auth Code dari header location.")
-            
-            code = location.split('code=')[1]
+        async with BP_LIMITER:
+            async with self.session.get(f"{self.API_URL}auth/o/authorize/", params=params_auth, allow_redirects=False) as r:
+                if r.status != 302:
+                    raise BeatportError(f"Auth step 3 gagal ({r.status})")
+                
+                location = r.headers.get('location')
+                if not location or 'code=' not in location:
+                     raise BeatportError("Gagal mendapatkan Auth Code dari header location.")
+                
+                code = location.split('code=')[1]
 
         data_token = {
             "client_id": self.client_id,
@@ -131,17 +131,16 @@ class BeatportAPI:
             "redirect_uri": self.redirect_uri,
         }
         
-        await asyncio.sleep(random.uniform(0.5, 1.0))
-        
-        async with self.session.post(f"{self.API_URL}auth/o/token/", data=data_token) as r:
-            if r.status != 200:
-                raise BeatportError(f"Auth step 4 gagal: {await r.text()}")
-            
-            resp_json = await r.json()
-            self.access_token = resp_json['access_token']
-            self.refresh_token = resp_json['refresh_token']
-            self.expires = datetime.now() + timedelta(seconds=resp_json['expires_in'])
-            LOGGER.info(f"Beatport: Login berhasil untuk {email}")
+        async with BP_LIMITER:
+            async with self.session.post(f"{self.API_URL}auth/o/token/", data=data_token) as r:
+                if r.status != 200:
+                    raise BeatportError(f"Auth step 4 gagal: {await r.text()}")
+                
+                resp_json = await r.json()
+                self.access_token = resp_json['access_token']
+                self.refresh_token = resp_json['refresh_token']
+                self.expires = datetime.now() + timedelta(seconds=resp_json['expires_in'])
+                LOGGER.info(f"Beatport: Login berhasil untuk {email}")
 
     async def refresh(self):
         await self._init_session()
@@ -151,16 +150,15 @@ class BeatportAPI:
             'grant_type': 'refresh_token',
         }
         
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-        
-        async with self.session.post(f'{self.API_URL}auth/o/token/', data=data) as r:
-            if r.status != 200:
-                raise BeatportError("Gagal refresh token (Invalid Grant)")
-            
-            resp_json = await r.json()
-            self.access_token = resp_json['access_token']
-            self.refresh_token = resp_json['refresh_token']
-            self.expires = datetime.now() + timedelta(seconds=resp_json['expires_in'])
+        async with BP_LIMITER:
+            async with self.session.post(f'{self.API_URL}auth/o/token/', data=data) as r:
+                if r.status != 200:
+                    raise BeatportError("Gagal refresh token (Invalid Grant)")
+                
+                resp_json = await r.json()
+                self.access_token = resp_json['access_token']
+                self.refresh_token = resp_json['refresh_token']
+                self.expires = datetime.now() + timedelta(seconds=resp_json['expires_in'])
 
     async def _get(self, endpoint: str, params: dict = None):
         await self._init_session()
@@ -175,38 +173,38 @@ class BeatportAPI:
                 else:
                     raise BeatportError("Sesi habis.")
 
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                async with self.session.get(f'{self.API_URL}{endpoint}', params=params, headers=self._get_headers(True)) as r:
-                    
-                    if r.status == 200:
-                        return await r.json()
+                # GUNAKAN LIMITER DI SINI (Perhatikan spasi di bawahnya)
+                async with BP_LIMITER:
+                    async with self.session.get(f'{self.API_URL}{endpoint}', params=params, headers=self._get_headers(True)) as r:
+                        
+                        if r.status == 200:
+                            return await r.json()
 
-                    if r.status in [500, 502, 503, 504]:
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(2)
-                            continue
-                        raise ConnectionError(f"Server Error: {r.status}")
+                        if r.status in [500, 502, 503, 504]:
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(2)
+                                continue
+                            raise ConnectionError(f"Server Error: {r.status}")
 
-                    if r.status == 401:
-                        raise BeatportError("Unauthorized (401)")
-                    
-                    if r.status == 403:
-                        try:
-                            err_data = await r.json()
-                            msg = str(err_data).lower()
-                            if "territory" in msg or "region" in msg:
-                                raise BeatportError("Region Locked (Gunakan VPN/Proxy)")
-                        except: pass
-                        raise BeatportError(f"Forbidden (403): Akses ditolak.")
-                    
-                    if r.status == 404:
-                        raise BeatportError(f"Not Found (404): {endpoint}")
-                    
-                    raise ConnectionError(f"API Error {r.status}")
+                        if r.status == 401:
+                            raise BeatportError("Unauthorized (401)")
+                        
+                        if r.status == 403:
+                            try:
+                                err_data = await r.json()
+                                msg = str(err_data).lower()
+                                if "territory" in msg or "region" in msg:
+                                    raise BeatportError("Region Locked (Gunakan VPN/Proxy)")
+                            except: pass
+                            raise BeatportError(f"Forbidden (403): Akses ditolak.")
+                        
+                        if r.status == 404:
+                            raise BeatportError(f"Not Found (404): {endpoint}")
+                        
+                        raise ConnectionError(f"API Error {r.status}")
 
             except aiohttp.ClientConnectorError:
                 if attempt < max_retries - 1:
