@@ -10,7 +10,7 @@ try:
     from .api import HighResAudioApi
 except ImportError:
     class HighResAudioApi: 
-        def close_session(self): pass
+        async def close_session(self): pass
     LOGGER.critical("HighResAudio: Gagal mengimpor 'HighResAudioApi' dari '.api'.")
 
 class HighResAudioError(Exception):
@@ -88,7 +88,7 @@ class HighResAudioLoginManager:
         except Exception as e:
             LOGGER.error(f"HighResAudio Manager: Gagal login ke Akun Global {account['email']}. Error: {e}")
             if hasattr(client, 'close_session'):
-                client.close_session()
+                await client.close_session()
             return None
 
     # Tambahkan parameter save_db agar fleksibel
@@ -125,13 +125,13 @@ class HighResAudioLoginManager:
         except Exception as e:
             LOGGER.error(f"HighResAudio: User {user_id} gagal login: {e}")
             if hasattr(client, 'close_session'):
-                client.close_session()
+                await client.close_session()
             return False, str(e)
 
     async def remove_user_account(self, user_id: int):
         # 1. Hapus Sesi Memory
         if user_id in self.user_clients:
-            try: self.user_clients[user_id].close_session()
+            try: await self.user_clients[user_id].close_session()
             except: pass
             del self.user_clients[user_id]
             
@@ -154,11 +154,11 @@ class HighResAudioLoginManager:
         LOGGER.info("HighResAudio Manager: Memulai shutdown...")
         for client in self.clients:
             if hasattr(client, 'close_session'):
-                try: client.close_session()
+                try: await client.close_session()
                 except: pass
         for uid, client in self.user_clients.items():
             if hasattr(client, 'close_session'):
-                try: client.close_session()
+                try: await client.close_session()
                 except: pass
         
         self.clients = []
