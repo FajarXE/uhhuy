@@ -79,8 +79,8 @@ class HighResAudioLoginManager:
             proxy=proxy 
         )
         try:
-            await asyncio.to_thread(
-                client.auth,
+            # Panggil langsung secara asinkron tanpa to_thread
+            await client.auth(
                 username=account['email'], 
                 password=account['password']
             )
@@ -101,14 +101,14 @@ class HighResAudioLoginManager:
         )
         
         try:
-            await asyncio.to_thread(
-                client.auth,
+            # Panggil langsung secara asinkron tanpa to_thread
+            await client.auth(
                 username=email,
                 password=password
             )
             
             if user_id in self.user_clients:
-                try: self.user_clients[user_id].close_session()
+                try: await self.user_clients[user_id].close_session()
                 except: pass
             
             self.user_clients[user_id] = client
