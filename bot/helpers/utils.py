@@ -210,14 +210,13 @@ async def format_string(text:str, data:dict, user=None):
         text = text.replace(R'{user}', user.get('name') or '').replace(R'{username}', user.get('user_name') or '')
     return text
 
-async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 20):
+ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 20):
     import asyncio
     import hashlib
     import time
     import math
     from bot.settings import bot_set
-    from .message import edit_message
-    from .utils import get_readable_file_size, get_readable_time, GLOBAL_CANCEL_DICT
+    from .utils import get_readable_file_size, get_readable_time, GLOBAL_CANCEL_DICT, GLOBAL_TASKS
 
     sem = asyncio.Semaphore(limit)
     total_tasks = len(tasks)
@@ -228,6 +227,8 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
     
     if update_details and update_details.get('msg'):
         batch_id = hashlib.md5(str(update_details['msg'].id).encode()).hexdigest()[:16]
+    else:
+        batch_id = "unknown_batch"
     
     async def run_with_sem(task):
         nonlocal completed_tasks
@@ -243,7 +244,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                     return None
                 
                 # --- [FIX ZOMBIE TRACK] BATAS WAKTU 10 MENIT PER LAGU ---
-                import asyncio
                 res = await asyncio.wait_for(task, timeout=600.0)
                 # --------------------------------------------------------
                 
@@ -295,17 +295,8 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                 title = update_details.get('title', 'Unknown')
                 action = update_details.get('action', 'Download').capitalize()
                 task_type = update_details.get('type', 'Task').capitalize()
-                
-                text_to_send = f"**{action} {task_type}**: `{title}`\n"
-                text_to_send += f"**Since**: {since_str}\n\n"
-                text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
-                text_to_send += f"**Processed_tasks**: {completed_tasks} of {total_tasks}\n"
-                text_to_send += f"**Current_Speed**: {speed_str}\n"
-                text_to_send += f"**Machine_type**: Aria2c 1.37.0\n"
-                text_to_send += f"**Destination_mode**: {dest_mode}\n"
-                text_to_send += f"**Cancel**: /cancel_{batch_id}\n\n"
-                text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
 
+                # MEMPERBARUI NILAI GLOBAL SAJA, TANPA MENGIRIM PESAN TELEGRAM
                 GLOBAL_TASKS[batch_id] = {
                     'action': action,
                     'type': task_type,
@@ -326,55 +317,28 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                     'user_id': update_details['msg'].chat.id if update_details and update_details.get('msg') else 0,
                     'timestamp': time.time()
                 }
-                
-                try: 
-                    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
-                    
-                    targets = {}
-                    if update_details and update_details.get('msg'):
-                        targets[update_details['msg'].chat.id] = update_details['msg']
-                    
-                    if GLOBAL_UI_MSG:
-                        for cid, m in list(GLOBAL_UI_MSG.items()):
-                            targets[cid] = m
-                    
-                    from bot.helpers.message import edit_message
-                    
-                    for cid, m in targets.items():
-                        current_page = GLOBAL_UI_PAGES.get(cid, 1)
-                        g_text, g_markup = get_status_text(page=current_page)
-                        try: 
-                            await edit_message(m, g_text, g_markup, False)
-                            # --- [ANTI-FLOODWAIT] JEDA ANTAR CHAT ---
-                            await asyncio.sleep(0.15)
-                        except Exception: 
-                            pass
-                except Exception: 
-                    pass
             
-            # ANTI-FLOODWAIT BATCH TASK: Diubah agar update lebih jarang tapi loop tetap responsif terhadap cancel
-            for _ in range(100): # Naik jadi ~10.0 detik jeda UI Update
+            # Loop jeda (hanya 1 detik, karena yang berat sudah diambil alih UI Worker)
+            for _ in range(10): 
                 if not is_running or batch_id in GLOBAL_CANCEL_DICT:
                     break
                 await asyncio.sleep(0.1)
 
     updater_task = asyncio.create_task(live_updater())
     
-    # --- [FIX ZOMBIE RADAR] PASTIKAN RADAR IKUT MATI SAAT TIMEOUT/GAGAL ---
     try:
         results = await asyncio.gather(*pending_tasks, return_exceptions=True)
     finally:
         is_running = False
         if not updater_task.done():
             updater_task.cancel()
-    # ----------------------------------------------------------------------
     
     if batch_id in GLOBAL_CANCEL_DICT:
+        from bot.helpers.message import edit_message
         if update_details and 'msg' in update_details:
             try: await edit_message(update_details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
             except: pass
             
-        import asyncio
         GLOBAL_TASKS.pop(batch_id, None) 
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         
@@ -619,9 +583,9 @@ async def progress_message(done, total, details):
     import random
     now = time.time()
     
-    # ANTI FLOODWAIT: Edit delay minimum 10.0 detik + jitter
+    # Jeda internal kalkulasi agar tidak boros CPU
     if 'last_updated' in details:
-        delay = 10.0 + random.uniform(0, 1.5) # <-- Jeda acak 10 hingga 11.5 detik
+        delay = 1.0  # Cukup 1 detik karena UI sudah dihandle Worker
         if now - details['last_updated'] < delay and done < total:
             return
     details['last_updated'] = now
@@ -745,6 +709,39 @@ async def progress_message(done, total, details):
     except FloodWait: pass
     except MessageNotModified: pass
     except Exception: pass
+
+# --- TAMBAHKAN FUNGSI DEDICATED WORKER INI ---
+async def dedicated_ui_worker():
+    """
+    Mandor UI (Daemon) yang berputar di latar belakang setiap 8 detik.
+    Tugasnya murni hanya memperbarui Papan Status ke Telegram secara rapi
+    agar tidak terjadi bentrokan API (Anti-FloodWait).
+    """
+    import asyncio
+    from bot.helpers.message import edit_message
+    from bot.logger import LOGGER
+
+    while True:
+        await asyncio.sleep(8.0)  # Frekuensi update global (8 detik)
+
+        if not GLOBAL_UI_MSG:
+            continue  # Jika tidak ada yang buka Papan Status, tidur lagi
+
+        # Ambil salinan agar dictionary aman saat diloop
+        targets = list(GLOBAL_UI_MSG.items()) 
+        
+        for chat_id, msg in targets:
+            try:
+                page = GLOBAL_UI_PAGES.get(chat_id, 1)
+                g_text, g_markup = get_status_text(page=page)
+                
+                await edit_message(msg, g_text, g_markup, antiflood=False)
+                
+                # Rem presisi agar Telegram tidak mengamuk (Limit 30 msg/detik)
+                await asyncio.sleep(0.15)
+            except Exception:
+                pass
+# ---------------------------------------------
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
