@@ -266,11 +266,13 @@ async def start_services():
     logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
     logging.info(f"------------------------------------------------")
 
-    # --- TAMBAHKAN BLOK INI TEPAT DI BAWAHNYA ---
+    # --- TAMBAHKAN BLOK INI TEPAT DI BAWAH AWAIT AIO.START() ---
     logging.info("Main: Memuat State Radar UI dari Database...")
     try:
         import bot.helpers.utils as utils
+        
         ui_states = await database.load_all_ui_states()
+        logging.info(f"Main: Ditemukan {len(ui_states)} memori Radar UI di MongoDB.") # <-- Detektor Jumlah Data
         
         restored_count = 0
         for chat_id, data in ui_states.items():
@@ -279,27 +281,33 @@ async def start_services():
             try:
                 # Ambil kembali wujud objek pesan secara live dari Telegram
                 msg = await aio.get_messages(chat_id, msg_id)
+                
                 # Pastikan pesan benar-benar masih ada (tidak dihapus manual oleh user)
                 if msg and getattr(msg, 'empty', False) is False:
                     utils.GLOBAL_UI_MSG[chat_id] = msg
                     utils.GLOBAL_UI_PAGES[chat_id] = page
                     restored_count += 1
-                    # --- [PERBAIKAN] PAKSA UPDATE UI SAAT WAKE UP ---
+                    
+                    # Paksa update UI saat bot bangun
                     try:
                         g_text, g_markup = utils.get_status_text(page=page)
                         await msg.edit_text(g_text, reply_markup=g_markup)
-                    except Exception:
-                        pass
-                    # ------------------------------------------------
+                        logging.info(f"Main: Berhasil me-refresh Radar {msg_id} di chat {chat_id}.")
+                    except Exception as e:
+                        logging.warning(f"Main: Gagal me-refresh teks Radar {msg_id}: {e}")
                 else:
+                    logging.warning(f"Main: Pesan Radar {msg_id} sudah terhapus di Telegram, mencabut dari DB.")
                     await database.remove_ui_state(chat_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.error(f"Main: Gagal mengambil wujud pesan {msg_id} dari Telegram: {e}")
         
         if restored_count > 0:
-            logging.info(f"Main: Berhasil memulihkan {restored_count} panel Radar UI dari memori.")
+            logging.info(f"Main: Berhasil memulihkan total {restored_count} panel Radar UI dari memori.")
+        else:
+            logging.info("Main: Tidak ada panel Radar UI yang dipulihkan.")
+            
     except Exception as e:
-        logging.warning(f"Main: Gagal memuat Radar UI: {e}")
+        logging.error(f"Main: Gagal memuat Radar UI (Fatal): {e}")
     # --------------------------------------------
 
     asyncio.create_task(periodic_garbage_collector())
