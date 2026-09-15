@@ -347,7 +347,8 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                             await edit_message(m, g_text, g_markup, False)
                             # --- [ANTI-FLOODWAIT] JEDA ANTAR CHAT ---
                             await asyncio.sleep(0.15)
-                        except: pass
+                        except Exception: 
+                            pass
             
             # ANTI-FLOODWAIT BATCH TASK: Diubah agar update lebih jarang tapi loop tetap responsif terhadap cancel
             for _ in range(100): # Naik jadi ~10.0 detik jeda UI Update
