@@ -349,6 +349,8 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                             await asyncio.sleep(0.15)
                         except Exception: 
                             pass
+                except Exception: 
+                    pass
             
             # ANTI-FLOODWAIT BATCH TASK: Diubah agar update lebih jarang tapi loop tetap responsif terhadap cancel
             for _ in range(100): # Naik jadi ~10.0 detik jeda UI Update
