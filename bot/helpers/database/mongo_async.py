@@ -141,4 +141,36 @@ class MongoDB:
         except Exception:
             logging.info(traceback.format_exc())
 
+    # --- PENAMBAHAN FUNGSI STATE CANCEL ---
+    async def add_cancel_task(self, task_id: str):
+        """Menyimpan ID tugas yang dibatalkan ke MongoDB"""
+        try:
+            # Menggunakan collection baru bernama 'cancelled_tasks'
+            await self.client.cancelled_tasks.update_one(
+                {'_id': task_id}, 
+                {'$set': {'status': 'cancelled'}}, 
+                upsert=True
+            )
+        except Exception as e:
+            logging.error(f"Gagal menyimpan cancel task ke DB: {e}")
+
+    async def load_all_cancels(self) -> set:
+        """Memuat semua sinyal batal dari MongoDB saat bot restart"""
+        cancels = set()
+        try:
+            cursor = self.client.cancelled_tasks.find({})
+            async for doc in cursor:
+                cancels.add(doc['_id'])
+        except Exception as e:
+            logging.error(f"Gagal memuat cancel tasks dari DB: {e}")
+        return cancels
+
+    async def clear_all_cancels(self):
+        """Membersihkan semua memori sinyal batal (Dipanggil oleh clear_board)"""
+        try:
+            await self.client.cancelled_tasks.delete_many({})
+        except Exception as e:
+            logging.error(f"Gagal menghapus cancel tasks di DB: {e}")
+    # --------------------------------------
+
 database = MongoDB()
