@@ -269,7 +269,6 @@ async def start_services():
     # --- TAMBAHKAN BLOK INI TEPAT DI BAWAHNYA ---
     logging.info("Main: Memuat State Radar UI dari Database...")
     try:
-        from bot.helpers.database.mongo_async import database
         import bot.helpers.utils as utils
         ui_states = await database.load_all_ui_states()
         
