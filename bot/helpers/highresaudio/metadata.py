@@ -42,10 +42,10 @@ async def process_album_metadata(album_url: str, r_id: str, user: dict):
     try:
         # LANGKAH 1: Scrape ID
         LOGGER.debug(f"HighResAudio: Scraping ID dari {album_url}...")
-        album_id = await asyncio.to_thread(client.get_album_id_from_url, album_url)
+        album_id = await client.get_album_id_from_url(album_url)
 
         # LANGKAH 2: API Metadata
-        api_data = await asyncio.to_thread(client.get_album_metadata, album_id)
+        api_data = await client.get_album_metadata(album_id)
         
         data = api_data.get('data', {}).get('results', {})
         if not data:
