@@ -164,7 +164,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         msg = None
         msg_created = False 
 
-        # --- [PERBAIKAN] MENGUBAH NAMA PROGRESS INTERNAL AGAR TIDAK BENTROK ---
+                # --- [PERBAIKAN] MENGUBAH NAMA PROGRESS INTERNAL AGAR TIDAK BENTROK ---
         async def internal_progress(current, total):
             nonlocal msg, last_update_time, msg_created, start_time 
             if cancel_id in GLOBAL_CANCEL_DICT:
@@ -198,8 +198,10 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
 
             now = time.time()
             import random
-            delay = 10.0 + random.uniform(0, 1.5) # <-- Jeda acak
-            if msg and (now - last_update_time > 10.0 or current == total):
+            
+            # Cukup hitung kalkulasi 1-2 detik sekali, UI diurus Mandor!
+            delay = 1.5
+            if msg and (now - last_update_time > delay or current == total):
                 diff = now - start_time
                 if diff < 1: diff = 1
                 
@@ -240,16 +242,6 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 
                 speed_ul = speed
 
-                text_to_send = f"**{action} {task_type}**: `{file_title}`\n"
-                text_to_send += f"**Since**: {since_str}\n\n"
-                text_to_send += f"**Progress**: `[{progress_bar}]` {percentage:.2f}%\n"
-                text_to_send += f"**Processed_bytes**: {done_str} of {total_str}\n"
-                text_to_send += f"**Current_Speed**: {speed_str} | **ETA**: {eta_str}\n"
-                text_to_send += f"**Machine_type**: Telegram API\n"
-                text_to_send += f"**Destination_mode**: {dest_mode}\n"
-                text_to_send += f"**Cancel**: /cancel_{cancel_id}\n\n"
-                text_to_send += f"🔻 {get_readable_file_size(speed_dl)}/s | 🔺 {get_readable_file_size(speed_ul)}/s"
-
                 # --- TAMBAHKAN UPDATE KE GLOBAL_TASKS DI SINI ---
                 try:
                     from bot.helpers.utils import GLOBAL_TASKS
@@ -268,50 +260,15 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         'cancel_id': cancel_id,
                         'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
                         'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-                        'speed_dl_raw': speed_dl,  # <--- TAMBAHKAN INI
-                        'speed_ul_raw': speed_ul,  # <--- TAMBAHKAN INI
+                        'speed_dl_raw': speed_dl,
+                        'speed_ul_raw': speed_ul,
                         'user_id': msg.chat.id if msg else 0,
                         'timestamp': now
                     }
-                    
                 except Exception:
                     pass
                 # ------------------------------------------------
                 
-                # --- PANGGIL UI GLOBAL UNTUK DITAMPILKAN ---
-                try:
-                    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
-                    
-                    # Kumpulkan semua pesan yang harus di-update (Pemilik + Penonton)
-                    targets = {}
-                    if msg: targets[msg.chat.id] = msg
-                    if GLOBAL_UI_MSG:
-                        for cid, m in list(GLOBAL_UI_MSG.items()): # <--- TAMBAHKAN list()
-                            targets[cid] = m
-                    
-                    from bot.helpers.message import edit_message
-                    
-                    # --- Broadcast pembaruan ke semua radar DENGAN MEMORI HALAMAN! ---
-                    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES, GLOBAL_UI_LAST_UPDATE
-                    
-                    for cid, m in targets.items():
-                        msg_id = m.id
-                        # Pasang rem yang sama dengan jeda acak
-                        delay_ui = 10.0 + random.uniform(0, 1.0)
-                        if msg_id in GLOBAL_UI_LAST_UPDATE and (now - GLOBAL_UI_LAST_UPDATE[msg_id] < delay_ui) and current < total:
-                            continue
-                            
-                        GLOBAL_UI_LAST_UPDATE[msg_id] = now
-                        current_page = GLOBAL_UI_PAGES.get(cid, 1)
-                        global_text, global_markup = get_status_text(page=current_page)
-                        try: 
-                            await edit_message(m, global_text, global_markup, False)
-                            # --- [ANTI-FLOODWAIT] JEDA ANTAR CHAT ---
-                            await asyncio.sleep(0.15)
-                        except Exception: 
-                            pass
-                    # ------------------------------------------------------------------
-                except Exception: pass
                 last_update_time = now
 
         try:
