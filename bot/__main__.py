@@ -272,34 +272,42 @@ async def start_services():
         import bot.helpers.utils as utils
         
         ui_states = await database.load_all_ui_states()
-        logging.info(f"Main: Ditemukan {len(ui_states)} memori Radar UI di MongoDB.") # <-- Detektor Jumlah Data
+        logging.info(f"Main: Ditemukan {len(ui_states)} memori Radar UI di MongoDB.")
         
         restored_count = 0
         for chat_id, data in ui_states.items():
             msg_id = data['message_id']
             page = data['page']
             try:
-                # Ambil kembali wujud objek pesan secara live dari Telegram
-                msg = await aio.get_messages(chat_id, msg_id)
+                # 1. Siapkan teks status kosong
+                g_text, g_markup = utils.get_status_text(page=page)
                 
-                # Pastikan pesan benar-benar masih ada (tidak dihapus manual oleh user)
-                if msg and getattr(msg, 'empty', False) is False:
+                # 2. BLIND EDIT (Paksa edit tanpa mengambil/membaca pesan dulu)
+                msg = None
+                try:
+                    msg = await aio.edit_message_text(chat_id, msg_id, g_text, reply_markup=g_markup)
+                except Exception as edit_err:
+                    if "MESSAGE_NOT_MODIFIED" in str(edit_err).upper():
+                        # Jika gagal karena teksnya sama persis (sudah kosong), buat wujud pesan bohongan (Dummy)
+                        class DummyMsg:
+                            def __init__(self, c_id, m_id):
+                                self.chat = type('DummyChat', (), {'id': c_id})()
+                                self.id = m_id
+                                self._client = None # Memaksa bot menggunakan fallback edit
+                        msg = DummyMsg(chat_id, msg_id)
+                    else:
+                        raise edit_err # Lempar error jika pesan memang benar-benar dihapus oleh user
+                
+                # 3. Masukkan ke memori RAM
+                if msg:
                     utils.GLOBAL_UI_MSG[chat_id] = msg
                     utils.GLOBAL_UI_PAGES[chat_id] = page
                     restored_count += 1
+                    logging.info(f"Main: Berhasil me-refresh Radar {msg_id} di chat {chat_id}.")
                     
-                    # Paksa update UI saat bot bangun
-                    try:
-                        g_text, g_markup = utils.get_status_text(page=page)
-                        await msg.edit_text(g_text, reply_markup=g_markup)
-                        logging.info(f"Main: Berhasil me-refresh Radar {msg_id} di chat {chat_id}.")
-                    except Exception as e:
-                        logging.warning(f"Main: Gagal me-refresh teks Radar {msg_id}: {e}")
-                else:
-                    logging.warning(f"Main: Pesan Radar {msg_id} sudah terhapus di Telegram, mencabut dari DB.")
-                    await database.remove_ui_state(chat_id)
             except Exception as e:
-                logging.error(f"Main: Gagal mengambil wujud pesan {msg_id} dari Telegram: {e}")
+                logging.warning(f"Main: Pesan Radar {msg_id} gagal diedit ({e}), mencabut dari DB.")
+                await database.remove_ui_state(chat_id)
         
         if restored_count > 0:
             logging.info(f"Main: Berhasil memulihkan total {restored_count} panel Radar UI dari memori.")
