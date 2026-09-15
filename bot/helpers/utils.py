@@ -262,67 +262,74 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
 
     async def live_updater():
         from .aria2_helper import get_aria2_global_stat
+        import bot.helpers.utils as utils_module # <-- Cara aman memanggil variabel global
+        from bot.logger import LOGGER
+        
         try:
             user_id = update_details['msg'].chat.id if update_details and update_details.get('msg') else 0
             dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode) if user_id else bot_set.upload_mode
         except:
             dest_mode = bot_set.upload_mode
             
-        while is_running:
-            if batch_id in GLOBAL_CANCEL_DICT:
-                for t in pending_tasks:
-                    if not t.done():
-                        t.cancel()
-                break 
+        try:
+            while is_running:
+                if batch_id in utils_module.GLOBAL_CANCEL_DICT:
+                    for t in pending_tasks:
+                        if not t.done():
+                            t.cancel()
+                    break 
 
-            if update_details:
-                try:
-                    stats = await get_aria2_global_stat()
-                    speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
-                    speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-                except:
-                    speed_dl = 0
-                    speed_ul = 0
+                if update_details:
+                    try:
+                        stats = await get_aria2_global_stat()
+                        speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
+                        speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
+                    except:
+                        speed_dl = 0
+                        speed_ul = 0
+                        
+                    percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+                    filled_blocks = math.floor((percentage / 100) * 12)
+                    empty_blocks = 12 - filled_blocks
+                    progress_bar = "■" * filled_blocks + "□" * empty_blocks
                     
-                percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
-                filled_blocks = math.floor((percentage / 100) * 12)
-                empty_blocks = 12 - filled_blocks
-                progress_bar = "■" * filled_blocks + "□" * empty_blocks
-                
-                speed_str = f"{get_readable_file_size(speed_dl)}/s"
-                since_str = get_readable_time(int(time.time() - start_time))
-                
-                title = update_details.get('title', 'Unknown')
-                action = update_details.get('action', 'Download').capitalize()
-                task_type = update_details.get('type', 'Task').capitalize()
+                    speed_str = f"{get_readable_file_size(speed_dl)}/s"
+                    since_str = get_readable_time(int(time.time() - start_time))
+                    
+                    title = update_details.get('title', 'Unknown')
+                    action = update_details.get('action', 'Download').capitalize()
+                    task_type = update_details.get('type', 'Task').capitalize()
 
-                # MEMPERBARUI NILAI GLOBAL SAJA, TANPA MENGIRIM PESAN TELEGRAM
-                GLOBAL_TASKS[batch_id] = {
-                    'action': action,
-                    'type': task_type,
-                    'title': title,
-                    'since': since_str,
-                    'progress_bar': progress_bar,
-                    'percentage': f"{percentage:.2f}%",
-                    'processed_label': "Processed_tasks",
-                    'processed': f"{completed_tasks} of {total_tasks}",
-                    'speed': speed_str,
-                    'machine': "Aria2c 1.37.0",
-                    'mode': dest_mode,
-                    'cancel_id': batch_id,
-                    'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-                    'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-                    'speed_dl_raw': speed_dl, 
-                    'speed_ul_raw': speed_ul, 
-                    'user_id': update_details['msg'].chat.id if update_details and update_details.get('msg') else 0,
-                    'timestamp': time.time()
-                }
-            
-            # Loop jeda (hanya 1 detik, karena yang berat sudah diambil alih UI Worker)
-            for _ in range(10): 
-                if not is_running or batch_id in GLOBAL_CANCEL_DICT:
-                    break
-                await asyncio.sleep(0.1)
+                    # MEMPERBARUI NILAI GLOBAL DENGAN CARA AMAN
+                    utils_module.GLOBAL_TASKS[batch_id] = {
+                        'action': action,
+                        'type': task_type,
+                        'title': title,
+                        'since': since_str,
+                        'progress_bar': progress_bar,
+                        'percentage': f"{percentage:.2f}%",
+                        'processed_label': "Processed_tasks",
+                        'processed': f"{completed_tasks} of {total_tasks}",
+                        'speed': speed_str,
+                        'machine': "Aria2c 1.37.0",
+                        'mode': dest_mode,
+                        'cancel_id': batch_id,
+                        'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+                        'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
+                        'speed_dl_raw': speed_dl, 
+                        'speed_ul_raw': speed_ul, 
+                        'user_id': user_id,
+                        'timestamp': time.time()
+                    }
+                
+                # Loop jeda 1 detik
+                for _ in range(10): 
+                    if not is_running or batch_id in utils_module.GLOBAL_CANCEL_DICT:
+                        break
+                    await asyncio.sleep(0.1)
+                    
+        except Exception as e:
+            LOGGER.error(f"Live Updater CRASH: {e}") # <-- Jika error, langsung teriak ke terminal
 
     updater_task = asyncio.create_task(live_updater())
     
@@ -722,7 +729,7 @@ async def dedicated_ui_worker():
     from bot.logger import LOGGER
 
     while True:
-        await asyncio.sleep(8.0)  # Frekuensi update global (8 detik)
+        await asyncio.sleep(2.5)
 
         if not GLOBAL_UI_MSG:
             continue  # Jika tidak ada yang buka Papan Status, tidur lagi
