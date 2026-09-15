@@ -173,4 +173,38 @@ class MongoDB:
             logging.error(f"Gagal menghapus cancel tasks di DB: {e}")
     # --------------------------------------
 
+    # --- PENAMBAHAN FUNGSI STATE RADAR UI ---
+    async def save_ui_state(self, chat_id: int, message_id: int, page: int = 1):
+        """Menyimpan ID pesan Radar Papan Global agar tidak hilang saat restart"""
+        try:
+            await self.client.ui_states.update_one(
+                {'_id': chat_id},
+                {'$set': {'message_id': message_id, 'page': page}},
+                upsert=True
+            )
+        except Exception as e:
+            logging.error(f"Gagal menyimpan UI state: {e}")
+
+    async def load_all_ui_states(self) -> dict:
+        """Memuat semua status Radar UI dari MongoDB"""
+        states = {}
+        try:
+            cursor = self.client.ui_states.find({})
+            async for doc in cursor:
+                states[doc['_id']] = {
+                    'message_id': doc['message_id'], 
+                    'page': doc.get('page', 1)
+                }
+        except Exception as e:
+            logging.error(f"Gagal memuat UI states: {e}")
+        return states
+
+    async def remove_ui_state(self, chat_id: int):
+        """Menghapus memori Radar UI jika tugas sudah selesai atau panel ditutup"""
+        try:
+            await self.client.ui_states.delete_one({'_id': chat_id})
+        except Exception:
+            pass
+    # ----------------------------------------
+
 database = MongoDB()
