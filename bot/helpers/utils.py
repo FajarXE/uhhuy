@@ -761,11 +761,19 @@ async def cleanup(user=None, metadata=None, user_dict: dict=None):
                     if isinstance(zip_files, str): zip_files = [zip_files]
                     for zp in zip_files: 
                         if os.path.exists(zp): os.remove(zp)
-            except: pass
+            except Exception as e: 
+                from bot.logger import LOGGER
+                LOGGER.debug(f"Cleanup metadata error: {e}")
+                
         if user:
             try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/")
-            except: pass
+            except Exception as e: 
+                from bot.logger import LOGGER
+                LOGGER.debug(f"Cleanup user dir error: {e}")
+                
             try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
-            except: pass
+            except Exception as e: 
+                from bot.logger import LOGGER
+                LOGGER.debug(f"Cleanup user temp dir error: {e}")
 
     await asyncio.to_thread(_sync_cleanup)
