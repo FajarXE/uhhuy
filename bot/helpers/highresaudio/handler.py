@@ -7,6 +7,8 @@ import shutil
 import traceback
 import asyncio
 import math 
+import requests 
+import random 
 import time
 import yarl
 
@@ -29,7 +31,19 @@ from bot.logger import LOGGER
 
 
 async def start_highresaudio(url: str, user: dict):
-    # Spam Re-Login telah dihapus untuk mengamankan IP dari blokir Akamai.
+    # --- RE-LOGIN OTOMATIS ---
+    try:
+        user_id = user.get('user_id')
+        client = highresaudio_manager.get_client(user_id)
+        
+        if client:
+            if hasattr(client, 're_login'):
+                await asyncio.to_thread(client.re_login)
+            else:
+                LOGGER.warning(f"HighResAudio: Client {user_id} tidak memiliki method 're_login'.")
+    except Exception as e:
+        LOGGER.error(f"HighResAudio: Gagal menyegarkan sesi (Re-login): {e}")
+
     try:
         media_type, item_id, extra_kwargs = custom_url_parse(url)
         if media_type == 'album':
@@ -86,11 +100,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
         # --- MESIN PENGUNDUH HYBRID (ARIA2 -> AIOHTTP TURBO) ---
-        cookie_str = ""
-        # Menyesuaikan dengan Cookie Jar asinkron murni dari aiohttp
-        if client.session and client.session.cookie_jar:
-            cookie_str = "; ".join([f"{c.key}={c.value}" for c in client.session.cookie_jar])
-            
+        cookie_str = "; ".join([f"{k}={v}" for k, v in client.s.cookies.items()])
         headers_dict = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
             "Referer": f"https://stream-app.highresaudio.com/album/{album_id_referer}",
@@ -105,7 +115,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         
         # ARIA2 HANYA MENDUKUNG HTTP/HTTPS PROXY! 
         # Jika proxy adalah SOCKS (misal socks5h://), JANGAN berikan ke Aria2 agar tidak error.
-        if getattr(client, 'proxy', None) and not client.proxy.startswith('socks'):
+        if client.proxy and not client.proxy.startswith('socks'):
             details['proxy'] = client.proxy 
         # --------------------------------------
 
@@ -135,7 +145,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             headers_dict["Range"] = "bytes=0-"
             
             connector = None
-            if getattr(client, 'proxy', None) and client.proxy.startswith('socks'):
+            if client.proxy and client.proxy.startswith('socks'):
                 try:
                     from aiohttp_socks import ProxyConnector
                     # [FIX]: Library menolak skema 'socks5h://'. Kita normalkan ke 'socks5://' secara internal
@@ -148,7 +158,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
 
             async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
                 get_kwargs = {}
-                if getattr(client, 'proxy', None) and not client.proxy.startswith('socks'):
+                if client.proxy and not client.proxy.startswith('socks'):
                     get_kwargs['proxy'] = client.proxy
                     
                 # [PERBAIKAN 2]: Kunci URL agar karakter Token Akamai tidak di-encode ulang
@@ -193,6 +203,19 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
 
     return True
 
+def download_booklet(client, url, temp_location):
+    try:
+        r = client.get_booklet_stream(url) 
+        r.raise_for_status()
+        with open(temp_location, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=32 * 1024):
+                if chunk:
+                    f.write(chunk)
+    except Exception as e:
+        if os.path.isfile(temp_location):
+            os.remove(temp_location)
+        LOGGER.error(f"HighResAudio: Gagal mengunduh booklet: {e}")
+    
 
 async def start_album(album_url: str, user: dict, upload=True):
     try:
@@ -223,9 +246,9 @@ async def start_album(album_url: str, user: dict, upload=True):
                 dl_client = highresaudio_manager.get_client(user.get('user_id'))
                 
                 if dl_client:
-                    # Gunakan fungsi download_file bawaan agar asinkron & responsif
-                    err = await download_file(album_meta['booklet_url'], temp_path, details={'msg': None})
-                    if not err and os.path.exists(temp_path):
+                    # Gunakan fungsi download_booklet bawaan (via to_thread karena requests itu sync)
+                    await asyncio.to_thread(download_booklet, dl_client, album_meta['booklet_url'], temp_path)
+                    if os.path.exists(temp_path):
                         booklet_path = temp_path
                 else:
                     raise Exception("Klien HighResAudio tidak tersedia.")
@@ -283,9 +306,7 @@ async def start_album(album_url: str, user: dict, upload=True):
         booklet_path = os.path.join(album_folder, "booklet.pdf")
         dl_client = highresaudio_manager.get_client(user.get('user_id'))
         if dl_client:
-            err = await download_file(album_meta['booklet_url'], booklet_path, details={'msg': None})
-            if err or not os.path.exists(booklet_path):
-                booklet_path = None
+            await asyncio.to_thread(download_booklet, dl_client, album_meta['booklet_url'], booklet_path)
     
     if album_meta.get('cover') and os.path.exists(album_meta['cover']):
         try:
