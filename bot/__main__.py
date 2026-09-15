@@ -319,6 +319,12 @@ async def start_services():
     # --------------------------------------------
 
     asyncio.create_task(periodic_garbage_collector())
+
+    # --- MASUKKAN KODE SAKELAR MANDOR DI SINI ---
+    from bot.helpers.utils import dedicated_ui_worker
+    asyncio.create_task(dedicated_ui_worker())
+    logging.info("Main: Dedicated UI Worker (Daemon) berhasil dijalankan.")
+    # --------------------------------------------
     
     stop_event = asyncio.Event()
     
