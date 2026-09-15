@@ -809,8 +809,9 @@ async def savePic(handle, metadata):
         try:
             handle.tags.delall("APIC")
             handle.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc=u'Cover', data=data))
-        except Exception:
-            pass
+        except Exception as e:
+            from bot.logger import LOGGER
+            LOGGER.debug(f"Gagal memasang cover art ID3 ke file: {e}")
 
 async def get_audio_extension(path):
     try:
