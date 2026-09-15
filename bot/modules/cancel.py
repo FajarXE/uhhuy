@@ -7,6 +7,7 @@ from pyrogram.enums import ChatType
 from bot.helpers.aria2_helper import aria2_cancel, ACTIVE_DOWNLOADS
 from bot.helpers.utils import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
 from bot.settings import bot_set
+from bot.helpers.database.mongo_async import database # <-- [TAMBAHAN IMPORT]
 
 @Client.on_message(filters.regex(r"^/cancel_([a-zA-Z0-9]+)"))
 async def cancel_task_handler(client: Client, message: Message):
@@ -36,6 +37,7 @@ async def cancel_task_handler(client: Client, message: Message):
     # --- FIX: Validasi apakah ID ada di daftar task global ---
     elif gid in GLOBAL_TASKS:
         GLOBAL_CANCEL_DICT.add(gid)
+        await database.add_cancel_task(gid) # <-- [SINKRONISASI KE DATABASE]
         await message.reply(f"🛑 **Sinyal Batal Dikirim!**\nProses akan segera dihentikan.")
         
     # --- FIX: Jika ID tidak ada di Aria2 maupun di Task Global ---
@@ -59,6 +61,7 @@ async def force_unlock_handler(client: Client, message: Message):
     
     # 2. Bersihkan sinyal batal yang nyangkut
     utils.GLOBAL_CANCEL_DICT.clear()
+    await database.clear_all_cancels() # <-- [SINKRONISASI KE DATABASE]
     
     # 3. Bunuh paksa semua unduhan Aria2 yang nyangkut di latar belakang
     from bot.helpers.aria2_helper import aria2_purge_all
