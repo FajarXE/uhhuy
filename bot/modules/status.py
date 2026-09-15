@@ -8,6 +8,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 # Mengimpor GLOBAL_UI_MSG dan GLOBAL_UI_PAGES untuk menyambungkan kabel radar Papan Global
 from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
 from bot.logger import LOGGER
+from bot.helpers.database.mongo_async import database # <-- [TAMBAHAN IMPORT MONGODB]
 
 @Client.on_message(filters.command(["task", "tasks"]))
 async def task_command(client: Client, message: Message):
@@ -35,6 +36,10 @@ async def task_command(client: Client, message: Message):
         # Mendaftarkan pesan ini ke dalam memori Radar agar diperbarui secara real-time
         GLOBAL_UI_MSG[chat_id] = sent_msg
         
+        # --- [SINKRONISASI KE MONGODB] ---
+        await database.save_ui_state(chat_id, sent_msg.id, 1)
+        # ---------------------------------
+        
     except FloodWait as e:
         LOGGER.warning(f"Terkena FloodWait {e.value} detik saat mengirim /task.")
         await asyncio.sleep(e.value)
@@ -42,6 +47,10 @@ async def task_command(client: Client, message: Message):
         try:
             sent_msg = await message.reply_text(text, reply_markup=markup)
             GLOBAL_UI_MSG[chat_id] = sent_msg
+            
+            # --- [SINKRONISASI KE MONGODB (FALLBACK)] ---
+            await database.save_ui_state(chat_id, sent_msg.id, 1)
+            # --------------------------------------------
         except Exception:
             pass
     except Exception as e:
@@ -57,6 +66,12 @@ async def status_callback(client: Client, query: CallbackQuery):
             await query.message.delete()
         except Exception:
             pass
+            
+        # --- [HAPUS DARI MONGODB & RAM] ---
+        GLOBAL_UI_MSG.pop(chat_id, None)
+        GLOBAL_UI_PAGES.pop(chat_id, None)
+        await database.remove_ui_state(chat_id)
+        # ----------------------------------
         return
         
     if data.startswith("status_page_"):
@@ -64,6 +79,9 @@ async def status_callback(client: Client, query: CallbackQuery):
         
         # --- [MEMORI HALAMAN] Simpan posisi halaman saat klik Next/Prev ---
         GLOBAL_UI_PAGES[chat_id] = page
+        
+        # --- [SINKRONISASI KE MONGODB] ---
+        await database.save_ui_state(chat_id, query.message.id, page)
         # ------------------------------------------------------------------
         
         text, markup = get_status_text(page=page)
@@ -80,8 +98,10 @@ async def status_callback(client: Client, query: CallbackQuery):
             try:
                 if "Next" in query.message.reply_markup.inline_keyboard[0][0].text:
                     GLOBAL_UI_PAGES[chat_id] = page - 1
+                    await database.save_ui_state(chat_id, query.message.id, page - 1)
                 else:
                     GLOBAL_UI_PAGES[chat_id] = page + 1
+                    await database.save_ui_state(chat_id, query.message.id, page + 1)
             except Exception: pass
         except MessageNotModified:
             try: await query.answer()
