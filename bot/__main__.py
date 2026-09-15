@@ -284,6 +284,13 @@ async def start_services():
                     utils.GLOBAL_UI_MSG[chat_id] = msg
                     utils.GLOBAL_UI_PAGES[chat_id] = page
                     restored_count += 1
+                    # --- [PERBAIKAN] PAKSA UPDATE UI SAAT WAKE UP ---
+                    try:
+                        g_text, g_markup = utils.get_status_text(page=page)
+                        await msg.edit_text(g_text, reply_markup=g_markup)
+                    except Exception:
+                        pass
+                    # ------------------------------------------------
                 else:
                     await database.remove_ui_state(chat_id)
             except Exception:
