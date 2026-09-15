@@ -210,7 +210,7 @@ async def format_string(text:str, data:dict, user=None):
         text = text.replace(R'{user}', user.get('name') or '').replace(R'{username}', user.get('user_name') or '')
     return text
 
- async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 20):
+async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 20):
     import asyncio
     import hashlib
     import time
