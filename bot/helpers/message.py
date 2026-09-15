@@ -366,17 +366,18 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             if msg:
                 is_protected = False
                 if isinstance(user, dict):
-                    # Lindungi pesan utama (bot_msg)
                     if user.get('bot_msg') and msg.id == user['bot_msg'].id:
                         is_protected = True
-                    # Lindungi radar permanen kita (radar_msg)
                     if user.get('radar_msg') and msg.id == user['radar_msg'].id:
                         is_protected = True
                 
                 if not is_protected:
                     from bot.tgclient import aio
-                    try: await aio.delete_messages(chat_id, msg.id)
-                    except: pass
+                    try: 
+                        await aio.delete_messages(chat_id, msg.id)
+                    except Exception as e: 
+                        from bot.logger import LOGGER
+                        LOGGER.debug(f"Gagal menghapus pesan pelindung radar {msg.id}: {e}")
             # --------------------------------------------------
 
             return res
