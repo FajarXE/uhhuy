@@ -66,6 +66,24 @@ async def fetch_user_details(msg: Message, reply=False) -> dict:
 
 
 async def check_user(uid=None, msg=None, restricted=False) -> bool:
+    # 1. Menentukan ID user yang valid (dari parameter uid atau objek msg)
+    actual_uid = uid if uid else (msg.from_user.id if msg and msg.from_user else None)
+
+    # --- [FITUR BARU] LAZY LOADING USER DATA + LRU CACHE ---
+    if actual_uid and actual_uid not in bot_set.user_data:
+        from bot.helpers.database.mongo_async import database
+        user_db_data = await database.get_user_settings(actual_uid)
+        
+        # Simpan ke cache RAM (Otomatis ditangani oleh LRUCache agar tidak luber)
+        bot_set.user_data[actual_uid] = user_db_data or {}
+
+        # Sinkronkan preferensi kualitas audio ke API Manager secara instan
+        if user_db_data:
+            import asyncio
+            asyncio.create_task(sync_single_user_managers(actual_uid, user_db_data))
+    # -------------------------------------------------------
+
+    # 2. Logika otorisasi bawaan
     if restricted:
         if uid in bot_set.admins:
             return True
@@ -74,11 +92,64 @@ async def check_user(uid=None, msg=None, restricted=False) -> bool:
             return True
         else:
             all_chats = list(bot_set.admins) + bot_set.auth_chats + bot_set.auth_users 
-            if msg.from_user.id in all_chats:
+            if msg and msg.from_user and msg.from_user.id in all_chats:
                 return True
-            elif msg.chat.id in all_chats:
+            elif msg and msg.chat and msg.chat.id in all_chats:
                 return True
     return False
+
+# --- HELPER: SINKRONISASI MANAGER JIT ---
+async def sync_single_user_managers(user_id, data):
+    """Menyuntikkan pengaturan kualitas user ke manajer musik secara dinamis"""
+    try:
+        def safe_import_mgr(path, name):
+            try:
+                mod = __import__(path, fromlist=[name])
+                return getattr(mod, name)
+            except: 
+                return None
+
+        # Daftar lengkap semua manager (Future-Proof)
+        settings_map = {
+            'deezer_qual': safe_import_mgr('bot.helpers.deezer.manager', 'deezer_manager'),
+            'beatport_qual': safe_import_mgr('bot.helpers.beatport.manager', 'beatport_manager'),
+            'tidal_qual': safe_import_mgr('bot.helpers.tidal.manager', 'tidal_manager'),
+            'kkbox_qual': safe_import_mgr('bot.helpers.kkbox.manager', 'kkbox_manager'),
+            'soundcloud_qual': safe_import_mgr('bot.helpers.soundcloud.manager', 'soundcloud_manager'),
+            'idagio_qual': safe_import_mgr('bot.helpers.idagio.manager', 'idagio_manager'),
+            'nugs_qual': safe_import_mgr('bot.helpers.nugs.manager', 'nugs_manager'),
+            'bugs_qual': safe_import_mgr('bot.helpers.bugs.manager', 'bugs_manager'),
+            'highresaudio_qual': safe_import_mgr('bot.helpers.highresaudio.manager', 'highresaudio_manager'),
+            'moov_qual': safe_import_mgr('bot.helpers.moov.manager', 'moov_manager'),
+            'jiosaavn_qual': safe_import_mgr('bot.helpers.jiosaavn.manager', 'jiosaavn_manager'),
+            'gaana_qual': safe_import_mgr('bot.helpers.gaana.manager', 'gaana_manager'),
+            'bandcamp_qual': safe_import_mgr('bot.helpers.bandcamp.manager', 'bandcamp_manager'),
+            'livephish_qual': safe_import_mgr('bot.helpers.livephish.manager', 'livephish_manager'),
+            'beatstars_qual': safe_import_mgr('bot.helpers.beatstars.manager', 'beatstars_manager'),
+            'khinsider_qual': safe_import_mgr('bot.helpers.khinsider.manager', 'khinsider_manager'),
+            'amazon_qual': safe_import_mgr('bot.helpers.amazon.manager', 'amazon_manager'),
+            'genie_qual': safe_import_mgr('bot.helpers.genie.manager', 'genie_manager'),
+        }
+        
+        for key, manager in settings_map.items():
+            # Hanya jalankan jika user punya settingnya DAN manager mendukungnya
+            if data.get(key) and manager and hasattr(manager, 'setup_quality'):
+                try: await manager.setup_quality(user_id, data[key])
+                except Exception: pass
+
+        # Penanganan khusus Qobuz (karena menggunakan struktur dictionary)
+        if data.get('qobuz_qual'):
+            from bot import BOT_QOBUZ_CLIENTS
+            if BOT_QOBUZ_CLIENTS:
+                qobuz_interface = list(BOT_QOBUZ_CLIENTS.values())[0]
+                if hasattr(qobuz_interface, 'setup_quality'):
+                    try: await qobuz_interface.setup_quality(user_id, data['qobuz_qual'])
+                    except Exception: pass
+                    
+    except Exception as e:
+        from bot.logger import LOGGER
+        LOGGER.debug(f"Gagal sinkronisasi manager JIT: {e}")
+# ----------------------------------------
 
 
 async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
