@@ -396,9 +396,8 @@ async def zip_handler(folderpath):
 
     if user_mode == 'Telegram':
         LOGGER.info(f"[ZIP] Mode Telegram: Menggunakan Split Zip (.zip, .part2.zip)")
-        with ProcessPoolExecutor() as pool:
-            zips = await loop.run_in_executor(pool, split_zip_folder, folderpath)
-        return zips
+        # [FIX] Ganti ProcessPoolExecutor yang berat dengan asyncio.to_thread (Thread Pool yang efisien)
+        return await asyncio.to_thread(split_zip_folder, folderpath)
     else:
         LOGGER.info(f"[ZIP] Mode {user_mode}: Menggunakan System Zip (Single File Utuh)")
         zip_file = await create_zip_system(folderpath)
@@ -418,13 +417,10 @@ async def create_zip_system(folderpath):
         await process.communicate()
         if process.returncode == 0: return zip_path
         else:
-            with ProcessPoolExecutor() as pool:
-                loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(pool, zip_folder, folderpath)
+            # [FIX] Pindahkan fallback zip_folder ke Thread
+            return await asyncio.to_thread(zip_folder, folderpath)
     except:
-        with ProcessPoolExecutor() as pool:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(pool, zip_folder, folderpath)
+        return await asyncio.to_thread(zip_folder, folderpath)
 
 def split_zip_folder(folderpath) -> list:
     zip_paths = []
@@ -434,30 +430,34 @@ def split_zip_folder(folderpath) -> list:
 
     def add_to_zip(zip_name, files_to_add):
         nonlocal part_num
-        if part_num == 1:
-            zip_path = f"{zip_name}.zip"
-        else:
-            zip_path = f"{zip_name}.part{part_num}.zip"
-
+        zip_path = f"{zip_name}.zip" if part_num == 1 else f"{zip_name}.part{part_num}.zip"
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zipf:
             for file_path, arcname in files_to_add:
                 zipf.write(file_path, arcname)
         return zip_path
 
-    for root, dirs, files in os.walk(folderpath):
-        for file in files:
-            file_path = os.path.join(root, file)
-            file_size = os.path.getsize(file_path)
-            arcname = os.path.relpath(file_path, folderpath)
+    # [FIX] Menggunakan os.scandir untuk traversal super cepat (Single Stat Call)
+    def scan_dir_recursive(path):
+        for entry in os.scandir(path):
+            if entry.is_dir(follow_symlinks=False):
+                yield from scan_dir_recursive(entry.path)
+            elif entry.is_file(follow_symlinks=False):
+                yield entry
 
-            if current_size + file_size > MAX_SIZE:
-                zip_paths.append(add_to_zip(folderpath, current_files))
-                part_num += 1
-                current_files = []
-                current_size = 0
+    for entry in scan_dir_recursive(folderpath):
+        file_path = entry.path
+        # Langsung tarik atribut ukuran dari cache OS (Tanpa getsize tambahan)
+        file_size = entry.stat().st_size
+        arcname = os.path.relpath(file_path, folderpath)
 
-            current_files.append((file_path, arcname))
-            current_size += file_size
+        if current_size + file_size > MAX_SIZE:
+            zip_paths.append(add_to_zip(folderpath, current_files))
+            part_num += 1
+            current_files = []
+            current_size = 0
+
+        current_files.append((file_path, arcname))
+        current_size += file_size
 
     if current_files:
         zip_paths.append(add_to_zip(folderpath, current_files))
@@ -467,10 +467,15 @@ def split_zip_folder(folderpath) -> list:
 def zip_folder(folderpath) -> str:
     zip_path = f"{folderpath}.zip"
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED, allowZip64=True) as zipf:
-        for root, dirs, files in os.walk(folderpath):
-            for file in files:
-                file_path = os.path.join(root, file)
-                zipf.write(file_path, os.path.relpath(file_path, folderpath))
+        def scan_dir_recursive(path):
+            for entry in os.scandir(path):
+                if entry.is_dir(follow_symlinks=False):
+                    yield from scan_dir_recursive(entry.path)
+                elif entry.is_file(follow_symlinks=False):
+                    yield entry
+                    
+        for entry in scan_dir_recursive(folderpath):
+            zipf.write(entry.path, os.path.relpath(entry.path, folderpath))
     return zip_path
 
 async def move_sorted_playlist(metadata, user) -> str:
