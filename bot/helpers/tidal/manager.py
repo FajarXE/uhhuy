@@ -300,6 +300,20 @@ class TidalLoginManager:
     # PENGATURAN KUALITAS & LAINNYA
     # ==================================================================
 
+    # --- JEMBATAN UNTUK LAZY-LOAD DARI MESSAGE.PY ---
+    async def setup_quality(self, user_id: int=0, qual: str="", spatial: str="") -> None:
+        if user_id not in self.user_data:
+            self.user_data[user_id] = {}
+            
+        # Jika JIT message.py mengirim data kualitas
+        if qual:
+            self.user_data[user_id]["tidal_qual"] = qual
+            
+        # Jika ada data spasial
+        if spatial:
+            self.user_data[user_id]["tidal_spatial"] = spatial
+    # ------------------------------------------------
+
     async def setup_user_settings(self, user_id: int, qual: str = None, spatial: str = None, mqa_fix: str = None, convert_m4a: str = None):
         """Mengatur cache kualitas, mqa, & convert untuk pengguna tertentu."""
         if user_id not in self.user_data:
