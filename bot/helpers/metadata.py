@@ -217,16 +217,33 @@ async def set_metadata(metadata:dict, user_id: int = None):
         from mutagen.oggopus import OggOpus
         from mutagen.mp4 import MP4
         
-        h = File(path)
-        # Fallback manual jika deteksi otomatis gagal
-        if h is None:
-            ext = os.path.splitext(path)[1].lower().strip()
-            if '.wav' in ext: h = WAVE(path)
-            elif '.mp3' in ext: h = MP3(path)
-            elif '.flac' in ext: h = FLAC(path)
-            elif '.ogg' in ext: h = OggVorbis(path)
-            elif '.opus' in ext: h = OggOpus(path)
-            elif ext in ['.m4a', '.mp4', '.m4b']: h = MP4(path)
+        ext = os.path.splitext(path)[1].lower().strip()
+        h = None
+        
+        try:
+            # Bypass deteksi otomatis File(), langsung eksekusi berdasarkan ekstensi (Jauh lebih cepat!)
+            if ext == '.flac': 
+                h = FLAC(path)
+            elif ext in ['.m4a', '.mp4', '.m4b']: 
+                h = MP4(path)
+            elif ext == '.mp3': 
+                h = MP3(path)
+            elif ext == '.ogg': 
+                h = OggVorbis(path)
+            elif ext == '.opus': 
+                h = OggOpus(path)
+            elif ext == '.wav': 
+                h = WAVE(path)
+            else:
+                # Fallback jika ekstensinya aneh/tidak diketahui
+                h = File(path)
+        except Exception:
+            # Jika gagal (misal header sedikit berantakan), panggil si detektif sebagai upaya terakhir
+            try:
+                h = File(path)
+            except Exception:
+                h = None
+                
         return h
 
     handle = None
