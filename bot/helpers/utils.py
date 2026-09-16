@@ -156,7 +156,8 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
                 try:
                     if os.path.exists(path): os.remove(path)
                     if os.path.exists(f"{path}.aria2"): os.remove(f"{path}.aria2")
-                except: pass
+                except Exception as e:
+                    LOGGER.debug(f"Gagal menghapus file sisa Aria2 '{path}': {e}")
                 # --------------------------------------------------------------
                 
         except Exception as e:
