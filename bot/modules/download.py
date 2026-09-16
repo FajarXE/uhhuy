@@ -612,7 +612,7 @@ async def run_download_task(link: str, user: dict):
                     # Update radar terakhir kali untuk semua orang (Pesan error tidak ikut ter-update)
                     for cid, m in list(utils.GLOBAL_UI_MSG.items()):
                         c_page = utils.GLOBAL_UI_PAGES.get(cid, 1)
-                        g_text, g_markup = utils.get_status_text(page=c_page)
+                        g_text, g_markup = await utils.get_status_text(page=c_page)
                         try: await edit_message(m, g_text, g_markup, False)
                         except: pass
 
