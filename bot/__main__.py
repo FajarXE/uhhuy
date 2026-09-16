@@ -236,7 +236,7 @@ async def start_services():
             page = data['page']
             try:
                 # 1. Siapkan teks status kosong
-                g_text, g_markup = utils.get_status_text(page=page)
+                g_text, g_markup = await utils.get_status_text(page=page)
                 
                 # 2. BLIND EDIT (Paksa edit tanpa mengambil/membaca pesan dulu)
                 msg = None
