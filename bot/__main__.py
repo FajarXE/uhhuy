@@ -84,51 +84,6 @@ def handle_exception(loop, context):
             return
         traceback.print_exception(type(context["exception"]), context["exception"], context["exception"].__traceback__)
 
-async def load_all_user_settings_into_managers():
-    logging.info("Main: Sinkronisasi pengaturan pengguna ke cache manajer...")
-    try:
-        count = 0
-        settings_map = {
-            'deezer_qual': deezer_manager,
-            'beatport_qual': beatport_manager,
-            'kkbox_qual': kkbox_manager,
-            'soundcloud_qual': soundcloud_manager,
-            'idagio_qual': idagio_manager,
-            'bugs_qual': bugs_manager,
-            'moov_qual': moov_manager,
-            'livephish_qual': livephish_manager,
-            'khinsider_qual': khinsider_manager,
-        }
-
-        if not bot_set.user_data:
-            logging.warning("Main: bot_set.user_data kosong/belum dimuat.")
-            return
-
-        qobuz_interface = None
-        if BOT_QOBUZ_CLIENTS:
-            qobuz_interface = list(BOT_QOBUZ_CLIENTS.values())[0]
-
-        for user_id, user_data in bot_set.user_data.items():
-            if not user_id: continue
-            
-            for key, manager in settings_map.items():
-                quality_val = user_data.get(key)
-                if quality_val and manager:
-                    try:
-                        await manager.setup_quality(user_id, quality_val)
-                        count += 1
-                    except Exception: pass
-            
-            if qobuz_interface and user_data.get('qobuz_qual'):
-                try:
-                    await qobuz_interface.setup_quality(user_id, user_data['qobuz_qual'])
-                    count += 1
-                except Exception: pass
-
-        logging.info(f"Main: Berhasil menyinkronkan {count} pengaturan.")
-    except Exception as e:
-        logging.error(f"Main: Gagal sinkronisasi pengaturan pengguna: {e}")
-
 
 async def login_single_client(creds: dict):
     creds_copy = creds.copy()
@@ -244,7 +199,8 @@ async def start_services():
 
     logging.info("Main: Memuat Database Pengguna...")
     await bot_set.initialize_users()
-    await load_all_user_settings_into_managers()
+    
+    # --- Blok sinkronisasi lama dihapus karena sudah diatasi JIT ---
 
     # --- TAMBAHKAN BLOK INI ---
     logging.info("Main: Memuat State Sinyal Batal dari Database...")
@@ -360,6 +316,14 @@ async def shutdown_all_services():
     for mgr in managers_list:
         if mgr and hasattr(mgr, 'shutdown'):
             tasks.append(mgr.shutdown())
+            
+    # --- PENAMBAHAN GRACEFUL SHUTDOWN ARIA2 ---
+    try:
+        from bot.helpers.aria2_helper import close_aria2_session
+        tasks.append(close_aria2_session())
+    except Exception as e:
+        logging.warning(f"Main: Peringatan saat mengatur penutupan Aria2: {e}")
+    # ---------------------------------------------
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -393,14 +357,6 @@ async def shutdown_all_services():
         logging.info("Main: Proses Gunicorn berhasil dimatikan.")
     except Exception: 
         pass
-    # ---------------------------------------------
-
-    # --- PENAMBAHAN GRACEFUL SHUTDOWN ARIA2 ---
-    try:
-        from bot.helpers.aria2_helper import close_aria2_session
-        tasks.append(close_aria2_session())
-    except Exception as e:
-        logging.warning(f"Main: Peringatan saat menutup sesi Aria2: {e}")
     # ---------------------------------------------
 
 
