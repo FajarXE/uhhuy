@@ -27,7 +27,7 @@ async def task_command(client: Client, message: Message):
     GLOBAL_UI_PAGES[chat_id] = 1
     # ------------------------------------------------------------
     
-    text, markup = get_status_text(page=1)
+    text, markup = await get_status_text(page=1)
     
     try:
         # Menyimpan pesan yang dikirim bot ke dalam variabel
@@ -84,7 +84,7 @@ async def status_callback(client: Client, query: CallbackQuery):
         await database.save_ui_state(chat_id, query.message.id, page)
         # ------------------------------------------------------------------
         
-        text, markup = get_status_text(page=page)
+        text, markup = await get_status_text(page=page)
         try:
             await query.message.edit_text(text, reply_markup=markup)
             try: await query.answer()
@@ -116,7 +116,7 @@ async def status_callback(client: Client, query: CallbackQuery):
         GLOBAL_UI_PAGES[chat_id] = page
         # ----------------------------------------------------------------
         
-        text, markup = get_status_text(page=page)
+        text, markup = await get_status_text(page=page)
         try:
             await query.message.edit_text(text, reply_markup=markup)
             await query.answer("Status diperbarui!", show_alert=False)
