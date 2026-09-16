@@ -175,10 +175,6 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
 
 # --- [PERBAIKAN] MENAMBAHKAN PARAMETER progress DAN progress_args ---
 async def send_message(user, text: str, type: str = 'text', markup=None, antiflood=False, meta=None, caption=None, progress=None, progress_args=None):
-    # [FIX] Import asyncio diletakkan di paling atas agar dikenali seluruh blok kode!
-    import asyncio
-    from pyrogram.types import Message
-    from bot.tgclient import aio
     
     if isinstance(user, Message):
         client = getattr(user, '_client', aio)
@@ -235,7 +231,7 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
         msg = None
         msg_created = False 
 
-                # --- [PERBAIKAN] MENGUBAH NAMA PROGRESS INTERNAL AGAR TIDAK BENTROK ---
+        # --- [PERBAIKAN] MENGUBAH NAMA PROGRESS INTERNAL AGAR TIDAK BENTROK ---
         async def internal_progress(current, total):
             nonlocal msg, last_update_time, msg_created, start_time 
             if cancel_id in GLOBAL_CANCEL_DICT:
