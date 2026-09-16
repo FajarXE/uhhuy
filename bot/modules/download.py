@@ -585,7 +585,19 @@ async def run_download_task(link: str, user: dict):
                     import hashlib
                     final_task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
                     
+                    # 1. HAPUS DARI PAPAN GLOBAL UTAMA
                     utils.GLOBAL_TASKS.pop(final_task_id, None)
+
+                    # --- [FIX MEMORY LEAK] HAPUS DARI DAFTAR CANCEL ---
+                    if final_task_id in utils.GLOBAL_CANCEL_DICT:
+                        utils.GLOBAL_CANCEL_DICT.discard(final_task_id) # discard() aman, tidak akan error jika kosong
+                        try:
+                            # Hapus juga dari Database agar tidak menumpuk saat restart
+                            from bot.helpers.database.mongo_async import database
+                            await database.client.cancelled_tasks.delete_one({'_id': final_task_id})
+                        except Exception as db_err:
+                            LOGGER.debug(f"Gagal menghapus cancel ID dari DB: {db_err}")
+                    # --------------------------------------------------
 
                     # --- [PERBAIKAN ERROR TERTEMPA RADAR] ---
                     # Keluarkan pesan ini dari memori Radar LEBIH AWAL jika tugas gagal,
@@ -623,8 +635,8 @@ async def run_download_task(link: str, user: dict):
                             await database.remove_ui_state(user['chat_id'])
                             # ----------------------------
                     # ---------------------------------------------------------
-            except:
-                pass
+            except Exception as e:
+                LOGGER.debug(f"Pembersihan akhir gagal (Non-Fatal): {e}")
 
 
 @Client.on_message(filters.command(CMD.DOWNLOAD))
