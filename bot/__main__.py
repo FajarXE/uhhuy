@@ -395,6 +395,14 @@ async def shutdown_all_services():
         pass
     # ---------------------------------------------
 
+    # --- PENAMBAHAN GRACEFUL SHUTDOWN ARIA2 ---
+    try:
+        from bot.helpers.aria2_helper import close_aria2_session
+        tasks.append(close_aria2_session())
+    except Exception as e:
+        logging.warning(f"Main: Peringatan saat menutup sesi Aria2: {e}")
+    # ---------------------------------------------
+
 
 if __name__ == "__main__":
     import shutil
