@@ -16,6 +16,30 @@ from .helpers.database.mongo_async import database
 from .helpers.translations import lang_available
 from .helpers.tidal.manager import tidal_manager
 
+from collections import OrderedDict
+
+class LRUCache(OrderedDict):
+    """Cache memori dinamis dengan sistem rotasi FIFO (Batas 1000 User)"""
+    def __init__(self, maxsize=1000, *args, **kwds):
+        self.maxsize = maxsize
+        super().__init__(*args, **kwds)
+
+    def __getitem__(self, key):
+        try:
+            value = super().__getitem__(key)
+            self.move_to_end(key)
+            return value
+        except KeyError:
+            return {} # Fallback aman jika user belum diset
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        if len(self) > self.maxsize:
+            oldest = next(iter(self))
+            del self[oldest]
+
 def __encrypt_string__(string):
     s = bytes(string, 'utf-8')
     s = base64.b64encode(s)
@@ -57,7 +81,7 @@ class BotSettings:
         self.playlist_zip = None
         self.artist_zip = None
         self.upload_mode = 'Telegram'
-        self.user_data = {}
+        self.user_data = LRUCache(maxsize=1000)
         self.can_enable_tidal = Config.ENABLE_TIDAL
 
     def check_upload_mode(self):
