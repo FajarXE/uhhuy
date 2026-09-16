@@ -299,7 +299,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                     action = update_details.get('action', 'Download').capitalize()
                     task_type = update_details.get('type', 'Task').capitalize()
 
-                    # MEMPERBARUI NILAI GLOBAL DENGAN CARA AMAN
+                async with GLOBAL_STATE_LOCK:
                     utils_module.GLOBAL_TASKS[batch_id] = {
                         'action': action,
                         'type': task_type,
@@ -345,7 +345,11 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
             try: await edit_message(update_details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
             except: pass
             
-        GLOBAL_TASKS.pop(batch_id, None) 
+        # --- TAMBAHKAN LOCK DI SINI SAAT MENGHAPUS (POP) ---
+        async with GLOBAL_STATE_LOCK:
+            GLOBAL_TASKS.pop(batch_id, None) 
+        # ---------------------------------------------------
+        
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         
     return results
