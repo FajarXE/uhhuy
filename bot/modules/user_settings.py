@@ -1,4 +1,4 @@
-# [GANTI TOTAL ISI FILE: bot/modules/user_settings.py]
+# [FILE: bot/modules/user_settings.py]
 
 import bot.helpers.translations as lang
 import logging, asyncio
@@ -13,30 +13,79 @@ from bot import cmd
 from bot import BOT_QOBUZ_CLIENTS 
 
 # --- IMPORT MANAGERS (DENGAN ERROR HANDLING) ---
-def safe_import_manager(module_path, manager_name):
-    try:
-        mod = __import__(module_path, fromlist=[manager_name])
-        return getattr(mod, manager_name)
-    except ImportError:
-        logging.warning(f"UserSettings: Gagal mengimpor {manager_name}.")
-        return None
-
-beatport_manager = safe_import_manager("bot.helpers.beatport.manager", "beatport_manager")
-deezer_manager = safe_import_manager("bot.helpers.deezer.manager", "deezer_manager")
-tidal_manager = safe_import_manager("bot.helpers.tidal.manager", "tidal_manager")
-kkbox_manager = safe_import_manager("bot.helpers.kkbox.manager", "kkbox_manager")
-soundcloud_manager = safe_import_manager("bot.helpers.soundcloud.manager", "soundcloud_manager")
-idagio_manager = safe_import_manager("bot.helpers.idagio.manager", "idagio_manager")
-bugs_manager = safe_import_manager("bot.helpers.bugs.manager", "bugs_manager")
-moov_manager = safe_import_manager("bot.helpers.moov.manager", "moov_manager")
-livephish_manager = safe_import_manager("bot.helpers.livephish.manager", "livephish_manager")
-highresaudio_manager = safe_import_manager("bot.helpers.highresaudio.manager", "highresaudio_manager")
-khinsider_manager = safe_import_manager("bot.helpers.khinsider.manager", "khinsider_manager")
-qobuz_manager = safe_import_manager("bot.helpers.qobuz.qopy", "qobuz_manager")
-amazon_manager = safe_import_manager("bot.helpers.amazon.manager", "amazon_manager")
-genie_manager = safe_import_manager("bot.helpers.genie.manager", "genie_manager")
+try:
+    from ..helpers.beatport.manager import beatport_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor beatport_manager.")
+    beatport_manager = None
+try:
+    from ..helpers.deezer.manager import deezer_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor deezer_manager.")
+    deezer_manager = None
+try:
+    from ..helpers.tidal.manager import tidal_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor tidal_manager.")
+    tidal_manager = None
+try:
+    from ..helpers.kkbox.manager import kkbox_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor kkbox_manager.")
+    kkbox_manager = None
+try:
+    from ..helpers.soundcloud.manager import soundcloud_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor soundcloud_manager.")
+    soundcloud_manager = None
+try:
+    from ..helpers.idagio.manager import idagio_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor idagio_manager.")
+    idagio_manager = None
+try:
+    from ..helpers.bugs.manager import bugs_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor bugs_manager.")
+    bugs_manager = None
+try:
+    from ..helpers.moov.manager import moov_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor moov_manager.")
+    moov_manager = None
+try:
+    from ..helpers.livephish.manager import livephish_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor livephish_manager.")
+    livephish_manager = None
+try:
+    from ..helpers.highresaudio.manager import highresaudio_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor highresaudio_manager.")
+    highresaudio_manager = None
+try:
+    from ..helpers.khinsider.manager import khinsider_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor khinsider_manager.")
+    khinsider_manager = None
+try:
+    from ..helpers.qobuz.qopy import qobuz_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor qobuz_manager.")
+    qobuz_manager = None
+try:
+    from ..helpers.amazon.manager import amazon_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor amazon_manager.")
+    amazon_manager = None
+try:
+    from ..helpers.genie.manager import genie_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor genie_manager.")
+    genie_manager = None
 
 # --- IMPORT BUTTONS ---
+# Pastikan Anda sudah menambahkan 'beatport_user_auth_buttons' di bot/helpers/buttons/settings.py
 from ..helpers.buttons.settings import (
     usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
@@ -51,547 +100,1208 @@ from ..helpers.tidal.tidal_api import TidalApi
 
 
 # ==================================
-# 1. DYNAMIC CLOUD TOKEN COMMANDS
+# COMMANDS SET/DEL TOKEN
 # ==================================
+
+# --- HELPER FUNCTION ---
 async def _save_token(message, key, name):
     user_id = message.from_user.id
     try:
-        if len(message.command) < 2: raise IndexError
+        if len(message.command) < 2:
+            raise IndexError
         token = message.text.split(maxsplit=1)[1].strip()
+        
+        # Simpan ke Memory & DB
         bot_set.user_data.setdefault(user_id, {})[key] = token
         await database.save_user_settings(user_id, {key: token})
+        
         await message.reply_text(f"✅ <b>{name} Token Saved!</b>\nToken: <code>{token}</code>")
     except IndexError:
         await message.reply_text(f"❌ <b>Format Salah.</b>\nContoh: <code>/set_{name.lower()} your_token_here</code>")
 
 async def _del_token(message, key, name):
     user_id = message.from_user.id
+    # Hapus dari Memory
     if user_id in bot_set.user_data:
         bot_set.user_data[user_id].pop(key, None)
+    
+    # Hapus dari DB
     await database.save_user_settings(user_id, {key: None})
     await message.reply_text(f"🗑️ <b>{name} Token Deleted!</b>")
 
-CLOUD_KEYS = {
-    "gofile": ("gofile_token", "Gofile"),
-    "buzzheavier": ("buzzheavier_token", "Buzzheavier"),
-    "viking": ("viking_token", "Vikingfiles")
-}
 
-@Client.on_message(filters.command(["set_gofile", "set_buzzheavier", "set_viking"]))
-async def set_cloud_cmd(client, message):
-    if not await check_user(msg=message): return
-    prov = message.command[0].split('_')[1]
-    if prov in CLOUD_KEYS:
-        await _save_token(message, CLOUD_KEYS[prov][0], CLOUD_KEYS[prov][1])
+# --- 1. GOFILE ---
+@Client.on_message(filters.command("set_gofile"))
+async def set_gofile_cmd(client, message):
+    if await check_user(msg=message):
+        await _save_token(message, 'gofile_token', 'Gofile')
 
-@Client.on_message(filters.command(["del_gofile", "delete_gofile", "del_buzzheavier", "delete_buzzheavier", "del_viking", "delete_viking"]))
-async def del_cloud_cmd(client, message):
-    if not await check_user(msg=message): return
-    prov = message.command[0].split('_')[1].replace('ete', '')
-    if prov in CLOUD_KEYS:
-        await _del_token(message, CLOUD_KEYS[prov][0], CLOUD_KEYS[prov][1])
+@Client.on_message(filters.command(["del_gofile", "delete_gofile"]))
+async def del_gofile_cmd(client, message):
+    if await check_user(msg=message):
+        await _del_token(message, 'gofile_token', 'Gofile')
+
+# --- 2. BUZZHEAVIER ---
+@Client.on_message(filters.command("set_buzzheavier"))
+async def set_bh_cmd(client, message):
+    if await check_user(msg=message):
+        await _save_token(message, 'buzzheavier_token', 'Buzzheavier')
+
+@Client.on_message(filters.command(["del_buzzheavier", "delete_buzzheavier"]))
+async def del_bh_cmd(client, message):
+    if await check_user(msg=message):
+        await _del_token(message, 'buzzheavier_token', 'Buzzheavier')
+
+# --- 3. VIKINGFILES ---
+@Client.on_message(filters.command("set_viking"))
+async def set_vk_cmd(client, message):
+    if await check_user(msg=message):
+        await _save_token(message, 'viking_token', 'Vikingfiles')
+
+@Client.on_message(filters.command(["del_viking", "delete_viking"]))
+async def del_vk_cmd(client, message):
+    if await check_user(msg=message):
+        await _del_token(message, 'viking_token', 'Vikingfiles')
 
 
 # ==================================
-# 2. PRIVATE AUTH COMMANDS & MENUS
+# BEATPORT PRIVATE AUTH (USER SETTINGS)
 # ==================================
-# Note: Karena alur otentikasi (TV Code, Proxy, Email) sangat unik per layanan, 
-# kita tetap mempertahankan handler individual untuk Auth Commands agar tidak merusak logika spesifiknya.
 
-# --- BEATPORT AUTH ---
+# 1. COMMAND LOGIN
 @Client.on_message(filters.command("beatport_login"))
 async def uset_bp_login_cmd(client, message):
-    if not await check_user(msg=message): return
+    if not await check_user(msg=message):
+        return
+
     user_id = message.from_user.id
     args = message.text.split()
-    if len(args) < 3: return await message.reply_text("❌ **Format Salah**\nGunakan: <code>/beatport_login email password</code>")
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/beatport_login email password</code>\n\n"
+            "⚠️ Password Anda akan disimpan dengan aman untuk login otomatis."
+        )
+    
+    email = args[1]
+    password = args[2] 
+    
     status_msg = await message.reply_text("🔄 **Verifying Account...**\nMencoba login ke Beatport...")
+    
     try:
-        await beatport_manager.add_user_account(user_id, args[1], args[2])
-        await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun: <code>{args[1]}</code>\nMode: Private Session")
-    except Exception as e: await status_msg.edit_text(f"❌ **Login Gagal:**\n{str(e)}")
+        # Panggil fungsi add_user_account yang baru di manager.py
+        await beatport_manager.add_user_account(user_id, email, password)
+        await status_msg.edit_text(
+            f"✅ **Login Berhasil!**\n\n"
+            f"Akun: <code>{email}</code>\n"
+            f"Mode: Private Session\n"
+            f"Sekarang bot akan menggunakan akun ini saat Anda mendownload dari Beatport."
+        )
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Login Gagal:**\n{str(e)}")
 
+
+# 2. CALLBACK HANDLERS (MENU)
 @Client.on_callback_query(filters.regex("^uset_bp_auth"))
 async def uset_bp_auth_handler(client, query):
-    if not await check_user(msg=query.message): return
+    if not await check_user(msg=query.message):
+        return
+    
     user_id = query.from_user.id
     has_session = beatport_manager.has_private_session(user_id)
+    
     text = "🔐 **BEATPORT PRIVATE SESSION**\n\n"
+    
     if has_session:
-        email_masked = beatport_manager.get_client(user_id).email
-        text += f"✅ **Status: LOGGED IN**\n👤 Akun: <code>{email_masked}</code>\nBot menggunakan akun ini khusus untuk Anda."
+        client_obj = beatport_manager.get_client(user_id)
+        email_masked = client_obj.email
+        text += f"✅ **Status: LOGGED IN**\n"
+        text += f"👤 Akun: <code>{email_masked}</code>\n"
+        text += "Bot menggunakan akun ini khusus untuk Anda."
     else:
-        text += "❌ **Status: NOT LOGGED IN**\nBot menggunakan akun Global (Shared) untuk Anda jika tersedia."
+        text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot menggunakan akun Global (Shared) untuk Anda jika tersedia.\n\n"
+        text += "Login akun sendiri untuk akses region/konten yang lebih spesifik."
+
     await edit_message(query.message, text, markup=beatport_user_auth_buttons(has_session))
+
 
 @Client.on_callback_query(filters.regex("^uset_bp_logout"))
 async def uset_bp_logout_handler(client, query):
-    if not await check_user(msg=query.message): return
+    if not await check_user(msg=query.message):
+        return
+        
     user_id = query.from_user.id
     if beatport_manager.has_private_session(user_id):
         await beatport_manager.remove_user_account(user_id)
-        await query.answer("✅ Sesi Beatport dihapus.", True)
-    else: await query.answer("Anda belum login.", True)
+        await query.answer("✅ Sesi Beatport dihapus. Kembali ke mode Global.", True)
+    else:
+        await query.answer("Anda belum login.", True)
+    
+    # Refresh menu
     await uset_bp_auth_handler(client, query)
+
 
 @Client.on_callback_query(filters.regex("^uset_bp_instr"))
 async def uset_bp_instr_handler(client, query):
-    if not await check_user(msg=query.message): return
-    text = "📝 **CARA LOGIN BEATPORT**\n\n<code>/beatport_login email password</code>"
+    if not await check_user(msg=query.message):
+        return
+    
+    text = (
+        "📝 **CARA LOGIN BEATPORT**\n\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/beatport_login email password</code>\n\n"
+        "Contoh:\n"
+        "<code>/beatport_login myemail@gmail.com rahasia123</code>"
+    )
+    # Tombol Back (Warna Biru)
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_bp_auth", style=ButtonStyle.PRIMARY)]]
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
-# --- HIGHRESAUDIO AUTH ---
+# ==================================
+# HIGHRESAUDIO PRIVATE AUTH
+# ==================================
+
+# 1. COMMAND LOGIN (/highresaudio_login email password)
 @Client.on_message(filters.command("highresaudio_login"))
 async def uset_hra_login_cmd(client, message):
-    if not await check_user(msg=message): return
+    if not await check_user(msg=message):
+        return
+
     user_id = message.from_user.id
     args = message.text.split()
-    if len(args) < 3: return await message.reply_text("❌ **Format Salah**\nGunakan: <code>/highresaudio_login email password</code>")
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/highresaudio_login email password</code>\n\n"
+            "⚠️ Password Anda akan disimpan dengan aman untuk login otomatis."
+        )
+    
+    email = args[1]
+    password = args[2] 
+    
     status_msg = await message.reply_text("🔄 **Verifying Account...**\nMencoba login ke HighResAudio...")
+    
     try:
-        success, info = await highresaudio_manager.add_user_account(user_id, args[1], args[2])
-        if success: await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun: <code>{args[1]}</code>")
-        else: await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
-    except Exception as e: await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+        # Memanggil fungsi add_user_account di manager
+        # Pastikan Anda sudah menambahkan fungsi add_user_account di HRA manager.py (seperti kode saya sebelumnya)
+        success, info = await highresaudio_manager.add_user_account(user_id, email, password)
+        
+        if success:
+            await status_msg.edit_text(
+                f"✅ **Login Berhasil!**\n\n"
+                f"Akun: <code>{email}</code>\n"
+                f"Mode: Private Session\n"
+                f"Sekarang bot akan menggunakan akun ini saat Anda mendownload dari HighResAudio."
+            )
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
 
+
+# 2. CALLBACK MENU AUTH (uset_hra_auth)
 @Client.on_callback_query(filters.regex("^uset_hra_auth"))
 async def uset_hra_auth_handler(client, query):
-    if not await check_user(msg=query.message): return
+    if not await check_user(msg=query.message):
+        return
+    
     user_id = query.from_user.id
-    if not highresaudio_manager: return await query.answer("Modul HighResAudio tidak aktif.", show_alert=True)
+    
+    # Cek apakah user punya sesi (Logika manual karena get_client HRA mengembalikan objek/None)
+    # Pastikan highresaudio_manager sudah diimport dan ada
+    if not highresaudio_manager:
+        return await query.answer("Modul HighResAudio tidak aktif.", show_alert=True)
+
     client_obj = highresaudio_manager.get_client(user_id)
+    
+    # Pastikan client yang didapat benar-benar milik user (ada di dict user_clients)
     has_session = user_id in highresaudio_manager.user_clients
+    
     text = "🔐 **HIGHRESAUDIO PRIVATE SESSION**\n\n"
+    
     if has_session and client_obj:
+        # --- PERBAIKAN DI SINI ---
+        # Gunakan getattr untuk mencegah error jika atribut .email tidak ada
+        # Kita coba cari 'email', kalau tidak ada cari 'username', kalau tidak ada pakai 'Unknown User'
         email_masked = getattr(client_obj, 'email', getattr(client_obj, 'username', 'Unknown User'))
-        text += f"✅ **Status: LOGGED IN**\n👤 Akun: <code>{email_masked}</code>"
+        
+        text += f"✅ **Status: LOGGED IN**\n"
+        text += f"👤 Akun: <code>{email_masked}</code>\n"
+        text += "Bot menggunakan akun ini khusus untuk Anda."
     else:
-        text += "❌ **Status: NOT LOGGED IN**\nBot menggunakan akun Global (Shared) untuk Anda jika tersedia."
+        text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot menggunakan akun Global (Shared) untuk Anda jika tersedia.\n\n"
+        text += "Login akun sendiri untuk akses region/konten yang lebih spesifik."
+
     await edit_message(query.message, text, markup=highresaudio_user_auth_buttons(has_session))
 
+
+# 3. CALLBACK LOGOUT (uset_hra_logout)
 @Client.on_callback_query(filters.regex("^uset_hra_logout"))
 async def uset_hra_logout_handler(client, query):
-    if not await check_user(msg=query.message): return
+    if not await check_user(msg=query.message):
+        return
+        
     user_id = query.from_user.id
     if user_id in highresaudio_manager.user_clients:
-        try: highresaudio_manager.user_clients[user_id].close_session()
+        try:
+            highresaudio_manager.user_clients[user_id].close_session()
         except: pass
         del highresaudio_manager.user_clients[user_id]
-        await query.answer("✅ Sesi HighResAudio dihapus.", True)
-    else: await query.answer("Anda belum login.", True)
+        
+        await query.answer("✅ Sesi HighResAudio dihapus. Kembali ke mode Global.", True)
+    else:
+        await query.answer("Anda belum login.", True)
+    
+    # Refresh tampilan menu auth
     await uset_hra_auth_handler(client, query)
 
+
+# 4. CALLBACK INSTRUKSI (uset_hra_instr)
 @Client.on_callback_query(filters.regex("^uset_hra_instr"))
 async def uset_hra_instr_handler(client, query):
-    if not await check_user(msg=query.message): return
-    text = "📝 **CARA LOGIN HIGHRESAUDIO**\n\n<code>/highresaudio_login email password</code>"
+    if not await check_user(msg=query.message):
+        return
+    
+    text = (
+        "📝 **CARA LOGIN HIGHRESAUDIO**\n\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/highresaudio_login email password</code>\n\n"
+        "Contoh:\n"
+        "<code>/highresaudio_login myemail@gmail.com rahasia123</code>"
+    )
+    
+    # Tambahkan style=ButtonStyle.PRIMARY agar warna BIRU
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_hra_auth", style=ButtonStyle.PRIMARY)]]
+    
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
-# --- QOBUZ AUTH ---
+# ==================================
+# QOBUZ PRIVATE AUTH (MULTI-ACCOUNT)
+# ==================================
+
+# 1. COMMAND LOGIN (Mendukung Email/Pass ATAU UserID/Token)
 @Client.on_message(filters.command("qobuz_login"))
 async def uset_qb_login_cmd(client, message):
-    if not await check_user(msg=message): return
+    if not await check_user(msg=message):
+        return
+
     user_id = message.from_user.id
     args = message.text.split()
-    if len(args) < 3: return await message.reply_text("❌ **Format Salah**\nVia Email: <code>/qobuz_login email password</code>\nVia Token: <code>/qobuz_login user_id token</code>")
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan salah satu format berikut:\n\n"
+            "**Via Email:**\n"
+            "<code>/qobuz_login email password [app_id] [app_secret]</code>\n\n"
+            "**Via Token:**\n"
+            "<code>/qobuz_login qobuz_user_id token [app_id] [app_secret]</code>"
+        )
+    
+    # Deteksi apakah menggunakan Email atau User ID
+    input_satu = args[1]
+    input_dua = args[2]
+    
     app_id = args[3] if len(args) > 3 else None
     app_secret = args[4] if len(args) > 4 else None
-    status_msg = await message.reply_text("🔄 **Verifying Qobuz Account...**")
+    
+    status_msg = await message.reply_text("🔄 **Verifying Qobuz Account...**\nSedang memvalidasi kredensial...")
+    
     try:
-        if "@" in args[1]: success, info = await qobuz_manager.add_user_account(tg_user_id=user_id, email=args[1], password=args[2], app_id=app_id, app_secret=app_secret)
-        else: success, info = await qobuz_manager.add_user_account(tg_user_id=user_id, q_user_id=args[1], q_token=args[2], app_id=app_id, app_secret=app_secret)
-        if success: await status_msg.edit_text(f"✅ **{info}**")
-        else: await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
-    except Exception as e: await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+        if "@" in input_satu:
+            # Mode Email & Password
+            success, info = await qobuz_manager.add_user_account(
+                tg_user_id=user_id, 
+                email=input_satu, 
+                password=input_dua, 
+                app_id=app_id, 
+                app_secret=app_secret
+            )
+        else:
+            # Mode User ID & Token
+            success, info = await qobuz_manager.add_user_account(
+                tg_user_id=user_id, 
+                q_user_id=input_satu, 
+                q_token=input_dua, 
+                app_id=app_id, 
+                app_secret=app_secret
+            )
+        
+        if success:
+            await status_msg.edit_text(
+                f"✅ **{info}**\n\n"
+                f"App ID Kustom: <code>{'Ya' if app_id else 'Tidak'}</code>\n"
+                f"Sesi pribadi Anda berhasil disimpan."
+            )
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
 
+
+# 2. HANDLER MENU AUTH (Menampilkan Daftar Akun)
 @Client.on_callback_query(filters.regex("^uset_qb_auth"))
 async def uset_qb_auth_handler(client, query):
-    if not await check_user(msg=query.message): return
-    accounts_list = bot_set.user_data.get(query.from_user.id, {}).get('qobuz_accounts', [])
+    if not await check_user(msg=query.message):
+        return
+    
+    user_id = query.from_user.id
+    
+    user_data_mem = bot_set.user_data.get(user_id, {})
+    accounts_list = user_data_mem.get('qobuz_accounts', [])
+    
     text = "🔐 **QOBUZ PRIVATE SESSION**\n\n"
-    if accounts_list: text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
-    else: text += "❌ **Status: TIDAK ADA AKUN**\n"
+    
+    if accounts_list:
+        text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
+            
+        text += "\nBot akan mencoba akun secara berurutan. Klik tombol 🗑️ di bawah untuk menghapus akun yang spesifik (misal expired)."
+    else:
+        text += "❌ **Status: TIDAK ADA AKUN**\n"
+        text += "Bot saat ini menggunakan akun Global (Shared).\n\n"
+        text += "Anda bisa menambahkan banyak akun pribadi (misal: beda region) untuk melewati batasan geo-restriction."
+
     await edit_message(query.message, text, markup=qb_user_auth_buttons(accounts_list))
 
+
+# 3. HANDLER HAPUS AKUN SPESIFIK
 @Client.on_callback_query(filters.regex(r"^uset_qb_rm_(.+)"))
 async def uset_qb_remove_handler(client, query):
-    if not await check_user(msg=query.message): return
-    if await qobuz_manager.remove_specific_account(query.from_user.id, query.matches[0].group(1)):
-        await query.answer("✅ Akun dihapus.", True)
-    else: await query.answer("❌ Gagal menghapus.", True)
+    if not await check_user(msg=query.message):
+        return
+
+    user_id = query.from_user.id
+    target_q_uid = query.matches[0].group(1) 
+    
+    result = await qobuz_manager.remove_specific_account(user_id, target_q_uid)
+    
+    if result:
+        await query.answer(f"✅ Akun {target_q_uid} berhasil dihapus.", True)
+    else:
+        await query.answer("❌ Gagal menghapus (Akun tidak ditemukan).", True)
+    
     await uset_qb_auth_handler(client, query)
 
+
+# 4. HANDLER INSTRUKSI
 @Client.on_callback_query(filters.regex("^uset_qb_instr"))
 async def uset_qb_instr_handler(client, query):
-    if not await check_user(msg=query.message): return
-    text = "📝 **CARA LOGIN QOBUZ**\n\n<code>/qobuz_login user_id user_token</code>"
+    if not await check_user(msg=query.message):
+        return
+    
+    text = (
+        "📝 **CARA LOGIN QOBUZ (MULTI-AKUN)**\n\n"
+        "Anda bisa menambahkan lebih dari satu akun.\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/qobuz_login user_id user_token</code>\n\n"
+        "Contoh:\n"
+        "<code>/qobuz_login 123456 r5T6y7U8...</code>"
+    )
+    style=ButtonStyle.PRIMARY
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_qb_auth", style=ButtonStyle.PRIMARY)]]
+    
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
-# --- DEEZER AUTH ---
+# ==================================
+# DEEZER PRIVATE AUTH (MULTI-ACCOUNT)
+# ==================================
+
+# 1. COMMAND LOGIN
 @Client.on_message(filters.command("deezer_login"))
 async def uset_dz_login_cmd(client, message):
-    if not await check_user(msg=message): return
-    if len(message.text.split()) < 2: return await message.reply_text("❌ **Format Salah**\nGunakan: <code>/deezer_login arl_anda</code>")
-    status_msg = await message.reply_text("🔄 **Verifying Deezer Account...**")
-    try:
-        success, info = await deezer_manager.add_user_account(message.from_user.id, message.text.split()[1].strip())
-        await status_msg.edit_text(f"✅ **{info}**" if success else f"❌ **Login Gagal:**\n{info}")
-    except Exception as e: await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+    if not await check_user(msg=message):
+        return
 
+    user_id = message.from_user.id
+    args = message.text.split()
+    
+    if len(args) < 2:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/deezer_login arl_anda</code>\n\n"
+            "Cara mendapatkan ARL:\n"
+            "1. Buka deezer.com -> Login\n"
+            "2. F12 (Dev Tools) -> Application -> Cookies -> deezer.com\n"
+            "3. Salin value dari cookie bernama `arl`."
+        )
+    
+    arl = args[1].strip()
+    status_msg = await message.reply_text("🔄 **Verifying Deezer Account...**")
+    
+    try:
+        success, info = await deezer_manager.add_user_account(user_id, arl)
+        if success:
+            await status_msg.edit_text(f"✅ **{info}**")
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+
+# 2. MENU AUTH
 @Client.on_callback_query(filters.regex("^uset_dz_auth"))
 async def uset_dz_auth_handler(client, query):
-    if not await check_user(msg=query.message): return
-    accounts_list = bot_set.user_data.get(query.from_user.id, {}).get('deezer_accounts', [])
+    if not await check_user(msg=query.message):
+        return
+    
+    user_id = query.from_user.id
+    user_data_mem = bot_set.user_data.get(user_id, {})
+    accounts_list = user_data_mem.get('deezer_accounts', [])
+    
     text = "🔐 **DEEZER PRIVATE SESSION**\n\n"
     if accounts_list:
         text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
-        for idx, acc in enumerate(accounts_list): text += f"{idx+1}. <b>{acc.get('label', 'Unknown')}</b>\n"
-    else: text += "❌ **Status: TIDAK ADA AKUN**\n"
+        for idx, acc in enumerate(accounts_list):
+            label = acc.get('label', 'Unknown')
+            text += f"{idx+1}. <b>{label}</b>\n"
+    else:
+        text += "❌ **Status: TIDAK ADA AKUN**\n"
+        text += "Bot menggunakan akun Global jika tersedia.\n"
+
+    # Pastikan Anda import 'deezer_user_auth_buttons' dari settings.py di bagian atas file ini!
     await edit_message(query.message, text, markup=deezer_user_auth_buttons(accounts_list))
 
+# 3. HAPUS AKUN
 @Client.on_callback_query(filters.regex(r"^uset_dz_rm_(.+)"))
 async def uset_dz_remove_handler(client, query):
-    if not await check_user(msg=query.message): return
-    if await deezer_manager.remove_specific_account(query.from_user.id, query.matches[0].group(1)):
+    if not await check_user(msg=query.message):
+        return
+    user_id = query.from_user.id
+    target = query.matches[0].group(1) 
+    if await deezer_manager.remove_specific_account(user_id, target):
         await query.answer("✅ Akun dihapus.", True)
-    else: await query.answer("❌ Gagal.", True)
+    else:
+        await query.answer("❌ Gagal.", True)
     await uset_dz_auth_handler(client, query)
 
+# 4. INSTRUKSI
 @Client.on_callback_query(filters.regex("^uset_dz_instr"))
 async def uset_dz_instr_handler(client, query):
     text = "Ketik: <code>/deezer_login arl_anda_disini</code>"
+    style=ButtonStyle.PRIMARY
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uset_dz_auth", style=ButtonStyle.PRIMARY)]]
+    
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
-# --- TIDAL AUTH ---
+# ==================================
+# TIDAL USER PRIVATE AUTH
+# ==================================
+
+# 1. Tombol Menu Auth di Panel Tidal (Callback)
 @Client.on_callback_query(filters.regex("^utd_auth_menu"))
 async def uset_tidal_auth_menu(client, query):
     if not await check_user(msg=query.message): return
+    
     user_id = query.from_user.id
+    
+    # Ambil daftar akun dari memori
     user_data_mem = bot_set.user_data.get(user_id, {})
     accounts_list = user_data_mem.get('tidal_accounts', [])
+    
+    # [FIX] Cek jika akun lama masih ada tapi belum dimasukkan ke list baru
     if not accounts_list and user_data_mem.get('tidal_auth'):
         accounts_list = [user_data_mem['tidal_auth']]
         user_data_mem['tidal_accounts'] = accounts_list
     
     text = "**🔐 TIDAL PRIVATE SESSION (MULTI-ACCOUNT)**\n\n"
     buttons = []
+
     if accounts_list:
         text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
+        text += "Bot akan menggunakan akun-akun ini secara bergantian (Load Balancing).\n\n"
+        
         for i, acc in enumerate(accounts_list):
-            text += f"**{i+1}. User ID:** `{acc.get('user_id', 'Unknown')}`\n   🏳️ Region: `{acc.get('country_code', '??')}` | 💎 Plan: `{acc.get('sub_type', 'Premium')}`\n\n"
+            uid = acc.get('user_id', 'Unknown')
+            country = acc.get('country_code', '??')
+            sub = acc.get('sub_type', 'Premium') 
+            
+            text += f"**{i+1}. User ID:** `{uid}`\n"
+            text += f"   🏳️ Region: `{country}` | 💎 Plan: `{sub}`\n\n"
+            
+        text += "👇 **Klik tombol sampah (🗑️) di bawah untuk menghapus akun tertentu.**\n"
+        
         buttons.append([InlineKeyboardButton("🔻 HAPUS AKUN (KLIK DI BAWAH) 🔻", callback_data="ignore")])
         for acc in accounts_list:
             uid = acc.get('user_id', 'Unknown')
-            buttons.append([InlineKeyboardButton(text=f"🗑️ {acc.get('sub_type', 'Premium')} - {uid}", callback_data=f"utd_rm_{uid}", style=ButtonStyle.DANGER)])
+            sub = acc.get('sub_type', 'Premium')
+            btn_text = f"🗑️ {sub} - {uid}"
+            buttons.append([
+                InlineKeyboardButton(text=btn_text, callback_data=f"utd_rm_{uid}", style=ButtonStyle.DANGER)
+            ])
     else:
         text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot menggunakan akun Global (Shared) untuk Anda.\n"
+        text += "Login akun sendiri untuk akses region/konten khusus dan kualitas HiRes pribadi.\n"
         
-    buttons.append([InlineKeyboardButton("➕ LOGIN ACCOUNT (TV CODE)", callback_data="utd_login_start", style=ButtonStyle.SUCCESS)])
-    buttons.append([InlineKeyboardButton("➕ LOGIN VIA TOKEN", callback_data="utd_instr_token", style=ButtonStyle.SUCCESS)])
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="uset_tidal", style=ButtonStyle.PRIMARY)])
+    buttons.append([
+        InlineKeyboardButton(
+            "➕ LOGIN ACCOUNT (TV CODE)", 
+            callback_data="utd_login_start", 
+            style=ButtonStyle.SUCCESS
+        )
+    ])
+
+    # Tambahkan tombol INSTRUKSI TOKEN tepat di bawahnya:
+    buttons.append([
+        InlineKeyboardButton(
+            "➕ LOGIN VIA TOKEN", 
+            callback_data="utd_instr_token", 
+            style=ButtonStyle.SUCCESS
+        )
+    ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 Back", 
+            callback_data="uset_tidal", 
+            style=ButtonStyle.PRIMARY
+        )
+    ])
+    
     await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
 
+
+# 2. Proses Login (Generate Code)
 @Client.on_callback_query(filters.regex("^utd_login_start"))
 async def uset_tidal_login_start(client, query):
     if not await check_user(msg=query.message): return
+    
     temp_client = TidalApi()
     try:
         auth_url, err = await temp_client.get_tv_login_url()
-        if err: return await query.answer(f"Error: {err}", True)
+        if err:
+            await temp_client.close()
+            return await query.answer(f"Error: {err}", True)
+        
+        text = (
+            "**TIDAL TV LOGIN**\n\n"
+            f"1. Buka link ini: [LOGIN LINK]({auth_url})\n"
+            "2. Login dan izinkan akses.\n"
+            "3. Setelah sukses di browser, klik tombol **'CLICK I HAVE LOGGED IN'** di bawah."
+        )
+        
+        # Simpan temp_client di memory sementara bot (bukan manager) agar bisa diakses saat verify
+        # Kita gunakan bot_set.user_data untuk simpan object sementara
         bot_set.user_data.setdefault(query.from_user.id, {})['temp_tidal_auth'] = temp_client
-        text = f"**TIDAL TV LOGIN**\n\n1. Buka link ini: [LOGIN LINK]({auth_url})\n2. Login dan izinkan akses.\n3. Setelah sukses, klik tombol 'CLICK I HAVE LOGGED IN'."
-        buttons = [[InlineKeyboardButton("CLICK I HAVE LOGGED IN", callback_data="utd_login_verify", style=ButtonStyle.SUCCESS)],
-                   [InlineKeyboardButton("🔙 Back", callback_data="utd_auth_menu", style=ButtonStyle.PRIMARY)]]
+        
+        buttons = [
+            # Tombol Konfirmasi -> HIJAU (SUCCESS)
+            [InlineKeyboardButton("CLICK I HAVE LOGGED IN", callback_data="utd_login_verify", style=ButtonStyle.SUCCESS)],
+            # Tombol Back -> BIRU (PRIMARY) - Sesuai Permintaan
+            [InlineKeyboardButton("🔙 Back", callback_data="utd_auth_menu", style=ButtonStyle.PRIMARY)]
+        ]
         await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
-    except Exception as e: await query.answer(f"Error: {e}", True)
+        
+    except Exception as e:
+        await temp_client.close()
+        await query.answer(f"Error: {e}", True)
 
+
+# 3. Proses Verifikasi Login
 @Client.on_callback_query(filters.regex("^utd_login_verify"))
 async def uset_tidal_login_verify(client, query):
     if not await check_user(msg=query.message): return
+    
     user_id = query.from_user.id
     temp_client = bot_set.user_data.get(user_id, {}).get('temp_tidal_auth')
-    if not temp_client: return await query.answer("Sesi kadaluarsa. Ulangi login.", True)
+    
+    if not temp_client:
+        return await query.answer("Sesi kadaluarsa. Silakan ulangi login.", True)
+    
     await edit_message(query.message, "🔄 **Verifying...**")
+    
     try:
         sub, err = await temp_client.login_tv()
         if err:
             await temp_client.close()
-            return await edit_message(query.message, f"❌ **Login Gagal:** {err}", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="utd_auth_menu")]]))
+            return await edit_message(
+                query.message, 
+                f"❌ **Login Gagal:** {err}\nSilakan coba lagi.",
+                InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="utd_auth_menu")]])
+            )
         
-        auth_data = {'refresh_token': temp_client.tv_session.refresh_token, 'country_code': temp_client.tv_session.country_code, 'user_id': temp_client.tv_session.user_id, 'sub_type': sub}
+        auth_data = {
+            'refresh_token': temp_client.tv_session.refresh_token,
+            'country_code': temp_client.tv_session.country_code,
+            'user_id': temp_client.tv_session.user_id,
+            'sub_type': sub 
+        }
+        
         user_data_mem = bot_set.user_data.setdefault(user_id, {})
         accounts_list = user_data_mem.get('tidal_accounts', [])
-        if not accounts_list and user_data_mem.get('tidal_auth'): accounts_list = [user_data_mem['tidal_auth']]
+        
+        # [FIX] Pastikan akun lama dimasukkan list sebelum ditambah baru
+        if not accounts_list and user_data_mem.get('tidal_auth'):
+            accounts_list = [user_data_mem['tidal_auth']]
         
         if not any(str(acc.get('user_id')) == str(auth_data['user_id']) for acc in accounts_list):
             accounts_list.append(auth_data)
+            
             user_data_mem['tidal_accounts'] = accounts_list
-            user_data_mem['tidal_auth'] = None
-            await database.save_user_settings(user_id, {'tidal_accounts': accounts_list, 'tidal_auth': None})
-            try: await tidal_manager.add_user_account(user_id, auth_data)
+            user_data_mem['tidal_auth'] = None # [FIX] Hancurkan data lama di memory
+            
+            # [FIX] Wajib overwrite tidal_auth jadi None di DB
+            await database.save_user_settings(user_id, {
+                'tidal_accounts': accounts_list,
+                'tidal_auth': None 
+            })
+            
+            try:
+                await tidal_manager.add_user_account(user_id, auth_data)
             except: pass
-            await query.answer("✅ Login Berhasil!", True)
-        else: await query.answer("⚠️ Akun sudah ada.", True)
+            
+            await query.answer("✅ Login Berhasil! Akun ditambahkan.", True)
+        else:
+            await query.answer("⚠️ Akun ini sudah ada di daftar Anda.", True)
         
         await temp_client.close()
         bot_set.user_data[user_id].pop('temp_tidal_auth', None)
+        
         await uset_tidal_auth_menu(client, query)
+        
     except Exception as e:
         if temp_client: await temp_client.close()
         await edit_message(query.message, f"Error Fatal: {e}")
 
+
+# 4. Hapus Akun Spesifik
 @Client.on_callback_query(filters.regex(r"^utd_rm_(.+)"))
 async def uset_tidal_remove_specific(client, query):
     if not await check_user(msg=query.message): return
+    
     user_id = query.from_user.id
     target_uid = query.matches[0].group(1)
+    
     user_data_mem = bot_set.user_data.get(user_id, {})
     accounts_list = user_data_mem.get('tidal_accounts', [])
-    if not accounts_list and user_data_mem.get('tidal_auth'): accounts_list = [user_data_mem['tidal_auth']]
+    
+    # [FIX] Cek jika akun lama masih nyangkut
+    if not accounts_list and user_data_mem.get('tidal_auth'):
+         accounts_list = [user_data_mem['tidal_auth']]
+         
     new_list = [acc for acc in accounts_list if str(acc.get('user_id')) != str(target_uid)]
+    
+    # Update DB dan Memori
     user_data_mem['tidal_accounts'] = new_list
-    user_data_mem['tidal_auth'] = None
-    await database.save_user_settings(user_id, {'tidal_accounts': new_list, 'tidal_auth': None})
+    user_data_mem['tidal_auth'] = None # [FIX] Bersihkan data lama di memory
+    
+    # [FIX] Force tidal_auth = None agar akun lama tidak kembali setelah list kosong
+    await database.save_user_settings(user_id, {
+        'tidal_accounts': new_list, 
+        'tidal_auth': None
+    })
+    
+    # Update ke Manager backend
     try:
-        if hasattr(tidal_manager, 'remove_specific_user_account'): await tidal_manager.remove_specific_user_account(user_id, target_uid)
+        if hasattr(tidal_manager, 'remove_specific_user_account'):
+            await tidal_manager.remove_specific_user_account(user_id, target_uid)
     except: pass
-    await query.answer(f"✅ Akun dihapus.", True)
+    
+    await query.answer(f"✅ Akun berhasil dihapus.", True)
+        
     await uset_tidal_auth_menu(client, query)
 
+# Tambahkan bersamaan dengan perintah login provider lainnya (misalnya di bawah deezer_login)
 @Client.on_message(filters.command("tidal_login"))
 async def uset_td_login_cmd(client, message):
-    if not await check_user(msg=message): return
+    if not await check_user(msg=message):
+        return
+
     user_id = message.from_user.id
     args = message.text.split()
-    if len(args) < 3: return await message.reply_text("❌ **Format Salah**\n<code>/tidal_login user_id refresh_token [country_code]</code>")
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/tidal_login user_id refresh_token [country_code]</code>\n\n"
+            "Contoh: <code>/tidal_login 12345678 xX_TokenAnda_Xx US</code>\n"
+            "*(Country code akan otomatis ke US jika dikosongkan)*"
+        )
+    
+    t_uid = args[1].strip()
+    t_token = args[2].strip()
     t_cc = args[3].upper() if len(args) > 3 else "US"
+    
     status_msg = await message.reply_text("🔄 **Verifying Tidal Account...**")
-    auth_data = {'refresh_token': args[2].strip(), 'country_code': t_cc, 'user_id': args[1].strip()}
+    
+    auth_data = {
+        'refresh_token': t_token,
+        'country_code': t_cc,
+        'user_id': t_uid
+    }
+    
     try:
         user_data_mem = bot_set.user_data.setdefault(user_id, {})
         accounts_list = user_data_mem.get('tidal_accounts', [])
-        if not accounts_list and user_data_mem.get('tidal_auth'): accounts_list = [user_data_mem['tidal_auth']]
-        if any(str(acc.get('user_id')) == str(auth_data['user_id']) for acc in accounts_list): return await status_msg.edit_text("⚠️ Akun ini sudah ada.")
+        
+        # Migrasi darurat untuk akun format tunggal yang lama
+        if not accounts_list and user_data_mem.get('tidal_auth'):
+            accounts_list = [user_data_mem['tidal_auth']]
+            
+        if any(str(acc.get('user_id')) == str(t_uid) for acc in accounts_list):
+            return await status_msg.edit_text("⚠️ Akun ini sudah ada di daftar Private Session Anda.")
+        
+        # Tes login dan daftarkan ke Manager
         success, info = await tidal_manager.add_user_account(user_id, auth_data)
+        
         if success:
             accounts_list.append(auth_data)
+            
+            # Update memory dan DB secara permanen
             user_data_mem['tidal_accounts'] = accounts_list
             user_data_mem['tidal_auth'] = None
-            await database.save_user_settings(user_id, {'tidal_accounts': accounts_list, 'tidal_auth': None})
-            await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun ID <code>{auth_data['user_id']}</code> ({t_cc}) ditambahkan.")
-        else: await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
-    except Exception as e: await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+            
+            await database.save_user_settings(user_id, {
+                'tidal_accounts': accounts_list,
+                'tidal_auth': None
+            })
+            
+            await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun ID <code>{t_uid}</code> ({t_cc}) ditambahkan ke sesi privat Anda.")
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
 
 @Client.on_callback_query(filters.regex("^utd_instr_token"))
 async def uset_tidal_instr_token(client, query):
-    text = "📝 **CARA LOGIN TIDAL (TOKEN)**\n\n<code>/tidal_login user_id refresh_token [country_code]</code>"
+    if not await check_user(msg=query.message): return
+    text = (
+        "📝 **CARA LOGIN TIDAL (USER ID & TOKEN)**\n\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/tidal_login user_id refresh_token [country_code]</code>\n\n"
+        "Contoh:\n"
+        "<code>/tidal_login 12345678 d41d8cd98f0... US</code>\n\n"
+        "*Country code (kode negara) opsional dan akan menggunakan US sebagai *default* jika dikosongkan."
+    )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="utd_auth_menu", style=ButtonStyle.PRIMARY)]]
     await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
 
 
-# --- AMAZON AUTH ---
+# ==================================
+# AMAZON MUSIC PRIVATE AUTH
+# ==================================
+
+# 0. DICTIONARY PENAHAN SESI (HARUS ADA DI LUAR FUNGSI)
 PENDING_AMAZON_AUTH = {}
+
+# 1. COMMAND LOGIN (Instruksi TV Code)
 @Client.on_message(filters.command("amazon_login"))
 async def uset_amz_login_cmd(client, message):
-    if not await check_user(msg=message): return
-    await message.reply_text("🔐 **AMAZON MUSIC TV LOGIN**\n\nGunakan perintah ini:\n<code>/amazon_auth jp</code> (atau region lain)")
+    if not await check_user(msg=message):
+        return
 
+    text = (
+        "🔐 **AMAZON MUSIC TV LOGIN**\n\n"
+        "Otentikasi Amazon Music menggunakan alur Smart TV.\n"
+        "Gunakan perintah ini dengan format region Anda (Contoh: `jp` atau `us`):\n\n"
+        "<code>/amazon_auth jp</code>\n\n"
+        "*(Fitur ini akan menghasilkan kode yang harus Anda masukkan di amazon.com/us/code atau amazon.co.jp/a/code)*"
+    )
+    await message.reply_text(text)
+
+# --- COMMAND EKSEKUSI TV LOGIN ---
 @Client.on_message(filters.command("amazon_auth"))
 async def amz_tv_auth_cmd(client, message):
     user_id = message.from_user.id
+
+    # 1. Batasi jumlah antrean login agar tidak membebani server
     if len(PENDING_AMAZON_AUTH) >= 5 and user_id not in PENDING_AMAZON_AUTH:
-        return await message.reply_text("❌ **Antrean Penuh!** Silakan coba nanti.")
-    region = message.text.split()[1].lower() if len(message.text.split()) > 1 else "us"
+        return await message.reply_text(
+            "❌ **Antrean Login Penuh!**\n"
+            "Saat ini sudah ada 5 pengguna yang sedang memproses login. "
+            "Silakan coba beberapa saat lagi."
+        )
+
+    args = message.text.split()
+    region = args[1].lower() if len(args) > 1 else "us"
+    
     valid_regions = ["us", "jp", "uk", "de", "fr", "mx", "br", "au", "nz", "ca", "it", "es", "ar", "in"]
-    if region not in valid_regions: return await message.reply_text(f"❌ Region tidak valid.")
+    if region not in valid_regions:
+        return await message.reply_text(f"❌ Region tidak valid. Pilih salah satu: {', '.join(valid_regions)}")
+        
     msg = await message.reply_text("🔄 **Meminta kode TV dari Amazon...**")
+    
+    # Inisialisasi API Amazon
     from bot.helpers.amazon.amazon_api import AmazonApi
     amz_api = AmazonApi(region=region)
+    
     try:
+        # 2. Ambil kode aktivasi dari server Amazon
         public_code, register_code, activation_url = await amz_api.get_tv_device_code()
-        PENDING_AMAZON_AUTH[user_id] = {"api": amz_api, "register_code": register_code, "region": region}
-        text = f"🔐 **AMAZON MUSIC TV LOGIN ({region.upper()})**\n\n1️⃣ Buka tautan: {activation_url}\n2️⃣ Masukkan kode ini: <code>{public_code}</code>\n3️⃣ Tekan **Allow / Izinkan**\n4️⃣ Klik tombol di bawah jika selesai."
+        
+        # Simpan objek API ke memori untuk proses polling nanti
+        PENDING_AMAZON_AUTH[user_id] = {
+            "api": amz_api,
+            "register_code": register_code,
+            "region": region
+        }
+        
+        text = (
+            f"🔐 **AMAZON MUSIC TV LOGIN ({region.upper()})**\n\n"
+            f"1️⃣ Buka tautan: {activation_url}\n"
+            f"2️⃣ Masukkan kode ini: <code>{public_code}</code>\n"
+            f"3️⃣ Tekan tombol **Allow / Izinkan** di web Amazon\n"
+            f"4️⃣ Jika sudah selesai, tekan tombol di bawah ini."
+        )
+        
+        from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         buttons = [[InlineKeyboardButton("✅ Saya Sudah Login", callback_data="amz_auth_verify")]]
+        
         await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        
     except Exception as e:
+        # [FIX] Pastikan sesi ditutup jika GAGAL mendapatkan kode awal
         await amz_api.close()
-        await msg.edit_text(f"❌ **Gagal:**\n`{str(e)[:400]}`")
+        
+        # [FIX] Potong pesan error agar tidak menyebabkan error "MessageTooLong" di Telegram
+        error_msg = str(e)[:400]
+        await msg.edit_text(f"❌ **Gagal mendapatkan kode TV:**\n`{error_msg}`")
 
+
+# --- HANDLER VERIFIKASI LOGIN (MULTI-ACCOUNT) ---
 @Client.on_callback_query(filters.regex("^amz_auth_verify"))
 async def amz_auth_verify_cb(client, query):
     user_id = query.from_user.id
-    if user_id not in PENDING_AMAZON_AUTH: return await query.answer("Sesi kadaluarsa.", True)
-    await query.answer("Memverifikasi...", show_alert=False)
+    
+    if user_id not in PENDING_AMAZON_AUTH:
+        return await query.answer("Sesi login tidak ditemukan atau sudah kadaluarsa. Silakan ulangi /amazon_auth.", show_alert=True)
+        
+    await query.answer("Memverifikasi login Anda di server Amazon...", show_alert=False)
+    
     auth_data = PENDING_AMAZON_AUTH[user_id]
     amz_api = auth_data["api"]
+    register_code = auth_data["register_code"]
+    region = auth_data["region"]
+    
     try:
-        tokens = await amz_api.poll_tv_auth(auth_data["register_code"])
-        if not tokens: return await query.message.reply_text("❌ **Verifikasi gagal.** Anda belum menekan Allow.")
-        await amz_api.close()
+        # 1. Polling ke Amazon untuk cek apakah user sudah klik 'Allow'
+        tokens = await amz_api.poll_tv_auth(register_code)
         
+        if not tokens:
+            return await query.message.reply_text("❌ **Verifikasi gagal.** Anda belum memasukkan kode atau menekan Allow di web Amazon.")
+
+        # 2. Segera tutup sesi HTTP API
+        await amz_api.close() 
+
+        from bot.helpers.database.mongo_async import database
+        from bot.helpers.amazon.manager import amazon_manager
+        
+        account_data = {"region": region, "tokens": tokens}
+        customer_id = tokens.get('customerId')
+        
+        # --- LOGIKA MULTI-ACCOUNT: Ambil daftar akun yang sudah ada ---
         user_data_mem = bot_set.user_data.setdefault(user_id, {})
         accounts_list = user_data_mem.get('amazon_accounts', [])
-        if not accounts_list and user_data_mem.get('amazon_account'): accounts_list = [user_data_mem['amazon_account']]
         
-        if not any(acc.get('tokens', {}).get('customerId') == tokens.get('customerId') for acc in accounts_list):
-            acc_data = {"region": auth_data["region"], "tokens": tokens}
-            accounts_list.append(acc_data)
+        # Migrasi data jika pengguna masih menggunakan format akun tunggal lama
+        if not accounts_list and user_data_mem.get('amazon_account'):
+            accounts_list = [user_data_mem['amazon_account']]
+            
+        # 3. Cek Duplikasi: Jangan masukkan jika Customer ID sudah terdaftar
+        if not any(acc.get('tokens', {}).get('customerId') == customer_id for acc in accounts_list):
+            accounts_list.append(account_data)
+            
+            # Update memori bot
             user_data_mem['amazon_accounts'] = accounts_list
-            user_data_mem['amazon_account'] = None
-            await database.save_user_settings(user_id, {'amazon_accounts': accounts_list, 'amazon_account': None})
-            if amazon_manager and hasattr(amazon_manager, 'add_user_account'): await amazon_manager.add_user_account(user_id, acc_data)
-            await query.message.edit_text("✅ **Login Berhasil!**\nSesi ditambahkan.")
-        else: await query.message.edit_text("⚠️ **Akun ini sudah ada**.")
+            user_data_mem['amazon_account'] = None  # Nonaktifkan format lama
+            
+            # Simpan permanen ke Database
+            await database.save_user_settings(user_id, {
+                'amazon_accounts': accounts_list,
+                'amazon_account': None
+            })
+            
+            # Daftarkan ke Manager agar bisa langsung dipakai unduh
+            if amazon_manager and hasattr(amazon_manager, 'add_user_account'):
+                await amazon_manager.add_user_account(user_id, account_data)
+                
+            await query.message.edit_text(
+                f"✅ **Login Berhasil!**\n"
+                f"Sesi Private Amazon Music (Region: {region.upper()}) telah ditambahkan ke daftar akun Anda.\n\n"
+                f"Bot akan menggunakan akun-akun Anda secara bergantian untuk setiap unduhan."
+            )
+        else:
+            await query.message.edit_text("⚠️ **Akun ini sudah ada** di daftar Sesi Private Anda.")
+            
+        # Bersihkan antrean login
         del PENDING_AMAZON_AUTH[user_id]
+        
     except Exception as e:
-        if 'amz_api' in locals() and not amz_api.session.closed: await amz_api.close()
-        if user_id in PENDING_AMAZON_AUTH: del PENDING_AMAZON_AUTH[user_id]
-        await query.message.reply_text(f"❌ **Error:** {str(e)[:400]}")
+        if 'amz_api' in locals() and not amz_api.session.closed:
+            await amz_api.close()
+        if user_id in PENDING_AMAZON_AUTH:
+            del PENDING_AMAZON_AUTH[user_id]
+        await query.message.reply_text(f"❌ **Terjadi kesalahan saat menyimpan sesi:** {str(e)[:400]}")
 
+
+# 2. CALLBACK MENU AUTH (MULTI-ACCOUNT)
 @Client.on_callback_query(filters.regex("^uamz_auth"))
 async def uset_amz_auth_handler(client, query):
-    if not await check_user(msg=query.message): return
+    if not await check_user(msg=query.message):
+        return
+    
     user_id = query.from_user.id
+    
+    # Ambil list akun dari memori
     user_data_mem = bot_set.user_data.get(user_id, {})
     accounts_list = user_data_mem.get('amazon_accounts', [])
+    
+    # Fallback migrasi jika user masih memakai format akun lama
     if not accounts_list and user_data_mem.get('amazon_account'):
         accounts_list = [user_data_mem['amazon_account']]
         user_data_mem['amazon_accounts'] = accounts_list
-    text = "🔐 **AMAZON MUSIC PRIVATE SESSION**\n\n"
+        
+    text = "🔐 **AMAZON MUSIC PRIVATE SESSION (MULTI-ACCOUNT)**\n\n"
+    
     if accounts_list:
         text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
-        for i, acc in enumerate(accounts_list): text += f"**{i+1}. Region:** `{acc.get('region', '??').upper()}` | **ID:** `{acc.get('tokens', {}).get('customerId', 'Unknown')}`\n"
-    else: text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot akan menggunakan akun-akun ini secara bergantian (Load Balancing).\n\n"
+        
+        # Tampilkan detail setiap akun
+        for i, acc in enumerate(accounts_list):
+            region = acc.get('region', '??').upper()
+            uid = acc.get('tokens', {}).get('customerId', 'Unknown')
+            text += f"**{i+1}. Region:** `{region}` | **ID:** `{uid}`\n"
+            
+        text += "\n👇 **Klik tombol di bawah untuk menghapus akun tertentu.**"
+    else:
+        text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot menggunakan akun Global (Shared) untuk Anda jika tersedia.\n"
+
+    # Panggil tombol menu dengan menyertakan accounts_list
     await edit_message(query.message, text, markup=amazon_user_auth_buttons(accounts_list))
 
+
+# 3. CALLBACK DELETE SPECIFIC ACCOUNT (MENGGANTIKAN LOGOUT)
 @Client.on_callback_query(filters.regex(r"^uamz_rm_(.+)"))
 async def uset_amz_remove_specific(client, query):
     if not await check_user(msg=query.message): return
+    
     user_id = query.from_user.id
+    target_uid = query.matches[0].group(1) # Mengambil target ID dari callback
+    
     user_data_mem = bot_set.user_data.get(user_id, {})
     accounts_list = user_data_mem.get('amazon_accounts', [])
-    if not accounts_list and user_data_mem.get('amazon_account'): accounts_list = [user_data_mem['amazon_account']]
-    new_list = [acc for acc in accounts_list if acc.get('tokens', {}).get('customerId') != query.matches[0].group(1)]
+    
+    # Fallback migrasi
+    if not accounts_list and user_data_mem.get('amazon_account'):
+        accounts_list = [user_data_mem['amazon_account']]
+        
+    # Buat list baru yang TIDAK berisi akun yang ingin dihapus
+    new_list = [acc for acc in accounts_list if acc.get('tokens', {}).get('customerId') != target_uid]
+    
+    # Update memori bot
     user_data_mem['amazon_accounts'] = new_list
     user_data_mem['amazon_account'] = None
-    await database.save_user_settings(user_id, {'amazon_accounts': new_list, 'amazon_account': None})
+    
+    # Update Database permanen
+    await database.save_user_settings(user_id, {
+        'amazon_accounts': new_list,
+        'amazon_account': None
+    })
+    
+    # Update ke Manager (agar file manager.py berhenti menggunakan sesi tersebut)
     try:
-        if hasattr(amazon_manager, 'remove_specific_user_account'): await amazon_manager.remove_specific_user_account(user_id, query.matches[0].group(1))
+        if hasattr(amazon_manager, 'remove_specific_user_account'):
+            await amazon_manager.remove_specific_user_account(user_id, target_uid)
     except: pass
-    await query.answer(f"✅ Akun dihapus.", True)
+    
+    await query.answer(f"✅ Akun berhasil dihapus.", True)
+    
+    # Refresh menu
     await uset_amz_auth_handler(client, query)
 
+
+# 4. CALLBACK INSTRUKSI
 @Client.on_callback_query(filters.regex("^uamz_instr"))
 async def uset_amz_instr_handler(client, query):
-    text = "📝 **CARA LOGIN AMAZON MUSIC**\n\n<code>/amazon_auth jp</code> (atau region lain)"
+    if not await check_user(msg=query.message):
+        return
+    
+    text = (
+        "📝 **CARA LOGIN AMAZON MUSIC**\n\n"
+        "Kirim perintah ini di chat untuk mendapatkan TV Code:\n"
+        "<code>/amazon_auth jp</code> (Untuk Region Jepang)\n"
+        "<code>/amazon_auth us</code> (Untuk Region Global/US)"
+    )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)]]
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
 
 
-# --- KKBOX AUTH ---
+# --- COMMAND LOGIN KKBOX ---
 @Client.on_message(filters.command("kkbox_login"))
 async def uset_kkb_login_cmd(client, message):
     if not await check_user(msg=message): return
+
     user_id = message.from_user.id
     args = message.text.split()
-    if len(args) < 3: return await message.reply_text("❌ **Format Salah**\n<code>/kkbox_login email password [proxy]</code>")
+    
+    if len(args) < 3:
+        return await message.reply_text(
+            "❌ **Format Salah**\n"
+            "Gunakan: <code>/kkbox_login email password [proxy]</code>\n\n"
+            "Contoh: <code>/kkbox_login myemail@gmail.com pass123 http://proxy:port</code>"
+        )
+    
+    email = args[1].strip()
+    password = args[2].strip()
+    proxy = args[3].strip() if len(args) > 3 else None
+    
     status_msg = await message.reply_text("🔄 **Verifying KKBox Account...**")
-    auth_data = {'email': args[1].strip(), 'password': args[2].strip(), 'proxy': args[3].strip() if len(args) > 3 else None}
+    auth_data = {'email': email, 'password': password, 'proxy': proxy}
+    
     try:
         user_data_mem = bot_set.user_data.setdefault(user_id, {})
         accounts_list = user_data_mem.get('kkbox_accounts', [])
-        if any(acc.get('email') == auth_data['email'] for acc in accounts_list): return await status_msg.edit_text("⚠️ Akun ini sudah ada.")
+        
+        if any(acc.get('email') == email for acc in accounts_list):
+            return await status_msg.edit_text("⚠️ Akun ini sudah ada di daftar Private Session Anda.")
+            
         success, info = await kkbox_manager.add_user_account(user_id, auth_data)
+        
         if success:
             accounts_list.append(auth_data)
             user_data_mem['kkbox_accounts'] = accounts_list
             await database.save_user_settings(user_id, {'kkbox_accounts': accounts_list})
-            await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun <code>{auth_data['email']}</code> ditambahkan.")
-        else: await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
-    except Exception as e: await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
+            await status_msg.edit_text(f"✅ **Login Berhasil!**\nAkun <code>{email}</code> ditambahkan ke sesi privat Anda.")
+        else:
+            await status_msg.edit_text(f"❌ **Login Gagal:**\n{info}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Error:**\n{str(e)}")
 
+# --- CALLBACK MENU AUTH KKBOX ---
 @Client.on_callback_query(filters.regex("^ukk_auth_menu"))
 async def uset_kkb_auth_handler(client, query):
     if not await check_user(msg=query.message): return
-    accounts_list = bot_set.user_data.get(query.from_user.id, {}).get('kkbox_accounts', [])
-    text = "🔐 **KKBOX PRIVATE SESSION**\n\n"
+    
+    user_id = query.from_user.id
+    accounts_list = bot_set.user_data.get(user_id, {}).get('kkbox_accounts', [])
+    
+    text = "🔐 **KKBOX PRIVATE SESSION (MULTI-ACCOUNT)**\n\n"
+    
     if accounts_list:
         text += f"✅ **Status: {len(accounts_list)} Akun Tersimpan**\n"
-        for i, acc in enumerate(accounts_list): text += f"**{i+1}. Email:** `{acc['email']}` | Proxy: {'Aktif' if acc.get('proxy') else 'Tidak'}\n"
-    else: text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot akan menggunakan akun-akun ini secara bergantian (Load Balancing).\n\n"
+        for i, acc in enumerate(accounts_list):
+            proxy_status = "Aktif" if acc.get('proxy') else "Tidak"
+            text += f"**{i+1}. Email:** `{acc['email']}` | Proxy: {proxy_status}\n"
+    else:
+        text += "❌ **Status: NOT LOGGED IN**\n"
+        text += "Bot menggunakan akun Global (Shared) jika tersedia.\n"
+
     from bot.helpers.buttons.settings import kkbox_user_auth_buttons
     await edit_message(query.message, text, markup=kkbox_user_auth_buttons(accounts_list))
 
+# --- CALLBACK HAPUS AKUN KKBOX ---
 @Client.on_callback_query(filters.regex(r"^ukk_rm_(.+)"))
 async def uset_kkb_remove_specific(client, query):
     if not await check_user(msg=query.message): return
+    
     user_id = query.from_user.id
+    target_email = query.matches[0].group(1)
+    
     accounts_list = bot_set.user_data.get(user_id, {}).get('kkbox_accounts', [])
-    new_list = [acc for acc in accounts_list if acc.get('email') != query.matches[0].group(1)]
+    new_list = [acc for acc in accounts_list if acc.get('email') != target_email]
+    
     bot_set.user_data[user_id]['kkbox_accounts'] = new_list
     await database.save_user_settings(user_id, {'kkbox_accounts': new_list})
-    await kkbox_manager.remove_specific_user_account(user_id, query.matches[0].group(1))
-    await query.answer(f"✅ Akun dihapus.", True)
+    await kkbox_manager.remove_specific_user_account(user_id, target_email)
+    
+    await query.answer(f"✅ Akun berhasil dihapus.", True)
     await uset_kkb_auth_handler(client, query)
 
+# --- CALLBACK INSTRUKSI KKBOX ---
 @Client.on_callback_query(filters.regex("^ukk_instr"))
 async def uset_kkb_instr_handler(client, query):
-    text = "📝 **CARA LOGIN KKBOX**\n\n<code>/kkbox_login email password [proxy]</code>"
+    if not await check_user(msg=query.message): return
+    text = (
+        "📝 **CARA LOGIN KKBOX**\n\n"
+        "Kirim perintah ini di chat:\n"
+        "<code>/kkbox_login email password [proxy]</code>\n\n"
+        "*(Proxy bersifat opsional, isi jika Anda butuh bypass region tertentu)*"
+    )
+    from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from pyrogram.enums import ButtonStyle
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="ukk_auth_menu", style=ButtonStyle.PRIMARY)]]
     await edit_message(query.message, text, InlineKeyboardMarkup(buttons))
 
 
 # ==================================
-# 3. SETTING MAIN ROUTERS & UI MENUS
+# MENU PENGATURAN UTAMA
 # ==================================
-
-# Konfigurasi Utama Pengaturan Per-Provider (DRY Architecture)
-MENU_CFG = {
-    "qobuz": {"mgr": qobuz_manager, "btn": qb_button, "db_key": "qobuz_qual", "qual_dict": {5:'MP3 320', 6:'Lossless', 7:'24B<=96KHZ', 27:'24B>96KHZ'}, "default": 6},
-    "beatport": {"mgr": beatport_manager, "btn": bp_button, "db_key": "beatport_qual", "qual_dict": {"lossless": "Lossless (FLAC)", "high": "High (AAC 256)", "medium": "Medium (AAC 128)"}},
-    "soundcloud": {"mgr": soundcloud_manager, "btn": sc_button, "db_key": "soundcloud_qual", "qual_dict": {"original": "Original (Jika Ada)", "stream": "Stream (Default AAC/MP3)"}},
-    "deezer": {"mgr": deezer_manager, "btn": dz_button, "db_key": "deezer_qual", "qual_dict": {"FLAC": "FLAC", "MP3_320": "MP3 320", "MP3_128": "MP3 128"}},
-    "kkbox": {"mgr": kkbox_manager, "btn": kk_button, "db_key": "kkbox_qual", "qual_dict": {"128k": "MP3 128k", "192k": "MP3 192k", "320k": "AAC 320k", "hifi": "FLAC 16-bit", "hires": "FLAC 24-bit"}},
-    "idagio": {"mgr": idagio_manager, "btn": id_button, "db_key": "idagio_qual", "qual_dict": {"FLAC": "FLAC", "MP3_320": "AAC 320k", "MP3_160": "AAC 160k"}},
-    "bugs": {"mgr": bugs_manager, "btn": bugs_button, "db_key": "bugs_qual", "qual_dict": {"flac": "FLAC 16-bit", "aac256": "AAC 320k", "320k": "MP3 320k", "aac": "AAC 128k"}},
-    "moov": {"mgr": moov_manager, "btn": mv_button, "db_key": "moov_qual", "qual_dict": {"FLAC": "Max (24bit/HR)", "MP3_320": "Std (16bit/LL)"}},
-    "livephish": {"mgr": livephish_manager, "btn": lp_button, "db_key": "livephish_qual", "qual_dict": {"FLAC": "FLAC (16-bit)", "ALAC": "ALAC (16-bit)", "AAC": "AAC"}},
-    "khinsider": {"mgr": khinsider_manager, "btn": khi_button, "db_key": "khinsider_qual", "qual_dict": {"flac": "FLAC", "mp3": "MP3"}},
-    "amazon": {"mgr": amazon_manager, "btn": amz_button, "db_key": "amazon_qual", "qual_dict": {"AC-4": "AC-4 (Dolby Atmos)", "EC-3": "EC-3 (Dolby Digital Plus)", "MHA1": "MPEG-H 3D (mha1)", "MHM1": "MPEG-H 3D (mhm1)", "UHD": "UHD (Hi-Res)", "HD": "HD (Lossless)", "SD": "SD (Opus - High)", "LD": "LD (Opus - Med/Low)"}, "default": "HD"},
-    "genie": {"mgr": genie_manager, "btn": gn_button, "db_key": "genie_qual", "qual_dict": {"flac24": "FLAC 24-bit", "flac16": "FLAC 16-bit", "mp3": "MP3 320kbps", "mp3192": "MP3 192kbps"}, "default": "flac24"}
-}
 
 @Client.on_message(filters.command(cmd.USETTING))
 async def start_user_setting(client: Client, m: Message, edit=False, users_: dict=None):
-    if not await check_user(msg=m): return
+    if not await check_user(msg=m):
+        return
     
-    user_id = users_.get('user_id') if users_ else (await fetch_user_details(m))['user_id']
-    if user_id not in bot_set.user_data: bot_set.user_data.setdefault(user_id, {})
-    curr = bot_set.user_data.get(user_id, {})
+    # Ambil data user
+    if users_:
+        user_data = users_
+        user_id = user_data.get('user_id')
+    else:
+        user = await fetch_user_details(m)
+        user_data = user
+        user_id = user_data['user_id']
     
-    # Priority Fetching ZIP
-    def _fetch_zip(k):
-        return curr.get(k.upper(), curr.get(k.lower(), False))
+    # Pastikan data termuat di memori bot
+    if user_id not in bot_set.user_data:
+         bot_set.user_data.setdefault(user_id, {})
+    
+    # Ambil data langsung dari memori bot (agar real-time)
+    curr_settings = bot_set.user_data.get(user_id, {})
+    
+    # --- PERBAIKAN LOGIKA BACA DATA ZIP ---
+    # Prioritas: Cek Key HURUF BESAR, jika None baru cek huruf kecil
+    
+    # Playlist
+    p_zip = curr_settings.get("PLAYLIST_ZIP")
+    if p_zip is None: p_zip = curr_settings.get("playlist_zip", False)
+    
+    # Album
+    a_zip = curr_settings.get("ALBUM_ZIP")
+    if a_zip is None: a_zip = curr_settings.get("album_zip", False)
+    
+    # Artist
+    ar_zip = curr_settings.get("ARTIST_ZIP")
+    if ar_zip is None: ar_zip = curr_settings.get("artist_zip", False)
+    
+    # Poster
+    po_zip = curr_settings.get("ART_POSTER")
+    if po_zip is None: po_zip = curr_settings.get("art_poster", False)
+    
+    # Video
+    v_zip = curr_settings.get("VIDEO_ZIP")
+    if v_zip is None: v_zip = curr_settings.get("video_zip", False)
+    
+    # --- END PERBAIKAN ---
 
-    upload_mode = curr.get('upload_mode', 'Telegram')
-    t_gf = "✅" if curr.get('gofile_token') else "❌"
-    t_bh = "✅" if curr.get('buzzheavier_token') else "❌"
-    t_vk = "✅" if curr.get('viking_token') else "❌"
+    # Ambil Pengaturan Cloud Upload
+    upload_mode = curr_settings.get('upload_mode', 'Telegram')
+    
+    # Cek status ketersediaan token (Indikator UI)
+    t_gf = "✅" if curr_settings.get('gofile_token') else "❌"
+    t_bh = "✅" if curr_settings.get('buzzheavier_token') else "❌"
+    t_vk = "✅" if curr_settings.get('viking_token') else "❌"
 
-    text = f"""
+    # Template Teks Menu
+    # Gunakan variabel baru (p_zip, a_zip, dst)
+    USETTING_TEXT = f"""
 <blockquote>
 <b>📦 ZIP SETTINGS</b>
-PLAYLIST : {_fetch_zip('PLAYLIST_ZIP')} | ALBUM : {_fetch_zip('ALBUM_ZIP')}
-ARTIST : {_fetch_zip('ARTIST_ZIP')} | POSTER : {_fetch_zip('ART_POSTER')}
-VIDEO : {_fetch_zip('VIDEO_ZIP')}
+PLAYLIST : {p_zip} | ALBUM : {a_zip}
+ARTIST : {ar_zip} | POSTER : {po_zip}
+VIDEO : {v_zip}
 
 <b>☁️ UPLOAD MODE: {upload_mode}</b>
 Gofile: {t_gf} | Buzz: {t_bh} | Viking: {t_vk}
@@ -599,290 +1309,1239 @@ Gofile: {t_gf} | Buzz: {t_bh} | Viking: {t_vk}
 {m.date.now().strftime("%d/%m/%Y %H:%M:%S")}
 Choose Menu option below:
 """
-    if not edit: await send_message(m, text, markup=usetting_button(user_id))
-    else: await edit_message(m, text, markup=usetting_button(user_id))
+    
+    # Kirim Pesan
+    target_chat = m.chat.id if not edit else m.chat.id # Logic send message biasa
+    
+    if not edit:
+        # Perhatikan: parameter pertama send_message biasanya chat_id atau object user
+        # Sesuaikan dengan library wrapper Anda (disini saya pakai m.chat.id untuk aman)
+        await send_message(m, USETTING_TEXT, markup=usetting_button(user_id))
+        return
+    await edit_message(m, USETTING_TEXT, markup=usetting_button(user_id))
 
+
+# --- HANDLER GANTI MODE UPLOAD (CYCLING) ---
 @Client.on_callback_query(filters.regex("^uset_upload_mode"))
 async def uset_upload_mode_handler(client, query):
-    if not await check_user(msg=query.message): return
-    user_id = query.from_user.id
-    modes = ['Telegram', 'Gofile', 'Buzzheavier', 'Vikingfiles']
-    curr = bot_set.user_data.get(user_id, {}).get('upload_mode', 'Telegram')
-    next_idx = (modes.index(curr) + 1) % len(modes) if curr in modes else 0
-    bot_set.user_data.setdefault(user_id, {})['upload_mode'] = modes[next_idx]
-    await database.save_user_settings(user_id, {'upload_mode': modes[next_idx]})
-    await start_user_setting(client, query.message, True, {"user_id": user_id})
+    if not await check_user(msg=query.message):
+        return
 
+    user_id = query.from_user.id
+    current_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', 'Telegram')
+    
+    # Daftar Mode yang tersedia
+    modes = ['Telegram', 'Gofile', 'Buzzheavier', 'Vikingfiles']
+    
+    # Cari index saat ini
+    try:
+        idx = modes.index(current_mode)
+    except ValueError:
+        idx = 0
+        
+    # Pindah ke mode selanjutnya (Looping)
+    next_idx = (idx + 1) % len(modes)
+    new_mode = modes[next_idx]
+    
+    # Simpan Perubahan
+    bot_set.user_data.setdefault(user_id, {})['upload_mode'] = new_mode
+    await database.save_user_settings(user_id, {'upload_mode': new_mode})
+    
+    # Refresh Menu
+    users_ = {"user_id": user_id}
+    await start_user_setting(client, query.message, True, users_)
+
+
+# --- HANDLER UTAMA TOMBOL MENU (PROVIDER SETTINGS) ---
 @Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider|amazon|genie)"))
 async def uset_cb(client, query, datatype=""):
-    if not await check_user(msg=query.message): return
+    if not await check_user(msg=query.message):
+        return
+    data = query.data.split("_")
     user_id = query.from_user.id
-    action = query.data.split("_")[1] if not datatype else datatype
 
-    if action == "back": return await start_user_setting(client, query.message, True, {"user_id": user_id})
-    if action == "close": return await query.message.delete()
-    
-    if action == "highresaudio":
-        if not highresaudio_manager: return await edit_message(query.message, "Layanan HighResAudio tidak aktif.")
-        return await edit_message(query.message, "HighResAudio Settings:", markup=hra_button(user_id))
+    if data[1] == "back":
+        users_ = {"user_id": user_id}
+        return await start_user_setting(client, query.message, True, users_)
+    if data[1] == "close":
+        await query.message.delete()
+        return
         
-    elif action == "tidal":
-        if not tidal_manager: return await edit_message(query.message, "Layanan Tidal tidak aktif.")
-        qualities = {'LOW':'LOW', 'HIGH':'HIGH', 'LOSSLESS':'LOSSLESS'}
+    # --- TIDAL MENU ---
+    if data[1] == "tidal" or datatype == "tidal":
+        if not tidal_manager:
+            return await edit_message(query.message, "Layanan Tidal tidak aktif.")
+            
+        text = f"Choose Tidal Audio Quality bellow:"
+        qualities = {
+              'LOW': 'LOW',
+              'HIGH': 'HIGH',
+              'LOSSLESS': 'LOSSLESS'
+        }
+        
         main_user_dict = bot_set.user_data.get(user_id, {})
-        await tidal_manager.setup_user_settings(user_id, qual=main_user_dict.get("tidal_qual"), spatial=main_user_dict.get("tidal_spatial"), mqa_fix=main_user_dict.get("tidal_mqa_fix"), convert_m4a=main_user_dict.get("tidal_convert_m4a"))
+        await tidal_manager.setup_user_settings(
+            user_id,
+            qual=main_user_dict.get("tidal_qual"),
+            spatial=main_user_dict.get("tidal_spatial"),
+            mqa_fix=main_user_dict.get("tidal_mqa_fix"),
+            convert_m4a=main_user_dict.get("tidal_convert_m4a")
+        )
         user_qual, user_spatial, _, __ = tidal_manager.get_user_quality_settings(user_id)
         
+        # --- [LOGIKA BARU: CEK GLOBAL + PRIVATE] ---
         has_hires = False
-        if tidal_manager.clients and any(c.mobile_hires for c in tidal_manager.clients): has_hires = True
-        user_client = await tidal_manager.get_user_client(user_id)
-        if user_client and getattr(user_client, 'mobile_hires', False): has_hires = True
-
-        if has_hires or user_qual == 'HI_RES': qualities['HI_RES'] = 'MAX'
-        if user_qual in qualities: qualities[user_qual] += '✅'
-        else: qualities.get('LOSSLESS', '') and qualities.update({'LOSSLESS': qualities['LOSSLESS'] + '✅'})
+        
+        # 1. Cek Admin/Global
+        if tidal_manager.clients and any(c.mobile_hires for c in tidal_manager.clients):
+            has_hires = True
             
-        return await edit_message(query.message, "Choose Tidal Audio Quality bellow:", tidal_quality_button(qualities, user_id, spatial=user_spatial))
+        # 2. Cek Akun Private User
+        # (Kita panggil get_user_client agar status hires akun user terbaca)
+        user_client = await tidal_manager.get_user_client(user_id)
+        if user_client and getattr(user_client, 'mobile_hires', False):
+            has_hires = True
 
-    elif action in MENU_CFG:
-        cfg = MENU_CFG[action]
-        mgr = cfg['mgr']
+        # Jika salah satu support HiRes, tampilkan tombol MAX
+        if has_hires:
+            qualities['HI_RES'] = 'MAX'
+            
+        # Safety Fallback: Jika user terlanjur set HI_RES tapi terdeteksi false
+        # (misal error sesaat), tetap paksa munculkan agar tidak Crash (KeyError)
+        if user_qual == 'HI_RES' and 'HI_RES' not in qualities:
+            qualities['HI_RES'] = 'MAX'
+        # -------------------------------------------
+
+        if user_qual in qualities:
+            qualities[user_qual] += '✅'
+        else:
+            # Fallback jika ada value aneh dari DB
+            if 'LOSSLESS' in qualities:
+                qualities['LOSSLESS'] += '✅'
+            
+        return await edit_message(query.message, text, tidal_quality_button(qualities, user_id, spatial=user_spatial))
+    
+    # --- QOBUZ MENU ---
+    if data[1] == "qobuz" or datatype == "qobuz":
+        text = f"Choose Qobuz Audio Quality bellow:"
+        quality = {5:'MP3 320', 6:'Lossless', 7:'24B<=96KHZ',27:'24B>96KHZ'}
+        
+        # [MODIFIKASI] Cek apakah ada klien (Global ATAU Private Session)
         has_client = False
         
-        if action == "qobuz":
-            if BOT_QOBUZ_CLIENTS or (mgr and mgr.has_private_session(user_id)): has_client = True
-        elif action == "amazon":
-            if mgr and (getattr(mgr, 'global_clients', []) or getattr(mgr, 'clients', []) or mgr.has_private_session(user_id)): has_client = True
-        elif action == "kkbox":
-            if mgr and (getattr(mgr, 'clients', []) or bot_set.user_data.get(user_id, {}).get('kkbox_accounts')): has_client = True
-        else:
-            if mgr and (getattr(mgr, 'clients', []) or getattr(mgr, 'global_clients', []) or (hasattr(mgr, 'has_private_session') and mgr.has_private_session(user_id))): has_client = True
-
-        if not has_client: return await edit_message(query.message, f"Layanan {action.title()} tidak aktif (tidak ada klien yang login).")
-
-        current = bot_set.user_data.get(user_id, {}).get(cfg['db_key'], getattr(mgr, 'quality', cfg.get('default', '')))
-        if hasattr(mgr, 'setup_quality'): await mgr.setup_quality(user_id, current)
-        if action == "qobuz":
-            try: current = int(current)
-            except: pass
+        # 1. Cek Klien Global (Bot)
+        if BOT_QOBUZ_CLIENTS:
+            has_client = True
+        # 2. Cek Klien Private (User) via Manager
+        elif qobuz_manager and qobuz_manager.has_private_session(user_id):
+            has_client = True
             
-        q_dict = cfg['qual_dict'].copy()
-        if current in q_dict: q_dict[current] += '✅'
+        if not has_client:
+            return await edit_message(query.message, "Layanan Qobuz tidak aktif (tidak ada klien yang login).")
+
+        # Ambil setting user (Default ke 6/Lossless jika belum diatur)
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("qobuz_qual", 6) 
         
-        text = f"Choose {action.title()} Audio Quality bellow:"
-        if action == "bugs": text += "\n(Kualitas FLAC tergantung langganan akun bot)"
-        elif action == "moov": text += "\n(Moov menyediakan FLAC 16bit & 24bit)"
-        elif action == "amazon": text += "\n(Tergantung pada tier langganan akun)"
+        # [MODIFIKASI] Simpan setting kualitas ke DB Manager agar terbaca oleh qopy.py
+        if qobuz_manager:
+            await qobuz_manager.setup_quality(user_id, current)
         
-        # [PERBAIKAN]: Pass nama argumen untuk custom button jika ada, 
-        # Beberapa button cuma butuh (q_dict, user_id), beberapa butuh (q_dict) lalu dibalut.
-        # Format umum di button yang kita gunakan sekarang aman dengan 2 argument ini.
-        return await edit_message(query.message, text, markup=cfg['btn'](q_dict, user_id))
+        try:
+            current = int(current)
+        except:
+            pass
 
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+            
+        # Tombol qb_button (yang sudah dimodifikasi di settings.py) akan menampilkan opsi "Private Account"
+        return await edit_message(query.message, text, markup=qb_button(quality, user_id))
 
-# ==================================
-# 4. UNIFIED QUALITY SETTERS ROUTER
-# ==================================
-QUAL_ROUTES = {
-    "uqbs": {"prov": "qobuz", "db_key": "qobuz_qual", "mgr": qobuz_manager, "is_int": True},
-    "ubps": {"prov": "beatport", "db_key": "beatport_qual", "mgr": beatport_manager, "map": {"Lossless (FLAC)": "lossless", "High (AAC 256)": "high", "Medium (AAC 128)": "medium"}},
-    "uscs": {"prov": "soundcloud", "db_key": "soundcloud_qual", "mgr": soundcloud_manager, "map": {"Original (Jika Ada)": "original", "Stream (Default AAC/MP3)": "stream"}},
-    "udzs": {"prov": "deezer", "db_key": "deezer_qual", "mgr": deezer_manager, "map": {"FLAC": "FLAC", "MP3 320": "MP3_320", "MP3 128": "MP3_128"}},
-    "ukks": {"prov": "kkbox", "db_key": "kkbox_qual", "mgr": kkbox_manager, "map": {"MP3 128k": "128k", "MP3 192k": "192k", "AAC 320k": "320k", "FLAC 16-bit": "hifi", "FLAC 24-bit": "hires"}},
-    "uids": {"prov": "idagio", "db_key": "idagio_qual", "mgr": idagio_manager, "map": {"FLAC": "FLAC", "AAC 320k": "MP3_320", "AAC 160k": "MP3_160"}},
-    "ubgs": {"prov": "bugs", "db_key": "bugs_qual", "mgr": bugs_manager, "map": {"FLAC 16-bit": "flac", "AAC 320k": "aac256", "MP3 320k": "320k", "AAC 128k": "aac"}},
-    "umvs": {"prov": "moov", "db_key": "moov_qual", "mgr": moov_manager},
-    "ulps": {"prov": "livephish", "db_key": "livephish_qual", "mgr": livephish_manager},
-    "ukhis": {"prov": "khinsider", "db_key": "khinsider_qual", "mgr": khinsider_manager},
-    "uamzs": {"prov": "amazon", "db_key": "amazon_qual", "mgr": amazon_manager},
-    "ugns": {"prov": "genie", "db_key": "genie_qual", "mgr": genie_manager},
-}
+    # --- BEATPORT MENU ---
+    if data[1] == "beatport" or datatype == "beatport":
+        text = f"Choose Beatport Audio Quality bellow:"
+        quality = {
+            "lossless": "Lossless (FLAC)",
+            "high": "High (AAC 256)",
+            "medium": "Medium (AAC 128)"
+        }
+        # Cek apakah ada klien (Global ATAU User)
+        has_client = False
+        if beatport_manager and (beatport_manager.global_clients or beatport_manager.has_private_session(user_id)):
+             has_client = True
+             
+        if not has_client:
+            return await edit_message(query.message, "Layanan Beatport tidak aktif (tidak ada klien yang login).")
 
-@Client.on_callback_query(filters.regex(r"^(uqbs|ubps|uscs|udzs|ukks|uids|ubgs|umvs|ulps|ukhis|uamzs|ugns)(_|$)"))
-async def unified_quality_setter(client, query):
-    if not await check_user(msg=query.message): return
-    user_id = query.from_user.id
-    prefix = query.data.split('_')[0]
-    
-    if prefix not in QUAL_ROUTES: return await query.answer("Invalid Setting.", True)
-    
-    c = QUAL_ROUTES[prefix]
-    to_set = query.data[len(prefix)+1:]
-    
-    if 'map' in c:
-        to_set = c['map'].get(to_set)
-        if not to_set: return await query.answer("Kualitas tidak valid.", True)
-    if c.get('is_int'):
-        try: to_set = int(to_set)
-        except: pass
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("beatport_qual", beatport_manager.quality) 
+        await beatport_manager.setup_quality(user_id, current) 
         
-    if hasattr(c['mgr'], 'setup_quality'):
-        await c['mgr'].setup_quality(user_id, to_set)
-    elif c['prov'] == "qobuz" and BOT_QOBUZ_CLIENTS:
-        for qc in BOT_QOBUZ_CLIENTS.values(): await qc.setup_quality(int(user_id), to_set)
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+            
+        # Tombol bp_button sekarang akan menyertakan tombol "PRIVATE ACCOUNT"
+        return await edit_message(query.message, text, markup=bp_button(quality, user_id))
+    
+    # --- SOUNDCLOUD MENU ---
+    if data[1] == "soundcloud" or datatype == "soundcloud":
+        text = f"Choose Soundcloud Audio Quality bellow:"
+        quality = {
+            "original": "Original (Jika Ada)",
+            "stream": "Stream (Default AAC/MP3)"
+        }
+        if not soundcloud_manager or not soundcloud_manager.get_client():
+            return await edit_message(query.message, "Layanan Soundcloud tidak aktif.")
+        
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("soundcloud_qual", soundcloud_manager.quality) 
+        await soundcloud_manager.setup_quality(user_id, current)
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+        
+        return await edit_message(
+            query.message,
+            text,
+            markup=sc_button(quality, user_id)
+        )
 
-    bot_set.user_data.setdefault(user_id, {})[c['db_key']] = to_set
-    await database.save_user_settings(user_id, {c['db_key']: to_set})
-    await uset_cb(client, query, c['prov'])
+    # --- DEEZER MENU ---
+    if data[1] == "deezer" or datatype == "deezer":
+        text = f"Choose Deezer Audio Quality bellow:"
+        quality = {
+            "FLAC": "FLAC",
+            "MP3_320": "MP3 320",
+            "MP3_128": "MP3 128"
+        }
+        
+        # [MODIFIKASI] Cek Akun Global ATAU Akun Private
+        has_client = False
+        if deezer_manager:
+            if deezer_manager.clients or deezer_manager.has_private_session(user_id):
+                has_client = True
+
+        if not has_client:
+            return await edit_message(query.message, "Layanan Deezer tidak aktif (tidak ada klien yang login).")
+
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("deezer_qual", deezer_manager.quality) 
+        await deezer_manager.setup_quality(user_id, current) 
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+        return await edit_message(query.message, text, markup=dz_button(quality, user_id))
+
+    # --- KKBOX MENU ---
+    if data[1] == "kkbox" or datatype == "kkbox":
+        text = f"Choose KKBox Audio Quality bellow:"
+        quality = {
+            "128k": "MP3 128k",
+            "192k": "MP3 192k",
+            "320k": "AAC 320k",
+            "hifi": "FLAC 16-bit",
+            "hires": "FLAC 24-bit"
+        }
+        
+        has_client = False
+        if kkbox_manager:
+            if getattr(kkbox_manager, 'clients', []):
+                has_client = True
+            else:
+                user_dict = bot_set.user_data.get(user_id, {})
+                if user_dict.get('kkbox_accounts'):
+                    has_client = True
+
+        if not has_client:
+            return await edit_message(query.message, "Layanan KKBox tidak aktif (tidak ada klien yang login).")
+
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("kkbox_qual", kkbox_manager.quality) 
+        await kkbox_manager.setup_quality(user_id, current) 
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+        return await edit_message(query.message, text, markup=kk_button(quality, user_id))
+
+    # --- IDAGIO MENU ---
+    if data[1] == "idagio" or datatype == "idagio":
+        text = f"Choose Idagio Audio Quality bellow:"
+        quality = {
+            "FLAC": "FLAC",
+            "MP3_320": "AAC 320k",
+            "MP3_160": "AAC 160k"
+        }
+        if not idagio_manager or not idagio_manager.clients:
+            return await edit_message(query.message, "Layanan Idagio tidak aktif (tidak ada klien yang login).")
+        
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("idagio_qual", idagio_manager.quality) 
+        await idagio_manager.setup_quality(user_id, current)
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+        return await edit_message(query.message, text, markup=id_button(quality, user_id))
+
+    # --- BUGS MENU ---
+    if data[1] == "bugs" or datatype == "bugs":
+        text = f"Choose Bugs Audio Quality bellow:"
+        quality = {
+            "flac": "FLAC 16-bit",
+            "aac256": "AAC 320k",
+            "320k": "MP3 320k",
+            "aac": "AAC 128k"
+        }
+        if not bugs_manager or not bugs_manager.clients:
+            return await edit_message(query.message, "Layanan Bugs tidak aktif (tidak ada klien yang login).")
+        
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("bugs_qual", bugs_manager.quality) 
+        await bugs_manager.setup_quality(user_id, current)
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+        return await edit_message(query.message, text + "\n(Kualitas FLAC tergantung langganan akun bot)", markup=bugs_button(quality, user_id))
+
+    # --- MOOV MENU ---
+    if data[1] == "moov" or datatype == "moov":
+        text = f"Choose Moov Audio Quality bellow:\n(Moov menyediakan FLAC 16bit & 24bit)"
+        quality = {
+            "FLAC": "Max (24bit/HR)",
+            "MP3_320": "Std (16bit/LL)"
+        }
+        if not moov_manager or not moov_manager.clients:
+            return await edit_message(query.message, "Layanan Moov tidak aktif!")
+        
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("moov_qual", moov_manager.quality) 
+        
+        await moov_manager.setup_quality(user_id, current)
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+        
+        return await edit_message(query.message, text, markup=mv_button(quality, user_id))
+
+    # --- LIVEPHISH MENU ---
+    if data[1] == "livephish" or datatype == "livephish":
+        text = f"Choose LivePhish Audio Quality bellow:"
+        quality = {
+            "FLAC": "FLAC (16-bit)",
+            "ALAC": "ALAC (16-bit)",
+            "AAC": "AAC"
+        }
+        if not livephish_manager or not livephish_manager.clients:
+             return await edit_message(query.message, "Layanan LivePhish tidak aktif!")
+        
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("livephish_qual", livephish_manager.quality)
+        
+        await livephish_manager.setup_quality(user_id, current)
+        
+        if current in quality:
+            quality[current] += '✅'
+        
+        return await edit_message(query.message, text, markup=lp_button(quality, user_id))
+
+    # --- HIGHRESAUDIO SPECIFIC ---
+    if data[1] == "highresaudio" or datatype == "highresaudio":
+        text = f"HighResAudio Settings:"
+        if not highresaudio_manager:
+            return await edit_message(query.message, "Layanan HighResAudio tidak aktif.")
+        
+        # Tampilkan tombol HRA
+        return await edit_message(query.message, text, markup=hra_button(user_id))
+
+    # --- KHINSIDER MENU ---
+    if data[1] == "khinsider" or datatype == "khinsider":
+        text = f"Choose Khinsider Preferred Format:"
+        quality = {
+            "flac": "FLAC",
+            "mp3": "MP3"
+        }
+        if not khinsider_manager:
+             return await edit_message(query.message, "Layanan Khinsider tidak aktif!")
+        
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("khinsider_qual", khinsider_manager.quality)
+        
+        await khinsider_manager.setup_quality(user_id, current)
+        
+        if current in quality:
+            quality[current] += '✅'
+        
+        return await edit_message(query.message, text, markup=khi_button(quality, user_id))
+
+    # --- AMAZON MUSIC MENU ---
+    if data[1] == "amazon" or datatype == "amazon":
+        text = f"Choose Amazon Music Audio Quality bellow:\n(Tergantung pada tier langganan akun)"
+        quality = {
+            "AC-4": "AC-4 (Dolby Atmos)",
+            "EC-3": "EC-3 (Dolby Digital Plus)",
+            "MHA1": "MPEG-H 3D (mha1)",
+            "MHM1": "MPEG-H 3D (mhm1)",
+            "UHD": "UHD (Hi-Res)",
+            "HD": "HD (Lossless)",
+            "SD": "SD (Opus - High)",
+            "LD": "LD (Opus - Med/Low)"
+        }
+        
+        # Pengecekan manager bersifat opsional di sini agar menu tidak blank
+        if not amazon_manager:
+            return await edit_message(query.message, "Layanan Amazon Music tidak aktif.")
+
+        # Ambil pengaturan kualitas user saat ini
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("amazon_qual", getattr(amazon_manager, 'quality', 'HD')) 
+        
+        # Tandai kualitas yang sedang aktif dengan centang
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+            
+        return await edit_message(query.message, text, markup=amz_button(quality, user_id))
+
+    # --- GENIE MENU ---
+    if data[1] == "genie" or datatype == "genie":
+        text = f"Choose Genie Audio Quality bellow:"
+        quality = {
+            "flac24": "FLAC 24-bit",
+            "flac16": "FLAC 16-bit",
+            "mp3": "MP3 320kbps",
+            "mp3192": "MP3 192kbps"
+        }
+        
+        if not genie_manager:
+            return await edit_message(query.message, "Layanan Genie tidak aktif.")
+
+        # Ambil pengaturan kualitas user saat ini
+        main_user_dict = bot_set.user_data.get(user_id, {})
+        current = main_user_dict.get("genie_qual", getattr(genie_manager, 'quality', 'flac24')) 
+        
+        # Simpan state sementara ke manager
+        if hasattr(genie_manager, 'setup_quality'):
+            await genie_manager.setup_quality(user_id, current)
+        
+        # Tandai kualitas yang sedang aktif dengan centang
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+            
+        return await edit_message(query.message, text, markup=gn_button(quality, user_id))
 
 
-# --- SETTING TIDAL KUALITAS SPECIFIC (Tidal Punya Parameter Kompleks) ---
+# --- HANDLER SETTING TIDAL SPECIFIC ---
 @Client.on_callback_query(filters.regex("^utdqs"))
-async def uset_tidal_setter(client, query):
-    if not await check_user(msg=query.message): return
-    if not tidal_manager: return await query.answer("Layanan Tidal tidak aktif!", show_alert=True)
+async def uset_tidal(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
     
-    user_id = query.from_user.id
     data = query.data 
+    user_id = query.from_user.id
     
-    if data.startswith("utdqs_mqa_"):
-        new_state = data.split("_")[-1]
-        bot_set.user_data.setdefault(user_id, {})["tidal_mqa_fix"] = new_state
-        await database.save_user_settings(user_id, {"tidal_mqa_fix": new_state})
-        await tidal_manager.setup_user_settings(user_id, mqa_fix=new_state)
-
-    elif data.startswith("utdqs_convert_"):
-        new_state = data.split("_")[-1]
-        bot_set.user_data.setdefault(user_id, {})["tidal_convert_m4a"] = new_state
-        await database.save_user_settings(user_id, {"tidal_convert_m4a": new_state})
-        await tidal_manager.setup_user_settings(user_id, convert_m4a=new_state)
-
-    elif data == "utdqs_spatial":
-        user_client = await tidal_manager.get_user_client(user_id)
-        has_atmos, has_360 = False, False
+    if not tidal_manager:
+        await query.answer("Layanan Tidal tidak aktif!", show_alert=True)
+        return
         
-        if tidal_manager.clients:
-            if any(c.mobile_atmos for c in tidal_manager.clients): has_atmos = True
-            if any(c.mobile_atmos or c.mobile_hires for c in tidal_manager.clients): has_360 = True
-        if user_client:
-            if getattr(user_client, 'mobile_atmos', False): has_atmos = True
-            if getattr(user_client, 'mobile_atmos', False) or getattr(user_client, 'mobile_hires', False): has_360 = True
+    try:
+        if data.startswith("utdqs_mqa_"):
+            new_state = data.split("_")[-1]
+            bot_set.user_data.setdefault(user_id, {})["tidal_mqa_fix"] = new_state
+            await database.save_user_settings(user_id, {"tidal_mqa_fix": new_state})
+            await tidal_manager.setup_user_settings(user_id, mqa_fix=new_state)
 
-        options = ['OFF', 'ATMOS AC3 JOC']
-        if has_atmos: options.append('ATMOS AC4')
-        if has_360: options.append('Sony 360RA')
+        elif data.startswith("utdqs_convert_"):
+            new_state = data.split("_")[-1]
+            bot_set.user_data.setdefault(user_id, {})["tidal_convert_m4a"] = new_state
+            await database.save_user_settings(user_id, {"tidal_convert_m4a": new_state})
+            await tidal_manager.setup_user_settings(user_id, convert_m4a=new_state)
+
+        elif data == "utdqs_spatial":
+            user_client = await tidal_manager.get_user_client(user_id)
             
-        current = options.index(bot_set.user_data.get(user_id, {}).get("tidal_spatial", tidal_manager.spatial)) if bot_set.user_data.get(user_id, {}).get("tidal_spatial", tidal_manager.spatial) in options else 0
-        new_spatial = options[(current + 1) % len(options)]
-        
-        bot_set.user_data.setdefault(user_id, {})["tidal_spatial"] = new_spatial
-        await database.save_user_settings(user_id, {"tidal_spatial": new_spatial})
-        await tidal_manager.setup_user_settings(user_id, spatial=new_spatial)
-    else:
-        to_set = data.split('_')[1]
-        qualities = {'LOW':'LOW','HIGH':'HIGH','LOSSLESS':'LOSSLESS','HI_RES':'MAX'}
-        to_set_qual = next((k for k, v in qualities.items() if v == to_set), "LOSSLESS")
+            has_atmos = False
+            has_360 = False
+            
+            if tidal_manager.clients:
+                if any(c.mobile_atmos for c in tidal_manager.clients): has_atmos = True
+                if any(c.mobile_atmos or c.mobile_hires for c in tidal_manager.clients): has_360 = True
+            
+            if user_client:
+                if getattr(user_client, 'mobile_atmos', False): has_atmos = True
+                if getattr(user_client, 'mobile_atmos', False) or getattr(user_client, 'mobile_hires', False): has_360 = True
 
-        bot_set.user_data.setdefault(user_id, {})["tidal_qual"] = to_set_qual
-        await database.save_user_settings(user_id, {"tidal_qual": to_set_qual})
-        await tidal_manager.setup_user_settings(user_id, qual=to_set_qual)
+            options = ['OFF', 'ATMOS AC3 JOC']
+            if has_atmos:
+                options.append('ATMOS AC4')
+            if has_360:
+                options.append('Sony 360RA')
+                
+            main_user_dict = bot_set.user_data.get(user_id, {})
+            user_spatial = main_user_dict.get("tidal_spatial", tidal_manager.spatial)
+            
+            try:
+                current = options.index(user_spatial)
+            except:
+                current = 0
+            nexti = (current + 1) % len(options)
+            new_spatial = options[nexti]
+            
+            bot_set.user_data.setdefault(user_id, {})["tidal_spatial"] = new_spatial
+            await database.save_user_settings(user_id, {"tidal_spatial": new_spatial})
+            await tidal_manager.setup_user_settings(user_id, spatial=new_spatial)
+        
+        else:
+            to_set = data.split('_')[1]
+            qualities = {'LOW':'LOW','HIGH':'HIGH','LOSSLESS':'LOSSLESS','HI_RES':'MAX'}
+            
+            to_set_qual = "LOSSLESS"
+            for k, v in qualities.items():
+                if v == to_set:
+                    to_set_qual = k
+                    break
+
+            bot_set.user_data.setdefault(user_id, {})["tidal_qual"] = to_set_qual
+            await database.save_user_settings(user_id, {"tidal_qual": to_set_qual})
+            await tidal_manager.setup_user_settings(user_id, qual=to_set_qual)
+        
+        return await uset_cb(client, query, "tidal")
+
+    except Exception:
+        logging.error(format_exc())
+        
+# --- HANDLER TIDAL COVER SOURCE SPECIFIC ---
+@Client.on_callback_query(filters.regex("^utdc_"))
+async def uset_tidal_cover(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
     
+    # Akan mengambil 'original', 'itunes', atau 'musicbrainz'
+    selected_source = query.data.split('_')[1] 
+    user_id = query.from_user.id
+    
+    if not tidal_manager:
+        await query.answer("Layanan Tidal tidak aktif!", show_alert=True)
+        return
+
+    # Simpan ke Memory dan Database MongoDB
+    bot_set.user_data.setdefault(user_id, {})["tidal_cover_source"] = selected_source
+    await database.save_user_settings(user_id, {"tidal_cover_source": selected_source})
+    
+    # Muat ulang menu Tidal agar tombol yang dipilih berwarna Hijau
     await uset_cb(client, query, "tidal")
 
 
-# ==================================
-# 5. UNIFIED COVER SOURCE ROUTER
-# ==================================
-@Client.on_callback_query(filters.regex("^(udzc|uqbc|utdc)_"))
-async def unified_cover_source(client, query):
-    if not await check_user(msg=query.message): return
+# # --- HANDLER SETTING QOBUZ SPECIFIC ---
+@Client.on_callback_query(filters.regex("^uqbs"))
+async def uset_qobuz(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    qobuz = {5:'MP3 320', 6:'Lossless', 7:'24B<=96KHZ',27:'24B>96KHZ'}
+    to_set = query.data.split('_')[1]
+    qobuz_qual = list(filter(lambda x: qobuz[x] == to_set, qobuz))[0]
     
-    prefix = query.data.split('_')[0]
-    selected = query.data.split('_')[1]
+    # Pindahkan deklarasi user_id ke sini agar bisa dipakai untuk cek sesi private
     user_id = query.from_user.id
     
-    cfg = {
-        "udzc": {"prov": "deezer", "db_key": "deezer_cover_source"},
-        "uqbc": {"prov": "qobuz", "db_key": "qobuz_cover_source"},
-        "utdc": {"prov": "tidal", "db_key": "tidal_cover_source"}
+    # --- PERBAIKAN LOGIKA PENGECEKAN KLIEN QOBUZ ---
+    has_client = False
+    if BOT_QOBUZ_CLIENTS:
+        has_client = True
+    elif qobuz_manager and qobuz_manager.has_private_session(user_id):
+        has_client = True
+        
+    if not has_client:
+        await query.answer("Layanan Qobuz tidak aktif!", show_alert=True)
+        return
+    # --- BATAS PERBAIKAN ---
+
+    bot_set.user_data.setdefault(user_id, {})["qobuz_qual"] = int(qobuz_qual)
+    await database.save_user_settings(user_id, {"qobuz_qual": int(qobuz_qual)})
+    
+    # Terapkan kualitas ke Global Clients jika bot memilikinya
+    if BOT_QOBUZ_CLIENTS:
+        for q_client in BOT_QOBUZ_CLIENTS.values():
+            await q_client.setup_quality(int(user_id), int(qobuz_qual))
+            
+    # Terapkan kualitas ke Private Clients melalui manager
+    if qobuz_manager:
+        await qobuz_manager.setup_quality(user_id, int(qobuz_qual))
+    
+    await uset_cb(client, query, "qobuz")
+
+# --- HANDLER QOBUZ COVER SOURCE SPECIFIC ---
+@Client.on_callback_query(filters.regex("^uqbc_"))
+async def uset_qobuz_cover(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # Akan menghasilkan 'original', 'itunes', atau 'musicbrainz'
+    selected_source = query.data.split('_')[1] 
+    user_id = query.from_user.id
+    
+    # Cek apakah layanan Qobuz aktif
+    has_client = False
+    if BOT_QOBUZ_CLIENTS:
+        has_client = True
+    elif qobuz_manager and qobuz_manager.has_private_session(user_id):
+        has_client = True
+        
+    if not has_client:
+        await query.answer("Layanan Qobuz tidak aktif!", show_alert=True)
+        return
+
+    # Simpan pengaturan ke memory
+    bot_set.user_data.setdefault(user_id, {})["qobuz_cover_source"] = selected_source
+    # Simpan secara permanen ke database
+    await database.save_user_settings(user_id, {"qobuz_cover_source": selected_source})
+    
+    # Reload menu Qobuz agar warna tombol (Hijau/Success) berpindah
+    await uset_cb(client, query, "qobuz")
+
+
+# --- HANDLER BEATPORT SPECIFIC ---
+@Client.on_callback_query(filters.regex("^ubps"))
+async def uset_beatport(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    qual_map_display = {
+        "Lossless (FLAC)": "lossless",
+        "High (AAC 256)": "high",
+        "Medium (AAC 128)": "medium"
+    }
+    to_set_display = query.data.split('_')[1]
+    to_set = qual_map_display.get(to_set_display)
+    if not to_set:
+        return await query.answer("Kualitas tidak valid.", True)
+    
+    has_client = False
+    if beatport_manager and (beatport_manager.global_clients or beatport_manager.has_private_session(query.from_user.id)):
+         has_client = True
+
+    if not has_client:
+        await query.answer("Layanan Beatport tidak aktif!", show_alert=True)
+        return
+    user_id = query.from_user.id
+    
+    await beatport_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['beatport_qual'] = to_set 
+    await database.save_user_settings(user_id, {'beatport_qual': to_set})
+    
+    await uset_cb(client, query, "beatport")
+
+
+# --- HANDLER SOUNDCLOUD SPECIFIC ---
+@Client.on_callback_query(filters.regex("^uscs"))
+async def uset_soundcloud(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    qual_map_display = {
+        "Original (Jika Ada)": "original",
+        "Stream (Default AAC/MP3)": "stream"
+    }
+    to_set_display = query.data.split('_')[1]
+    to_set = qual_map_display.get(to_set_display)
+    
+    if not to_set:
+        return await query.answer("Kualitas tidak valid.", True)
+
+    if not soundcloud_manager or not soundcloud_manager.get_client():
+        await query.answer("Layanan Soundcloud tidak aktif!", show_alert=True)
+        return
+
+    user_id = query.from_user.id
+    
+    await soundcloud_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['soundcloud_qual'] = to_set 
+    await database.save_user_settings(user_id, {'soundcloud_qual': to_set})
+    
+    await uset_cb(client, query, "soundcloud")
+
+
+# --- HANDLER DEEZER SPECIFIC ---
+@Client.on_callback_query(filters.regex("^udzs"))
+async def uset_deezer(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    qual_map_display = {
+        "FLAC": "FLAC",
+        "MP3 320": "MP3_320",
+        "MP3 128": "MP3_128"
+    }
+    to_set_display = query.data.split('_')[1]
+    to_set = qual_map_display.get(to_set_display)
+    if not to_set:
+        return await query.answer("Kualitas tidak valid.", True)
+    
+    user_id = query.from_user.id
+    
+    # --- PERBAIKAN LOGIKA PENGECEKAN KLIEN ---
+    has_client = False
+    if deezer_manager:
+        # Cek apakah ada akun global ATAU akun private milik user
+        if deezer_manager.clients or deezer_manager.has_private_session(user_id):
+            has_client = True
+
+    if not has_client:
+        await query.answer("Layanan Deezer tidak aktif!", show_alert=True)
+        return
+    # --- BATAS PERBAIKAN ---
+
+    await deezer_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['deezer_qual'] = to_set 
+    await database.save_user_settings(user_id, {'deezer_qual': to_set})
+    
+    await uset_cb(client, query, "deezer")
+
+# --- HANDLER DEEZER COVER SOURCE SPECIFIC ---
+@Client.on_callback_query(filters.regex("^udzc_"))
+async def uset_deezer_cover(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    selected_source = query.data.split('_')[1] 
+    user_id = query.from_user.id
+    
+    if not deezer_manager:
+        await query.answer("Layanan Deezer tidak aktif!", show_alert=True)
+        return
+
+    # Simpan ke Memory dan Database
+    bot_set.user_data.setdefault(user_id, {})["deezer_cover_source"] = selected_source
+    from bot.helpers.database.mongo_async import database
+    await database.save_user_settings(user_id, {"deezer_cover_source": selected_source})
+    
+    # Reload menu Deezer
+    await uset_cb(client, query, "deezer")
+
+
+# --- HANDLER KKBOX SPECIFIC ---
+@Client.on_callback_query(filters.regex("^ukks"))
+async def uset_kkbox(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    qual_map_display = {
+        "MP3 128k": "128k",
+        "MP3 192k": "192k",
+        "AAC 320k": "320k",
+        "FLAC 16-bit": "hifi",
+        "FLAC 24-bit": "hires"
+    }
+    to_set_display = query.data.split('_')[1]
+    to_set = qual_map_display.get(to_set_display)
+    if not to_set:
+        return await query.answer("Kualitas tidak valid.", True)
+        
+    user_id = query.from_user.id
+    has_client = False
+    if kkbox_manager:
+        if getattr(kkbox_manager, 'clients', []):
+            has_client = True
+        else:
+            user_dict = bot_set.user_data.get(user_id, {})
+            if user_dict.get('kkbox_accounts'):
+                has_client = True
+
+    if not has_client:
+        await query.answer("Layanan KKBox tidak aktif!", show_alert=True)
+        return
+    
+    await kkbox_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['kkbox_qual'] = to_set 
+    await database.save_user_settings(user_id, {'kkbox_qual': to_set})
+
+    await uset_cb(client, query, "kkbox")
+
+
+# --- HANDLER IDAGIO SPECIFIC ---
+@Client.on_callback_query(filters.regex("^uids"))
+async def uset_idagio(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    qual_map_display = {
+        "FLAC": "FLAC",
+        "AAC 320k": "MP3_320",
+        "AAC 160k": "MP3_160"
+    }
+    to_set_display = query.data.split('_')[1]
+    to_set = qual_map_display.get(to_set_display)
+    if not to_set:
+        return await query.answer("Kualitas tidak valid.", True)
+    if not idagio_manager or not idagio_manager.clients:
+        await query.answer("Layanan Idagio tidak aktif!", show_alert=True)
+        return
+    user_id = query.from_user.id
+    
+    await idagio_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['idagio_qual'] = to_set 
+    await database.save_user_settings(user_id, {'idagio_qual': to_set})
+
+    await uset_cb(client, query, "idagio")
+
+
+# --- HANDLER BUGS SPECIFIC ---
+@Client.on_callback_query(filters.regex("^ubgs"))
+async def uset_bugs(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    qual_map_display = {
+        "FLAC 16-bit": "flac",
+        "AAC 320k": "aac256",
+        "MP3 320k": "320k",
+        "AAC 128k": "aac"
     }
     
-    bot_set.user_data.setdefault(user_id, {})[cfg[prefix]['db_key']] = selected
-    await database.save_user_settings(user_id, {cfg[prefix]['db_key']: selected})
-    await uset_cb(client, query, cfg[prefix]['prov'])
+    to_set_display = query.data.split('_')[1]
+    to_set = qual_map_display.get(to_set_display)
+    if not to_set:
+        return await query.answer("Kualitas tidak valid.", True)
+    if not bugs_manager or not bugs_manager.clients:
+        await query.answer("Layanan Bugs tidak aktif!", show_alert=True)
+        return
+    user_id = query.from_user.id
+    
+    await bugs_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['bugs_qual'] = to_set 
+    await database.save_user_settings(user_id, {'bugs_qual': to_set})
+
+    await uset_cb(client, query, "bugs")
 
 
-# ==================================
-# 6. LYRICS & ZIP SETTINGS ROUTER
-# ==================================
+# --- HANDLER MOOV SPECIFIC ---
+@Client.on_callback_query(filters.regex("^umvs"))
+async def uset_moov_handler(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # Data format: umvs_FLAC, umvs_MP3_320
+    to_set = query.data.split('_')[1]
+    
+    if not moov_manager or not moov_manager.clients:
+        await query.answer("Layanan Moov tidak aktif!", show_alert=True)
+        return
+
+    user_id = query.from_user.id
+    
+    # Simpan ke Manager & DB
+    await moov_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['moov_qual'] = to_set 
+    await database.save_user_settings(user_id, {'moov_qual': to_set})
+    
+    await uset_cb(client, query, "moov")
+
+
+# --- HANDLER LIVEPHISH SPECIFIC ---
+@Client.on_callback_query(filters.regex("^ulps"))
+async def uset_livephish_handler(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # Data format: ulps_FLAC, ulps_AAC
+    to_set = query.data.split('_')[1]
+    
+    if not livephish_manager or not livephish_manager.clients:
+        await query.answer("Layanan LivePhish tidak aktif!", show_alert=True)
+        return
+
+    user_id = query.from_user.id
+    
+    # Simpan ke Manager & DB
+    await livephish_manager.setup_quality(user_id, to_set)
+    bot_set.user_data.setdefault(user_id, {})['livephish_qual'] = to_set
+    await database.save_user_settings(user_id, {'livephish_qual': to_set})
+    
+    await uset_cb(client, query, "livephish")
+
+
+# --- HANDLER KHINSIDER SPECIFIC ---
+@Client.on_callback_query(filters.regex("^ukhis"))
+async def uset_khinsider_handler(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # Data format: ukhis_flac, ukhis_mp3
+    to_set = query.data.split('_')[1]
+    
+    if not khinsider_manager:
+        await query.answer("Layanan Khinsider tidak aktif!", show_alert=True)
+        return
+
+    user_id = query.from_user.id
+    
+    # Simpan ke Manager & DB
+    await khinsider_manager.setup_quality(user_id, to_set)
+    bot_set.user_data.setdefault(user_id, {})['khinsider_qual'] = to_set
+    await database.save_user_settings(user_id, {'khinsider_qual': to_set})
+    
+    await uset_cb(client, query, "khinsider")
+
+
+# --- HANDLER AMAZON SPECIFIC ---
+@Client.on_callback_query(filters.regex("^uamzs_"))
+async def uset_amazon(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # query.data formatnya: uamzs_UHD, uamzs_HD, uamzs_SD
+    to_set = query.data.split('_')[1]
+    user_id = query.from_user.id
+    
+    has_client = False
+    if amazon_manager:
+        if getattr(amazon_manager, 'global_clients', []) or getattr(amazon_manager, 'clients', []) or amazon_manager.has_private_session(user_id):
+            has_client = True
+
+    if not has_client:
+        await query.answer("Layanan Amazon Music tidak aktif!", show_alert=True)
+        return
+    
+    # Simpan pengaturan ke Manager dan Database
+    await amazon_manager.setup_quality(user_id, to_set) 
+    bot_set.user_data.setdefault(user_id, {})['amazon_qual'] = to_set 
+    await database.save_user_settings(user_id, {'amazon_qual': to_set})
+    
+    await uset_cb(client, query, "amazon")
+
+
+# --- HANDLER GENIE SPECIFIC ---
+@Client.on_callback_query(filters.regex("^ugns_"))
+async def uset_genie_handler(client, query):
+    m = query.message
+    if not await check_user(msg=m):
+        return
+    
+    # Data format: ugns_flac24, ugns_flac16, ugns_mp3
+    to_set = query.data.split('_')[1]
+    user_id = query.from_user.id
+    
+    if not genie_manager:
+        await query.answer("Layanan Genie tidak aktif!", show_alert=True)
+        return
+    
+    # Simpan pengaturan ke Manager, Memory, dan Database
+    if hasattr(genie_manager, 'setup_quality'):
+        await genie_manager.setup_quality(user_id, to_set)
+        
+    bot_set.user_data.setdefault(user_id, {})['genie_qual'] = to_set 
+    await database.save_user_settings(user_id, {'genie_qual': to_set})
+    
+    # Refresh menu
+    await uset_cb(client, query, "genie")
+
+
+# --- HANDLER CALLBACK BARU UNTUK LIRIK ---
+# Ubah filter regex untuk menyertakan 'uset_sendly'
 @Client.on_callback_query(filters.regex("^uset_ly|^uset_sendly"))
 async def uset_lyrics_handler(client, query):
-    if not await check_user(msg=query.message): return
-    user_id = query.from_user.id
+    if not await check_user(msg=query.message):
+        return
+    
     data = query.data
-    bot_set.user_data.setdefault(user_id, {})
+    user_id = query.from_user.id
+    
+    # Inisialisasi dictionary jika belum ada
+    if user_id not in bot_set.user_data:
+        bot_set.user_data[user_id] = {}
+    
+    # 1. Masuk Menu
+    if data == "uset_lyrics":
+        pass # Langsung render di bawah
 
-    if data == "uset_ly_on": await database.save_user_settings(user_id, {'lyrics_status': True}); bot_set.user_data[user_id]['lyrics_status'] = True
-    elif data == "uset_ly_off": await database.save_user_settings(user_id, {'lyrics_status': False}); bot_set.user_data[user_id]['lyrics_status'] = False
-    elif data == "uset_sendly_on": await database.save_user_settings(user_id, {'send_lyrics_file': True}); bot_set.user_data[user_id]['send_lyrics_file'] = True
-    elif data == "uset_sendly_off": await database.save_user_settings(user_id, {'send_lyrics_file': False}); bot_set.user_data[user_id]['send_lyrics_file'] = False
-    elif data.startswith("uset_ly_p_"): 
+    # 2. Toggle Status Lirik
+    elif data == "uset_ly_on":
+        bot_set.user_data[user_id]['lyrics_status'] = True
+        await database.save_user_settings(user_id, {'lyrics_status': True})
+    elif data == "uset_ly_off":
+        bot_set.user_data[user_id]['lyrics_status'] = False
+        await database.save_user_settings(user_id, {'lyrics_status': False})
+
+    # === [TAMBAHAN: LOGIKA SIMPAN TOGGLE FILE LIRIK] ===
+    elif data == "uset_sendly_on":
+        bot_set.user_data[user_id]['send_lyrics_file'] = True
+        await database.save_user_settings(user_id, {'send_lyrics_file': True})
+    elif data == "uset_sendly_off":
+        bot_set.user_data[user_id]['send_lyrics_file'] = False
+        await database.save_user_settings(user_id, {'send_lyrics_file': False})
+    # ===================================================
+
+    # 3. Ganti Provider
+    elif data.startswith("uset_ly_p_"):
         prov = data.split("_")[-1]
         bot_set.user_data[user_id]['lyrics_provider'] = prov
         await database.save_user_settings(user_id, {'lyrics_provider': prov})
-    elif data.startswith("uset_ly_t_"): 
+
+    # 4. Ganti Tipe
+    elif data.startswith("uset_ly_t_"):
         typ = data.split("_")[-1]
         bot_set.user_data[user_id]['lyrics_type'] = typ
         await database.save_user_settings(user_id, {'lyrics_type': typ})
 
-    await edit_message(query.message, "<b>Lyrics Settings</b>\n\nConfigure how you want to download lyrics.", markup=lyrics_button(bot_set.user_data[user_id], user_id))
+    # Render Menu
+    text = "<b>Lyrics Settings</b>\n\nConfigure how you want to download lyrics."
+    await edit_message(query.message, text, markup=lyrics_button(bot_set.user_data[user_id], user_id))
 
+
+# --- HANDLER ZIP SETTINGS ---
 @Client.on_callback_query(filters.regex("^zip"))
 async def uset_zip(self, query):
-    if not await check_user(msg=query.message): return
+    if not await check_user(msg=query.message):
+        return
     data = query.data.split("_")[1].lower()
     user_id = query.from_user.id
+    users_ = {"user_id": user_id}
     
-    bot_set.user_data.setdefault(user_id, {})
-    curr = bot_set.user_data[user_id]
+    # Pastikan user data ada di memori
+    if user_id not in bot_set.user_data:
+        bot_set.user_data.setdefault(user_id, {})
     
+    user_dict = bot_set.user_data.get(user_id, {})
+    
+    # Toggle Playlist Zip
+    if data == "playlist":
+        # Cek data lama (lower) atau data baru (UPPER)
+        current = user_dict.get("PLAYLIST_ZIP")
+        if current is None:
+            current = user_dict.get("playlist_zip", False)
+            
+        # HAPUS .lower() agar tersimpan sebagai HURUF BESAR
+        new_val = not current
+        data_saved = {"PLAYLIST_ZIP": new_val}
+        
+        bot_set.user_data[user_id].update(data_saved)
+        await database.save_user_settings(user_id, data_saved)
+        # Tampilkan status True/False di notifikasi
+        await query.answer(f"Playlist zip: {new_val}")
+        return await start_user_setting(self, query.message, True, users_)
+    
+    # Toggle Album Zip
+    if data == "album":
+        current = user_dict.get("ALBUM_ZIP")
+        if current is None:
+            current = user_dict.get("album_zip", False)
+            
+        new_val = not current
+        data_saved = {"ALBUM_ZIP": new_val}
+        
+        bot_set.user_data[user_id].update(data_saved)
+        await database.save_user_settings(user_id, data_saved)
+        await query.answer(f"Album zip: {new_val}")
+        return await start_user_setting(self, query.message, True, users_)
+    
+    # Toggle Artist Zip
+    if data == "artist":
+        current = user_dict.get("ARTIST_ZIP")
+        if current is None:
+            current = user_dict.get("artist_zip", False)
+            
+        new_val = not current
+        data_saved = {"ARTIST_ZIP": new_val}
+        
+        bot_set.user_data[user_id].update(data_saved)
+        await database.save_user_settings(user_id, data_saved)
+        await query.answer(f"Artist zip: {new_val}")
+        return await start_user_setting(self, query.message, True, users_)
+    
+    # Toggle Art Poster
+    if data == "poster":
+        current = user_dict.get("ART_POSTER")
+        if current is None:
+            # Kode asli anda pakai "art_poster" (kecil), kita handle di sini
+            current = user_dict.get("art_poster", False)
+            
+        new_val = not current
+        # Ubah key jadi HURUF BESAR agar konsisten
+        data_saved = {"ART_POSTER": new_val}
+        
+        bot_set.user_data[user_id].update(data_saved)
+        await database.save_user_settings(user_id, data_saved)
+        await query.answer(f"Art poster: {new_val}")
+        return await start_user_setting(self, query.message, True, users_)
+
+    # Toggle Video Zip
     if data == "video":
-        new_val = not curr.get("VIDEO_ZIP", curr.get("video_zip", False))
-        if isinstance(new_val, str): new_val = new_val.lower() in ['true', '1', 'on']
-        curr.update({"VIDEO_ZIP": new_val})
-        curr.pop("video_zip", None)
-        await database.save_user_settings(user_id, {"VIDEO_ZIP": new_val, "video_zip": None})
-    else:
-        key = f"{data.upper()}_ZIP" if data != "poster" else "ART_POSTER"
-        new_val = not curr.get(key, curr.get(f"{data}_zip" if data != "poster" else "art_poster", False))
-        curr[key] = new_val
-        await database.save_user_settings(user_id, {key: new_val})
+        current = user_dict.get("VIDEO_ZIP")
+        if current is None:
+            current = user_dict.get("video_zip", False)
+            
+        # Jika isinya string "False"/"True", bersihkan dulu
+        if isinstance(current, str):
+            current = current.lower() in ['true', '1', 'on']
+            
+        new_val = not current
+        data_saved = {"VIDEO_ZIP": new_val, "video_zip": None} # Matikan yang huruf kecil
+        
+        bot_set.user_data[user_id].update(data_saved)
+        bot_set.user_data[user_id].pop("video_zip", None) # Hapus dari memori lokal
+        
+        await database.save_user_settings(user_id, data_saved)
+        await query.answer(f"Video zip: {new_val}")
+        return await start_user_setting(self, query.message, True, users_)
 
-    await query.answer(f"{data.capitalize()} setting: {new_val}")
-    await start_user_setting(self, query.message, True, {"user_id": user_id})
 
-
-# ==================================
-# 7. DEBUG COMMAND
-# ==================================
+# --- DEBUG HANDLER (ADMIN ONLY) ---
 @Client.on_message(filters.command("debug") & filters.user(list(Config.ADMINS)))
 async def debug(c, m): 
     # QOBUZ DEBUG
     dt_qb = "QOBUZ:\n"
     if BOT_QOBUZ_CLIENTS:
         first_client = BOT_QOBUZ_CLIENTS.get(1) or list(BOT_QOBUZ_CLIENTS.values())[0]
-        dt_qb += f"{len(BOT_QOBUZ_CLIENTS)} klien Qobuz aktif.\nLabel Klien #1: {first_client.label}\nKualitas Default: {first_client.quality}"
-    else: dt_qb += "Tidak ada klien Qobuz yang aktif."
+        dt_qb += f"{len(BOT_QOBUZ_CLIENTS)} klien Qobuz aktif.\n"
+        dt_qb += f"Label Klien #1: {first_client.label}\n"
+        dt_qb += f"Kualitas Default Klien #1: {first_client.quality}"
+    else:
+        dt_qb += "Tidak ada klien Qobuz yang aktif."
 
-    # OTHER MANAGERS
-    mgrs = [
-        ("BEATPORT", beatport_manager), ("SOUNDCLOUD", soundcloud_manager), ("DEEZER", deezer_manager),
-        ("TIDAL", tidal_manager), ("KKBOX", kkbox_manager), ("IDAGIO", idagio_manager),
-        ("BUGS", bugs_manager), ("MOOV", moov_manager), ("LIVEPHISH", livephish_manager),
-        ("HIGHRESAUDIO", highresaudio_manager), ("KHINSIDER", khinsider_manager),
-        ("AMAZON MUSIC", amazon_manager), ("GENIE", genie_manager)
-    ]
+    # BEATPORT DEBUG
+    dt_bp = "\n\nBEATPORT:\n"
+    if beatport_manager:
+        dt_bp += f"Global Clients: {len(beatport_manager.global_clients)}\n"
+        dt_bp += f"Private User Clients: {len(beatport_manager.user_clients)}\n"
+        dt_bp += f"Global Default Quality: {beatport_manager.quality}\n"
+    else:
+        dt_bp += "Beatport Manager tidak aktif."
     
-    debug_text = dt_qb
-    for name, mgr in mgrs:
-        debug_text += f"\n\n{name}:\n"
-        if mgr:
-            gl = len(getattr(mgr, 'global_clients', getattr(mgr, 'clients', []))) if name != "SOUNDCLOUD" else (1 if mgr.get_client() else 0)
-            pv = len(getattr(mgr, 'user_clients', {}))
-            debug_text += f"Global: {gl} | Private: {pv}\n"
-            if hasattr(mgr, 'quality'): debug_text += f"Default Qual: {mgr.quality}\n"
-        else:
-            debug_text += f"{name} tidak aktif/gagal diload."
-            
-    debug_text += f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
-    await m.reply(debug_text, True)
+    # SOUNDCLOUD DEBUG
+    dt_sc = "\n\nSOUNDCLOUD:\n"
+    if soundcloud_manager and soundcloud_manager.get_client():
+        dt_sc += f"Klien Soundcloud aktif (Token diatur).\n"
+        dt_sc += f"Kualitas Default: {soundcloud_manager.quality}\n"
+        dt_sc += f"Cache User (Global): {len([u for u in bot_set.user_data if 'soundcloud_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_sc += "Tidak ada klien Soundcloud yang aktif (Token hilang)."
+
+    # DEEZER DEBUG
+    dt_dz = "\n\nDEEZER:\n"
+    if deezer_manager and deezer_manager.clients:
+        dt_dz += f"{len(deezer_manager.clients)} klien Deezer aktif.\n"
+        dt_dz += f"Kualitas Default: {deezer_manager.quality}\n"
+        dt_dz += f"Cache User (Global): {len([u for u in bot_set.user_data if 'deezer_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_dz += "Tidak ada klien Deezer yang aktif."
+
+    # TIDAL DEBUG
+    dt_td = "\n\nTIDAL:\n"
+    if tidal_manager and tidal_manager.clients:
+        dt_td += f"{len(tidal_manager.clients)} klien Tidal aktif.\n"
+        dt_td += f"Kualitas Default: {tidal_manager.quality}, Spasial: {tidal_manager.spatial}\n"
+        dt_td += f"Global MQA Fix: {tidal_manager.mqa_fix}, Global Convert M4A: {tidal_manager.convert_m4a}\n"
+        dt_td += f"Cache User Kualitas: {len([u for u in bot_set.user_data if 'tidal_qual' in bot_set.user_data[u]])} pengguna\n"
+        dt_td += f"Cache User MQA: {len([u for u in bot_set.user_data if 'tidal_mqa_fix' in bot_set.user_data[u]])} pengguna\n"
+        dt_td += f"Cache User Convert: {len([u for u in bot_set.user_data if 'tidal_convert_m4a' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_td += "Tidak ada klien Tidal yang aktif."
+
+    # KKBOX DEBUG
+    dt_kk = "\n\nKKBOX:\n"
+    if kkbox_manager and kkbox_manager.clients:
+        dt_kk += f"{len(kkbox_manager.clients)} klien KKBox aktif.\n"
+        dt_kk += f"Kualitas Default: {kkbox_manager.quality}\n"
+        dt_kk += f"Cache User (Global): {len([u for u in bot_set.user_data if 'kkbox_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_kk += "Tidak ada klien KKBox yang aktif."
+    
+    # IDAGIO DEBUG
+    dt_id = "\n\nIDAGIO:\n"
+    if idagio_manager and idagio_manager.clients:
+        dt_id += f"{len(idagio_manager.clients)} klien Idagio aktif.\n"
+        dt_id += f"Kualitas Default: {idagio_manager.quality}\n"
+        dt_id += f"Cache User (Global): {len([u for u in bot_set.user_data if 'idagio_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_id += "Tidak ada klien Idagio yang aktif."
+
+    # BUGS DEBUG
+    dt_bg = "\n\nBUGS:\n"
+    if bugs_manager and bugs_manager.clients:
+        dt_bg += f"{len(bugs_manager.clients)} klien Bugs aktif.\n"
+        dt_bg += f"Kualitas Default: {bugs_manager.quality}\n"
+        dt_bg += f"Cache User (Global): {len([u for u in bot_set.user_data if 'bugs_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_bg += "Tidak ada klien Bugs yang aktif."
+
+    # MOOV DEBUG
+    dt_mv = "\n\nMOOV:\n"
+    if moov_manager and moov_manager.clients:
+        dt_mv += f"{len(moov_manager.clients)} klien Moov aktif.\n"
+        dt_mv += f"Kualitas Default: {moov_manager.quality}\n"
+        dt_mv += f"Cache User (Global): {len([u for u in bot_set.user_data if 'moov_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_mv += "Tidak ada klien Moov yang aktif."
+
+    # LIVEPHISH DEBUG
+    dt_lp = "\n\nLIVEPHISH:\n"
+    if livephish_manager and livephish_manager.clients:
+        dt_lp += f"{len(livephish_manager.clients)} klien LivePhish aktif.\n"
+        dt_lp += f"Kualitas Default: {livephish_manager.quality}\n"
+        dt_lp += f"Cache User (Global): {len([u for u in bot_set.user_data if 'livephish_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_lp += "Tidak ada klien LivePhish yang aktif."
+
+    # HIGHRESAUDIO DEBUG
+    dt_hra = "\n\nHIGHRESAUDIO:\n"
+    if highresaudio_manager and (highresaudio_manager.clients or getattr(highresaudio_manager, 'user_clients', {})):
+        dt_hra += f"{len(highresaudio_manager.clients)} klien Global HRA aktif.\n"
+        # Cek jumlah private account
+        pv_count = len(highresaudio_manager.user_clients) if hasattr(highresaudio_manager, 'user_clients') else 0
+        dt_hra += f"Private User Clients: {pv_count}\n"
+    else:
+        dt_hra += "Tidak ada klien HighResAudio yang aktif."
+
+    # KHINSIDER DEBUG
+    dt_khi = "\n\nKHINSIDER:\n"
+    if khinsider_manager:
+        dt_khi += f"Klien Khinsider aktif.\n"
+        dt_khi += f"Kualitas Default: {khinsider_manager.quality}\n"
+        dt_khi += f"Cache User (Global): {len([u for u in bot_set.user_data if 'khinsider_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_khi += "Tidak ada klien Khinsider yang aktif."
+
+    # =========================================
+    # TAMBAHKAN AMAZON MUSIC DEBUG DI SINI
+    # =========================================
+    dt_amz = "\n\nAMAZON MUSIC:\n"
+    if amazon_manager and (getattr(amazon_manager, 'clients', []) or getattr(amazon_manager, 'user_clients', {})):
+        gl_count = len(getattr(amazon_manager, 'clients', []))
+        pv_count = len(getattr(amazon_manager, 'user_clients', {}))
+        
+        dt_amz += f"{gl_count} klien Global Amazon aktif.\n"
+        dt_amz += f"Private User Clients: {pv_count}\n"
+        dt_amz += f"Kualitas Default: {getattr(amazon_manager, 'quality', 'HD')}\n"
+        dt_amz += f"Cache User (Global): {len([u for u in bot_set.user_data if 'amazon_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_amz += "Tidak ada klien Amazon Music yang aktif."
+    # =========================================
+
+    # =========================================
+    # TAMBAHKAN GENIE DEBUG DI SINI
+    # =========================================
+    dt_gn = "\n\nGENIE:\n"
+    if genie_manager:
+        dt_gn += f"Klien Genie aktif.\n"
+        dt_gn += f"Kualitas Default: {getattr(genie_manager, 'quality', 'flac24')}\n"
+        dt_gn += f"Cache User (Global): {len([u for u in bot_set.user_data if 'genie_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_gn += "Tidak ada klien Genie yang aktif."
+    # =========================================
+
+    # ZIP SETTINGS DEBUG
+    zips = f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
+    
+    # Combine all debug texts (Pastikan dt_amz ditambahkan ke dalam final_debug_text)
+    final_debug_text = dt_qb + dt_bp + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + zips
+    
+    # Reply safely
+    await m.reply(final_debug_text, True)
