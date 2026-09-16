@@ -416,18 +416,22 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             try:
                 from bot.helpers.utils import GLOBAL_TASKS
                 GLOBAL_TASKS.pop(cancel_id, None)
-            except Exception: pass
+            except Exception as e: 
+                from bot.logger import LOGGER
+                LOGGER.debug(f"Pembersihan GLOBAL_TASKS gagal (Cancelled): {e}")
             # ----------------------------
 
             from bot.helpers.message import edit_message
-            if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
+            if msg: 
+                try: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
+                except Exception as e: LOGGER.debug(f"Edit msg batal gagal: {e}")
             
             # --- MENGHAPUS PESAN "UPLOADING..." YANG NYANGKUT ---
             if isinstance(user, dict) and 'bot_msg' in user:
                 try: await edit_message(user['bot_msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
-                except: pass
+                except Exception as e: LOGGER.debug(f"Edit bot_msg batal gagal: {e}")
             
-            # Lempar sinyal ke sistem utama (agar sistem utama yg mengirim 1x pesan "Tugas Dibatalkan")
+            # Lempar sinyal ke sistem utama
             raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             
         except Exception as e:
@@ -435,17 +439,21 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             try:
                 from bot.helpers.utils import GLOBAL_TASKS
                 GLOBAL_TASKS.pop(cancel_id, None)
-            except Exception: pass
+            except Exception as cleanup_err: 
+                from bot.logger import LOGGER
+                LOGGER.debug(f"Pembersihan GLOBAL_TASKS gagal (Error): {cleanup_err}")
             # ----------------------------
 
             from bot.helpers.message import edit_message
             if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
-                if msg: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
+                if msg: 
+                    try: await edit_message(msg, "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
+                    except Exception as edit_err: LOGGER.debug(f"Edit msg batal (Error) gagal: {edit_err}")
                 
                 # --- MENGHAPUS PESAN "UPLOADING..." YANG NYANGKUT ---
                 if isinstance(user, dict) and 'bot_msg' in user:
                     try: await edit_message(user['bot_msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
-                    except: pass
+                    except Exception as edit_err: LOGGER.debug(f"Edit bot_msg batal (Error) gagal: {edit_err}")
                 
                 # Lempar sinyal ke sistem utama
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
