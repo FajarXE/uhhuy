@@ -241,3 +241,11 @@ async def aria2_purge_all():
             ACTIVE_DOWNLOADS.clear()
     except Exception:
         pass
+
+async def close_aria2_session():
+    """Fungsi untuk menutup sesi aiohttp secara aman saat bot dimatikan"""
+    global _ARIA2_SESSION
+    if _ARIA2_SESSION and not _ARIA2_SESSION.closed:
+        await _ARIA2_SESSION.close()
+        from bot.logger import LOGGER
+        LOGGER.info("Aria2: Sesi aiohttp global berhasil ditutup dengan aman.")
