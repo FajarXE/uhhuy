@@ -36,31 +36,29 @@ GLOBAL_UI_MSG = {}
 GLOBAL_UI_PAGES = {}
 GLOBAL_UI_LAST_UPDATE = {}
 
+# --- TAMBAHKAN LOCK INI ---
+GLOBAL_STATE_LOCK = asyncio.Lock()
+# --------------------------
+
 # PENGHAPUSAN: GLOBAL_TASK_LOCK dan GLOBAL_QUEUE_COUNT telah dihapus.
 
-def get_status_text(page=1, limit=5):
+async def get_status_text(page=1, limit=5):
     current_time = time.time()
     
-    stale = []
-    for k, v in list(GLOBAL_TASKS.items()):
-        action = str(v.get('action', '')).lower()
-        
-        # --- FIX: Cabut kekebalan abadi (immortality) dari Ghost Task ---
-        # Zipping kita beri batas waktu 15 menit (900 detik) jika ukuran file raksasa.
-        # Fetching/Processing/Connecting normal maksimal 2 menit (120 detik).
-        if 'zipping' in action:
-            time_limit = 900 
-        else:
-            time_limit = 120 
-            
-        # Jika task diam lebih lama dari time_limit, anggap mati dan buang!
-        if current_time - v.get('timestamp', current_time) > time_limit:
-            stale.append(k)
-            
-    for k in stale:
-        GLOBAL_TASKS.pop(k, None)
+    # Kunci akses ke dictionary selama proses kalkulasi Papan Status!
+    async with GLOBAL_STATE_LOCK:
+        stale = []
+        for k, v in list(GLOBAL_TASKS.items()):
+            action = str(v.get('action', '')).lower()
+            time_limit = 900 if 'zipping' in action else 120 
+                
+            if current_time - v.get('timestamp', current_time) > time_limit:
+                stale.append(k)
+                
+        for k in stale:
+            GLOBAL_TASKS.pop(k, None)
 
-    tasks = list(GLOBAL_TASKS.values())
+        tasks = list(GLOBAL_TASKS.values())
     if not tasks:
         return "💤 **There are no tasks currently running.**", None
 
@@ -711,7 +709,7 @@ async def progress_message(done, total, details):
                 
             GLOBAL_UI_LAST_UPDATE[msg_id] = now
             current_page = GLOBAL_UI_PAGES.get(cid, 1) 
-            g_text, g_markup = get_status_text(page=current_page)
+            g_text, g_markup = await get_status_text(page=current_page)
             
             try: 
                 await edit_message(m, g_text, g_markup, False)
@@ -746,7 +744,7 @@ async def dedicated_ui_worker():
         for chat_id, msg in targets:
             try:
                 page = GLOBAL_UI_PAGES.get(chat_id, 1)
-                g_text, g_markup = get_status_text(page=page)
+                g_text, g_markup = await get_status_text(page=page)
                 
                 await edit_message(msg, g_text, g_markup, antiflood=False)
                 
