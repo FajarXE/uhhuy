@@ -483,9 +483,13 @@ async def track_upload(metadata, user, disable_link=False):
             caption += f"\n\n🔗 <b>{user_mode.upper()} LINK:</b>\n{link}"
             await send_message(user, caption, 'text')
             upload_success = True
+            
+            # --- [FIX SILENT ERROR] Pembersihan File Lokal ---
             try:
                 if os.path.exists(metadata['filepath']): os.remove(metadata['filepath'])
-            except: pass
+            except Exception as e: 
+                LOGGER.debug(f"Gagal menghapus file lokal setelah upload cloud '{metadata['filepath']}': {e}")
+            # -------------------------------------------------
             return 
 
     if not upload_success:
@@ -494,9 +498,13 @@ async def track_upload(metadata, user, disable_link=False):
         else:
             rclone_link, index_link = await rclone_upload(user, metadata['filepath'])
             if not disable_link: await post_simple_message(user, metadata, rclone_link, index_link)
+            
+    # --- [FIX SILENT ERROR] Pembersihan File Lokal ---
     try: 
         if os.path.exists(metadata['filepath']): os.remove(metadata['filepath'])
-    except: pass
+    except Exception as e:
+        LOGGER.debug(f"Gagal menghapus file lokal setelah upload default '{metadata['filepath']}': {e}")
+    # -------------------------------------------------
 
 async def rclone_upload(user, realpath):
     path_to_upload = realpath
