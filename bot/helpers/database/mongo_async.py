@@ -26,16 +26,10 @@ class MongoDB:
         return self._client
     
     async def initialize_users(self) -> dict:
-        exists = await self.db[Config.BOT_USERNAME].users.find_one({})
-        if exists:
-            user_data = {} 
-            # Menggunakan AsyncIOMotorCursor
-            cursor = self.db[Config.BOT_USERNAME].users.find({})
-            async for row in cursor:
-                uid = row["_id"]
-                del row["_id"]
-                user_data[uid] = row
-            return user_data
+        """
+        Dikosongkan untuk mencegah Memory Leak / RAM Bloat.
+        Data user tidak lagi dimuat semua saat bot start, melainkan via Lazy-Load (JIT).
+        """
         return {}
     
     async def authorize_chats(self, user_id: int, remove=False) -> bool:
