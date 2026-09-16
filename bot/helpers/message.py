@@ -175,6 +175,10 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
 
 # --- [PERBAIKAN] MENAMBAHKAN PARAMETER progress DAN progress_args ---
 async def send_message(user, text: str, type: str = 'text', markup=None, antiflood=False, meta=None, caption=None, progress=None, progress_args=None):
+
+    import asyncio
+    from pyrogram.types import Message
+    from bot.tgclient import aio
     
     if isinstance(user, Message):
         client = getattr(user, '_client', aio)
