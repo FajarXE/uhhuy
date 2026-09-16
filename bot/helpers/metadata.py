@@ -5,6 +5,7 @@ import aiohttp
 import aiofiles
 import base64
 import hashlib
+import asyncio
 from datetime import datetime
 
 # Import Mutagen
@@ -21,6 +22,10 @@ from mutagen.id3 import TALB, TCOP, TDRC, TIT2, TPE1, TRCK, APIC, \
 
 from config import Config
 from bot.logger import LOGGER
+
+# --- TAMBAHKAN INI DI BAWAH IMPORT ---
+COVER_LOCKS = {}
+# -------------------------------------
 
 try:
     from bot.helpers.lyrics.manager import lyrics_manager
@@ -802,17 +807,21 @@ async def savePic(handle, metadata):
     # --- 2. Handler OGG VORBIS & OPUS (Spotify/Amazon SD) ---
     elif isinstance(handle, (OggVorbis, OggOpus)): 
         try:
-            pic = Picture()
-            pic.data = data
-            pic.mime = u"image/jpeg"
-            pic.type = 3 # 3 = Front Cover
-            pic.desc = u"Cover"
-            
-            # Encode gambar ke Base64 (Standard OGG Vorbis Comment)
-            # Wajib import base64 di paling atas file!
-            pic_data = pic.write()
-            encoded_data = base64.b64encode(pic_data).decode("ascii")
+            # Pindahkan logika berat ini ke fungsi sinkron internal
+            def _encode_ogg_pic(img_data):
+                pic = Picture()
+                pic.data = img_data
+                pic.mime = u"image/jpeg"
+                pic.type = 3 # 3 = Front Cover
+                pic.desc = u"Cover"
+                pic_data = pic.write()
+                return base64.b64encode(pic_data).decode("ascii")
+
+            # Lempar fungsi berat ke CPU Thread
+            import asyncio
+            encoded_data = await asyncio.to_thread(_encode_ogg_pic, data)
             handle["METADATA_BLOCK_PICTURE"] = [encoded_data]
+            
         except Exception as e:
             LOGGER.error(f"Gagal set cover art OGG: {e}")
 
@@ -902,8 +911,15 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
     temp_dir = meta.get('tempfolder', '.')
     cover_path = os.path.join(temp_dir, filename)
     
-    if not os.path.exists(cover_path):
-        await _download_cover_with_headers(url, cover_path, proxy=proxy)
+    # --- OPTIMASI: LOCK PER-FILE GAMBAR (ANTI DOWNLOAD GANDA) ---
+    if cover_path not in COVER_LOCKS:
+        COVER_LOCKS[cover_path] = asyncio.Lock()
+
+    async with COVER_LOCKS[cover_path]:
+        # Cek ulang setelah masuk antrean lock, siapa tahu sudah didownload oleh task sebelumnya
+        if not os.path.exists(cover_path) or os.path.getsize(cover_path) == 0:
+            await _download_cover_with_headers(url, cover_path, proxy=proxy)
+    # ------------------------------------------------------------
     
     if os.path.exists(cover_path) and os.path.getsize(cover_path) > 0:
         return cover_path
