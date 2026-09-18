@@ -200,15 +200,13 @@ async def start_services():
     logging.info("Main: Memuat Database Pengguna...")
     await bot_set.initialize_users()
     
-    # --- Blok sinkronisasi lama dihapus karena sudah diatasi JIT ---
-
-    # --- TAMBAHKAN BLOK INI ---
+    # --- [FIX] PERBAIKAN IMPORT utils KE ui_manager ---
     logging.info("Main: Memuat State Sinyal Batal dari Database...")
-    import bot.helpers.utils as utils
+    import bot.helpers.ui_manager as ui_manager
     try:
         saved_cancels = await database.load_all_cancels()
         if saved_cancels:
-            utils.GLOBAL_CANCEL_DICT.update(saved_cancels)
+            ui_manager.GLOBAL_CANCEL_DICT.update(saved_cancels)
             logging.info(f"Main: Berhasil memulihkan {len(saved_cancels)} sinyal batal dari memori.")
     except Exception as e:
         logging.warning(f"Main: Gagal memuat sinyal batal: {e}")
@@ -222,11 +220,9 @@ async def start_services():
     logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
     logging.info(f"------------------------------------------------")
 
-    # --- TAMBAHKAN BLOK INI TEPAT DI BAWAH AWAIT AIO.START() ---
+    # --- [FIX] PERBAIKAN IMPORT utils KE ui_manager ---
     logging.info("Main: Memuat State Radar UI dari Database...")
     try:
-        import bot.helpers.utils as utils
-        
         ui_states = await database.load_all_ui_states()
         logging.info(f"Main: Ditemukan {len(ui_states)} memori Radar UI di MongoDB.")
         
@@ -236,7 +232,7 @@ async def start_services():
             page = data['page']
             try:
                 # 1. Siapkan teks status kosong
-                g_text, g_markup = await utils.get_status_text(page=page)
+                g_text, g_markup = await ui_manager.get_status_text(page=page)
                 
                 # 2. BLIND EDIT (Paksa edit tanpa mengambil/membaca pesan dulu)
                 msg = None
@@ -256,8 +252,8 @@ async def start_services():
                 
                 # 3. Masukkan ke memori RAM
                 if msg:
-                    utils.GLOBAL_UI_MSG[chat_id] = msg
-                    utils.GLOBAL_UI_PAGES[chat_id] = page
+                    ui_manager.GLOBAL_UI_MSG[chat_id] = msg
+                    ui_manager.GLOBAL_UI_PAGES[chat_id] = page
                     restored_count += 1
                     logging.info(f"Main: Berhasil me-refresh Radar {msg_id} di chat {chat_id}.")
                     
@@ -276,8 +272,8 @@ async def start_services():
 
     asyncio.create_task(periodic_garbage_collector())
 
-    # --- MASUKKAN KODE SAKELAR MANDOR DI SINI ---
-    from bot.helpers.utils import dedicated_ui_worker
+    # --- [FIX] PERBAIKAN IMPORT utils KE ui_manager ---
+    from bot.helpers.ui_manager import dedicated_ui_worker
     asyncio.create_task(dedicated_ui_worker())
     logging.info("Main: Dedicated UI Worker (Daemon) berhasil dijalankan.")
     # --------------------------------------------
@@ -325,7 +321,7 @@ async def shutdown_all_services():
         logging.warning(f"Main: Peringatan saat mengatur penutupan Aria2: {e}")
     # ---------------------------------------------
 
-    # --- [FIX] PENAMBAHAN GRACEFUL SHUTDOWN CLOUD UPLOADER ---
+    # --- PENAMBAHAN GRACEFUL SHUTDOWN CLOUD UPLOADER ---
     try:
         from bot.modules.direct_uploader import close_upload_session
         tasks.append(close_upload_session())
