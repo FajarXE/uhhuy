@@ -11,8 +11,8 @@ ACTIVE_DOWNLOADS = {}
 _ARIA2_SESSION = None
 
 async def aria2_download(url, filepath, details=None):
-    # Import di dalam fungsi untuk menghindari circular import
-    from bot.helpers.utils import progress_message 
+    # --- [FIX] Import dari ui_manager untuk menghindari circular import ---
+    from bot.helpers.ui_manager import progress_message 
 
     # --- FIX: Ubah path menjadi Absolut agar daemon Aria2 tidak nyasar ---
     dir_path = os.path.abspath(os.path.dirname(filepath))
@@ -114,9 +114,9 @@ async def aria2_download(url, filepath, details=None):
         }
         
         while True:
-            # --- [FIX ZOMBIE TASK] CEK SINYAL BATAL GLOBAL ---
+            # --- [FIX ZOMBIE TASK] CEK SINYAL BATAL GLOBAL DARI UI_MANAGER ---
             if details and 'task_id' in details:
-                from bot.helpers.utils import GLOBAL_CANCEL_DICT
+                from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT
                 if details['task_id'] in GLOBAL_CANCEL_DICT:
                     await aria2_cancel(gid) # Hancurkan task di sisi server Aria2
                     LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
@@ -142,7 +142,7 @@ async def aria2_download(url, filepath, details=None):
                         await progress_message(completed_length, total_length, details)
                     else:
                         # Memompa detak jantung meski Aria2 nyangkut agar tidak dihapus sistem
-                        from bot.helpers.utils import GLOBAL_TASKS
+                        from bot.helpers.ui_manager import GLOBAL_TASKS
                         import time
                         task_id = details.get('task_id')
                         if task_id and task_id in GLOBAL_TASKS:
