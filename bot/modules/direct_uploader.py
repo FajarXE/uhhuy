@@ -27,12 +27,12 @@ class ProgressFileWrapper(io.IOBase):
         self.last_update = 0
 
     def read(self, size=-1):
-        # --- [TAMBAHAN: DETEKSI TOMBOL CANCEL] ---
-        from bot.helpers.utils import GLOBAL_CANCEL_DICT
+        # --- DETEKSI TOMBOL CANCEL ---
+        from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT
         if self.details and self.details.get('task_id') in GLOBAL_CANCEL_DICT:
             # Membunuh koneksi upload seketika jika tombol Cancel ditekan
             raise Exception("DIBATALKAN_PENGGUNA")
-        # -----------------------------------------
+        # -----------------------------
         
         chunk = self.file.read(size)
         if chunk:
@@ -41,7 +41,7 @@ class ProgressFileWrapper(io.IOBase):
             # Tembakkan radar progres setiap 1.5 detik agar Telegram tidak FloodWait
             if self.details and (now - self.last_update > 1.5 or self.bytes_read == self.total_size):
                 self.last_update = now
-                from bot.helpers.utils import progress_message
+                from bot.helpers.ui_manager import progress_message
                 
                 def schedule_progress(b_read, t_size, det):
                     asyncio.create_task(progress_message(b_read, t_size, det))
@@ -49,13 +49,13 @@ class ProgressFileWrapper(io.IOBase):
                 self.loop.call_soon_threadsafe(schedule_progress, self.bytes_read, self.total_size, self.details)
         return chunk
         
-    # --- [FIX UTAMA: ANTI CHUNKED TRANSFER UNTUK SERVER PHP/VIKINGFILE] ---
+    # --- ANTI CHUNKED TRANSFER UNTUK SERVER PHP/VIKINGFILE ---
     def tell(self):
         return self.file.tell()
         
     def seek(self, offset, whence=io.SEEK_SET):
         return self.file.seek(offset, whence)
-    # ----------------------------------------------------------------------
+    # ---------------------------------------------------------
     
     def close(self):
         self.file.close()
@@ -67,14 +67,8 @@ class ProgressFileWrapper(io.IOBase):
         # Penting agar AIOHTTP dapat mendeteksi ukuran Content-Length secara otomatis
         return self.file.fileno()
 
-class DirectUpload:
-    def __init__(self, listener=None, name=None, path=None):
-        self.name = name
-        self.path = path
-        self.listener = listener
-        self.user_dict = listener.user_dict if listener else {}
 
-# --- [FIX] MANAJER SESI GLOBAL UNTUK UPLOADER ---
+# --- MANAJER SESI GLOBAL UNTUK UPLOADER ---
 _GLOBAL_UPLOAD_SESSION = None
 
 def get_upload_session():
@@ -90,7 +84,16 @@ async def close_upload_session():
     global _GLOBAL_UPLOAD_SESSION
     if _GLOBAL_UPLOAD_SESSION and not _GLOBAL_UPLOAD_SESSION.closed:
         await _GLOBAL_UPLOAD_SESSION.close()
-# ------------------------------------------------
+        LOGGER.info("Cloud Uploader: Sesi aiohttp berhasil ditutup dengan aman.")
+# ------------------------------------------
+
+
+class DirectUpload:
+    def __init__(self, listener=None, name=None, path=None):
+        self.name = name
+        self.path = path
+        self.listener = listener
+        self.user_dict = listener.user_dict if listener else {}
 
     # ============================
     # GOFILE HANDLER (AIOHTTP)
@@ -116,7 +119,6 @@ async def close_upload_session():
                         res2 = await r2.json()
                         return res2['data']['rootFolder']
         except Exception as e:
-            from bot.logger import LOGGER
             LOGGER.error(f"Gofile Get Root Error: {e}")
         return None
 
@@ -131,7 +133,6 @@ async def close_upload_session():
         return None
 
     async def _upload_gofile_aiohttp(self, filepath, token, folder_id, details):
-        # MENGGUNAKAN FUNGSI ASINKRON BARU
         server = await self.gofile_get_server()
         url = f"https://{server}.gofile.io/uploadFile"
         
@@ -154,7 +155,6 @@ async def close_upload_session():
         except Exception as e:
             wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
-                from bot.logger import LOGGER
                 LOGGER.warning(f"Gofile Upload dibatalkan oleh pengguna: {filename}")
                 try:
                     from bot.helpers.message import edit_message
@@ -163,7 +163,6 @@ async def close_upload_session():
                 except: pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
-                from bot.logger import LOGGER
                 LOGGER.error(f"Gofile Upload Error: {e}")
         return None
 
@@ -179,7 +178,6 @@ async def close_upload_session():
                 if res.get('code') == 200: 
                     return res['data']['id']
         except Exception as e: 
-            from bot.logger import LOGGER
             LOGGER.error(f"Buzzheavier Get Root Error: {e}")
         return None
     
@@ -199,9 +197,8 @@ async def close_upload_session():
                 if res.get('code') == 200 or res.get('code') == 201: 
                     return res['data']['id']
                     
-                # --- KEMBALIKAN LOGIKA 409: FOLDER SUDAH ADA ---
+                # --- LOGIKA 409: FOLDER SUDAH ADA ---
                 elif res.get('code') == 409:
-                    import re
                     # Deteksi apakah sudah ada angka di belakang nama, misal "(1)"
                     match = re.search(r"\s\((\d+)\)$", name)
                     if match:
@@ -212,10 +209,9 @@ async def close_upload_session():
                         
                     # Coba buat ulang dengan nama baru
                     return await self.buzzheavier_create_folder_async(token, parent_id, new_name)
-                # -----------------------------------------------
+                # ------------------------------------
                     
         except Exception as e:
-            from bot.logger import LOGGER
             LOGGER.error(f"Buzzheavier Create Folder Error: {e}")
         return None
 
@@ -239,7 +235,6 @@ async def close_upload_session():
         except Exception as e:
             wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
-                from bot.logger import LOGGER
                 LOGGER.warning(f"Buzzheavier Upload dibatalkan oleh pengguna: {filename}")
                 try:
                     from bot.helpers.message import edit_message
@@ -248,7 +243,6 @@ async def close_upload_session():
                 except: pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
-                from bot.logger import LOGGER
                 LOGGER.error(f"Buzzheavier Upload Error: {e}")
         return None
 
@@ -256,7 +250,6 @@ async def close_upload_session():
     # VIKINGFILES HANDLER (AIOHTTP)
     # ============================
     async def _upload_viking_aiohttp(self, filepath, token, details):
-        # Ganti fungsi get_srv sinkron menjadi ini:
         srv = None
         try:
             session = get_upload_session()
@@ -282,13 +275,12 @@ async def close_upload_session():
                 raw_text = await resp.text()
                 wrapper.close()
                 
-                # --- [FIX PARSER & DIAGNOSTIK] ---
+                # --- PARSER & DIAGNOSTIK ---
                 try:
                     res = json.loads(raw_text)
                     if res.get('url'): return res['url']
                 except:
                     # re.DOTALL (re.S) agar bisa melacak JSON multi-baris di dalam HTML
-                    import re
                     match = re.search(r'(\{.*?\})', raw_text, re.DOTALL)
                     if match:
                         try:
@@ -299,7 +291,7 @@ async def close_upload_session():
                         
                 # Jika sampai di baris ini, berarti server Vikingfile memberikan pesan error!
                 LOGGER.error(f"Viking Response Mentah: {raw_text[:500]}")
-                # ---------------------------------
+                # ---------------------------
                         
         except Exception as e:
             wrapper.close()
