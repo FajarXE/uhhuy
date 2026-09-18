@@ -348,15 +348,16 @@ async def run_download_task(link: str, user: dict):
             user['bot_msg'] = await send_message(user, 'Mempersiapkan tugas...')
             
             # --- PUSATKAN PESAN STATUS ---
-            import bot.helpers.utils as utils
-            if chat_id in utils.GLOBAL_UI_MSG:
+            # [FIX] MENGGUNAKAN ui_manager ALIH-ALIH utils
+            import bot.helpers.ui_manager as ui_manager
+            
+            if chat_id in ui_manager.GLOBAL_UI_MSG:
                 try: 
-                    # --- [FIX GHOST PANEL] HAPUS BRUTAL VIA CLIENT ---
                     from bot.tgclient import aio
-                    await aio.delete_messages(chat_id, utils.GLOBAL_UI_MSG[chat_id].id)
+                    await aio.delete_messages(chat_id, ui_manager.GLOBAL_UI_MSG[chat_id].id)
                 except Exception: 
                     pass
-            utils.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
+            ui_manager.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
             
             # --- [SINKRONISASI KE MONGODB] ---
             from bot.helpers.database.mongo_async import database
@@ -367,11 +368,11 @@ async def run_download_task(link: str, user: dict):
             import time
             cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
             
-            if cancel_id in utils.GLOBAL_CANCEL_DICT:
+            if cancel_id in ui_manager.GLOBAL_CANCEL_DICT:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
             # --- DAFTARKAN KE PAPAN GLOBAL SECARA LANGSUNG ---
-            utils.GLOBAL_TASKS[cancel_id] = {
+            ui_manager.GLOBAL_TASKS[cancel_id] = {
                 'action': 'Processing',
                 'type': 'Task',
                 'title': link,
@@ -437,12 +438,10 @@ async def run_download_task(link: str, user: dict):
                     USER_DOWNLOAD_HISTORY[user['user_id']]['video'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['video'] if current_time - ts < Config.FREE_WAIT_TIME]
                     USER_DOWNLOAD_HISTORY[user['user_id']]['track'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['track'] if current_time - ts < Config.FREE_WAIT_TIME]
 
-                    # --- TAMBAHKAN PEMBERSIHAN KUNCI KOSONG DI SINI ---
                     # Periksa apakah seluruh daftar riwayat (album, playlist, dll) sudah kosong
                     is_history_empty = all(not history_list for history_list in USER_DOWNLOAD_HISTORY[user['user_id']].values())
                     if is_history_empty:
                         USER_DOWNLOAD_HISTORY.pop(user['user_id'], None)
-                    # --------------------------------------------------
                     
                     # 5. Cek aturan limitasi
                     if link_type == "artist":
@@ -512,14 +511,12 @@ async def run_download_task(link: str, user: dict):
             # -----------------------------------------------------------------------
                 
         except asyncio.CancelledError:
-            # HAPUS BARIS INI: from bot.logger import LOGGER
             LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan.")
             try: await edit_message(user['bot_msg'], "🛑 Tugas dibatalkan.")
             except: pass
             await asyncio.sleep(5) 
                 
         except Exception as e:
-            # HAPUS BARIS INI: from bot.logger import LOGGER
             import traceback
             error_str = str(e)
             is_handled_error = False
@@ -552,10 +549,11 @@ async def run_download_task(link: str, user: dict):
             else:
                  LOGGER.error(f"Error fatal di run_download_task: {e}\n{traceback.format_exc()}")
 
-            # --- [PERBAIKAN: MENAMBAHKAN TOMBOL KONTAK ADMIN UNTUK LIMIT] ---
             admin_markup = None
             if "vip access required" in error_str.lower() or "limit reached" in error_str.lower():
                 from config import Config
+                from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                from pyrogram.enums import ButtonStyle
                 admin_markup = InlineKeyboardMarkup([
                     [InlineKeyboardButton(Config.ADMIN_BTN_TEXT, url=Config.ADMIN_BTN_URL, style=ButtonStyle.PRIMARY)]
                 ])
@@ -566,31 +564,28 @@ async def run_download_task(link: str, user: dict):
                 else:
                     await edit_message(user['bot_msg'], error_message)
             except: pass 
-            # ----------------------------------------------------------------
                 
         finally:
-            import bot.helpers.utils as utils
             # Catatan: Pastikan fungsi cleanup ada di file/import Anda
             await cleanup(user)
 
             # --- TAMBAHKAN PEMBERSIHAN SEMAPHORE DI SINI ---
-            # Hapus kunci dari memori jika tidak ada lagi antrean yang mengunci
             current_sem = USER_SEMAPHORES.get(chat_id)
             if current_sem and not current_sem.locked():
                 USER_SEMAPHORES.pop(chat_id, None)
-            # -----------------------------------------------
             
             try:
                 if 'bot_msg' in user:
                     import hashlib
+                    import bot.helpers.ui_manager as ui_manager # <-- FIX IMPORT
                     final_task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
                     
                     # 1. HAPUS DARI PAPAN GLOBAL UTAMA
-                    utils.GLOBAL_TASKS.pop(final_task_id, None)
+                    ui_manager.GLOBAL_TASKS.pop(final_task_id, None)
 
                     # --- [FIX MEMORY LEAK] HAPUS DARI DAFTAR CANCEL ---
-                    if final_task_id in utils.GLOBAL_CANCEL_DICT:
-                        utils.GLOBAL_CANCEL_DICT.discard(final_task_id) # discard() aman, tidak akan error jika kosong
+                    if final_task_id in ui_manager.GLOBAL_CANCEL_DICT:
+                        ui_manager.GLOBAL_CANCEL_DICT.discard(final_task_id)
                         try:
                             # Hapus juga dari Database agar tidak menumpuk saat restart
                             from bot.helpers.database.mongo_async import database
@@ -599,26 +594,21 @@ async def run_download_task(link: str, user: dict):
                             LOGGER.debug(f"Gagal menghapus cancel ID dari DB: {db_err}")
                     # --------------------------------------------------
 
-                    # --- [PERBAIKAN ERROR TERTEMPA RADAR] ---
-                    # Keluarkan pesan ini dari memori Radar LEBIH AWAL jika tugas gagal,
-                    # agar pesan error tidak tertimpa oleh teks status Radar ("Tidak ada task...").
-                    current_radar = utils.GLOBAL_UI_MSG.get(user['chat_id'])
+                    current_radar = ui_manager.GLOBAL_UI_MSG.get(user['chat_id'])
                     if current_radar and current_radar.id == user['bot_msg'].id:
                         if not task_successful:
-                            utils.GLOBAL_UI_MSG.pop(user['chat_id'], None)
-                            utils.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
-                    # ----------------------------------------
+                            ui_manager.GLOBAL_UI_MSG.pop(user['chat_id'], None)
+                            ui_manager.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
                     
                     # Update radar terakhir kali untuk semua orang (Pesan error tidak ikut ter-update)
-                    for cid, m in list(utils.GLOBAL_UI_MSG.items()):
-                        c_page = utils.GLOBAL_UI_PAGES.get(cid, 1)
-                        g_text, g_markup = await utils.get_status_text(page=c_page)
+                    for cid, m in list(ui_manager.GLOBAL_UI_MSG.items()):
+                        c_page = ui_manager.GLOBAL_UI_PAGES.get(cid, 1)
+                        g_text, g_markup = await ui_manager.get_status_text(page=c_page)
                         try: await edit_message(m, g_text, g_markup, False)
                         except: pass
 
                     # --- [FIX GHOST PANEL] PASTIKAN PESAN TELEGRAM DIHAPUS ---
                     try: 
-                        # Hapus pesan otomatis HANYA JIKA prosesnya sukses 100%
                         if task_successful:
                             await user['bot_msg'].delete()
                     except: 
@@ -627,14 +617,11 @@ async def run_download_task(link: str, user: dict):
                     # Bersihkan sisa memori radar jika tugas sukses
                     if current_radar and current_radar.id == user['bot_msg'].id:
                         if task_successful:
-                            utils.GLOBAL_UI_MSG.pop(user['chat_id'], None)
-                            utils.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
+                            ui_manager.GLOBAL_UI_MSG.pop(user['chat_id'], None)
+                            ui_manager.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
                             
-                            # --- [HAPUS DARI MONGODB] ---
                             from bot.helpers.database.mongo_async import database
                             await database.remove_ui_state(user['chat_id'])
-                            # ----------------------------
-                    # ---------------------------------------------------------
             except Exception as e:
                 LOGGER.debug(f"Pembersihan akhir gagal (Non-Fatal): {e}")
 
