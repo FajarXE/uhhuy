@@ -1,4 +1,4 @@
-# [FILE BARU: bot/helpers/ui_manager.py]
+# [GANTI TOTAL ISI FILE: bot/helpers/ui_manager.py]
 
 import time
 import math
@@ -10,7 +10,6 @@ import hashlib
 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
-from pyrogram.errors import FloodWait, MessageNotModified
 
 from config import Config
 from bot.settings import bot_set
@@ -34,6 +33,7 @@ GLOBAL_STATE_LOCK = asyncio.Lock()
 async def get_status_text(page=1, limit=5):
     current_time = time.time()
     
+    # --- [FIX] AMANKAN PEMBACAAN DENGAN LOCK ---
     async with GLOBAL_STATE_LOCK:
         stale = []
         for k, v in list(GLOBAL_TASKS.items()):
@@ -47,6 +47,7 @@ async def get_status_text(page=1, limit=5):
             GLOBAL_TASKS.pop(k, None)
 
         tasks = list(GLOBAL_TASKS.values())
+    # -------------------------------------------
         
     if not tasks:
         return "💤 **There are no tasks currently running.**", None
@@ -113,6 +114,7 @@ async def get_status_text(page=1, limit=5):
 
     return text, InlineKeyboardMarkup(buttons)
 
+
 async def progress_message(done, total, details):
     if not details or not details.get('msg'): return
     
@@ -174,16 +176,24 @@ async def progress_message(done, total, details):
     if action.lower() == 'upload': speed_ul += speed
     elif action.lower() == 'download' and machine == 'Telegram API': speed_dl += speed
 
-    GLOBAL_TASKS[task_id] = {
-        'action': action, 'type': task_type, 'title': title, 'since': since_str,
-        'progress_bar': progress_bar, 'percentage': f"{percentage:.2f}%",
-        'processed_label': progress_label, 'processed': f"{done_str} of {total_str}",
-        'speed': speed_str, 'machine': machine, 'mode': dest_mode,
-        'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-        'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl,
-        'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0,
-        'timestamp': now
-    }
+    # --- [FIX] UPDATE DICTIONARY DALAM LOCK MEMORI ---
+    # Ini mencegah alokasi memori berulang kali dan mengatasi CPU Overhead
+    async with GLOBAL_STATE_LOCK:
+        if task_id not in GLOBAL_TASKS:
+            GLOBAL_TASKS[task_id] = {}
+            
+        GLOBAL_TASKS[task_id].update({
+            'action': action, 'type': task_type, 'title': title, 'since': since_str,
+            'progress_bar': progress_bar, 'percentage': f"{percentage:.2f}%",
+            'processed_label': progress_label, 'processed': f"{done_str} of {total_str}",
+            'speed': speed_str, 'machine': machine, 'mode': dest_mode,
+            'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+            'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl,
+            'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0,
+            'timestamp': now
+        })
+    # ------------------------------------------------
+
 
 async def dedicated_ui_worker():
     """ Mandor UI (Daemon) yang berputar di latar belakang """
