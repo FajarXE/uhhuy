@@ -77,89 +77,95 @@ async def aria2_download(url, filepath, details=None):
     }
     
     try:
-        async with aiohttp.ClientSession() as session:
-            # 1. Mengirim perintah ke Aria2
-            async with session.post(ARIA2_RPC_URL, json=payload_add) as resp:
+        # --- [FIX] GUNAKAN GLOBAL SESSION ARIA2 ---
+        global _ARIA2_SESSION
+        if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
+            _ARIA2_SESSION = aiohttp.ClientSession()
+        session = _ARIA2_SESSION
+        # ------------------------------------------
+
+        # 1. Mengirim perintah ke Aria2
+        async with session.post(ARIA2_RPC_URL, json=payload_add) as resp:
+            res = await resp.json()
+            if "error" in res:
+                LOGGER.error(f"Aria2 Add Error: {res['error']['message']}")
+                return False
+            
+            # Mendapatkan Task ID (GID) asli dari Aria2
+            gid = res["result"]
+            ACTIVE_DOWNLOADS[gid] = file_name
+            
+            # --- FIX: Sembunyikan log 'Memulai Unduhan' untuk file berakhiran angka (.0, .1) ---
+            if not file_name.split('.')[-1].isdigit():
+                LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
+            
+            # Menyiapkan data untuk UI Progress Bar
+            if details:
+                details['task_id'] = gid
+                details['title'] = file_name
+                details['type'] = 'Download'
+
+        # 2. Polling status unduhan secara Live
+        payload_status = {
+            "jsonrpc": "2.0",
+            "id": "bot_status",
+            "method": "aria2.tellStatus",
+            "params": [gid]
+        }
+        
+        while True:
+            # --- [FIX ZOMBIE TASK] CEK SINYAL BATAL GLOBAL ---
+            if details and 'task_id' in details:
+                from bot.helpers.utils import GLOBAL_CANCEL_DICT
+                if details['task_id'] in GLOBAL_CANCEL_DICT:
+                    await aria2_cancel(gid) # Hancurkan task di sisi server Aria2
+                    LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
+                    return False
+            # -------------------------------------------------
+
+            async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
                 res = await resp.json()
                 if "error" in res:
-                    LOGGER.error(f"Aria2 Add Error: {res['error']['message']}")
+                    ACTIVE_DOWNLOADS.pop(gid, None)
                     return False
+                    
+                status = res["result"]
+                state = status.get("status")
                 
-                # Mendapatkan Task ID (GID) asli dari Aria2
-                gid = res["result"]
-                ACTIVE_DOWNLOADS[gid] = file_name
+                # Ambil angka bytes untuk progress bar
+                total_length = int(status.get("totalLength", 0))
+                completed_length = int(status.get("completedLength", 0))
                 
-                # --- FIX: Sembunyikan log 'Memulai Unduhan' untuk file berakhiran angka (.0, .1) ---
-                if not file_name.split('.')[-1].isdigit():
-                    LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
-                
-                # Menyiapkan data untuk UI Progress Bar
+                # --- [FIX GHOST TASK] JANTUNG BUATAN ---
                 if details:
-                    details['task_id'] = gid
-                    details['title'] = file_name
-                    details['type'] = 'Download'
+                    if total_length > 0:
+                        await progress_message(completed_length, total_length, details)
+                    else:
+                        # Memompa detak jantung meski Aria2 nyangkut agar tidak dihapus sistem
+                        from bot.helpers.utils import GLOBAL_TASKS
+                        import time
+                        task_id = details.get('task_id')
+                        if task_id and task_id in GLOBAL_TASKS:
+                            GLOBAL_TASKS[task_id]['timestamp'] = time.time()
+                            GLOBAL_TASKS[task_id]['action'] = 'Connecting'
+                            GLOBAL_TASKS[task_id]['processed'] = 'Mengalokasikan file...'
+                # ----------------------------------------
+                
+                if state == "complete":
+                    ACTIVE_DOWNLOADS.pop(gid, None)
+                    # Sembunyikan log pecahan DASH (.0, .1) agar terminal tidak kotor/lag
+                    if not file_name.split('.')[-1].isdigit():
+                        LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
+                    return True
+                    
+                elif state in ["error", "removed"]:
+                    ACTIVE_DOWNLOADS.pop(gid, None)
+                    err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
+                    LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
+                    return False
+                    
+            await asyncio.sleep(2.0)
 
-            # 2. Polling status unduhan secara Live
-            payload_status = {
-                "jsonrpc": "2.0",
-                "id": "bot_status",
-                "method": "aria2.tellStatus",
-                "params": [gid]
-            }
-            
-            while True:
-                # --- [FIX ZOMBIE TASK] CEK SINYAL BATAL GLOBAL ---
-                if details and 'task_id' in details:
-                    from bot.helpers.utils import GLOBAL_CANCEL_DICT
-                    if details['task_id'] in GLOBAL_CANCEL_DICT:
-                        await aria2_cancel(gid) # Hancurkan task di sisi server Aria2
-                        LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
-                        return False
-                # -------------------------------------------------
-
-                async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
-                    res = await resp.json()
-                    if "error" in res:
-                        ACTIVE_DOWNLOADS.pop(gid, None)
-                        return False
-                        
-                    status = res["result"]
-                    state = status.get("status")
-                    
-                    # Ambil angka bytes untuk progress bar
-                    total_length = int(status.get("totalLength", 0))
-                    completed_length = int(status.get("completedLength", 0))
-                    
-                    # --- [FIX GHOST TASK] JANTUNG BUATAN ---
-                    if details:
-                        if total_length > 0:
-                            await progress_message(completed_length, total_length, details)
-                        else:
-                            # Memompa detak jantung meski Aria2 nyangkut agar tidak dihapus sistem
-                            from bot.helpers.utils import GLOBAL_TASKS
-                            import time
-                            task_id = details.get('task_id')
-                            if task_id and task_id in GLOBAL_TASKS:
-                                GLOBAL_TASKS[task_id]['timestamp'] = time.time()
-                                GLOBAL_TASKS[task_id]['action'] = 'Connecting'
-                                GLOBAL_TASKS[task_id]['processed'] = 'Mengalokasikan file...'
-                    # ----------------------------------------
-                    
-                    if state == "complete":
-                        ACTIVE_DOWNLOADS.pop(gid, None)
-                        # Sembunyikan log pecahan DASH (.0, .1) agar terminal tidak kotor/lag
-                        if not file_name.split('.')[-1].isdigit():
-                            LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
-                        return True
-                        
-                    elif state in ["error", "removed"]:
-                        ACTIVE_DOWNLOADS.pop(gid, None)
-                        err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
-                        LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
-                        return False
-                        
-                await asyncio.sleep(2.0)
- 
     except Exception as e:
         LOGGER.error(f"Aria2 RPC Exception: {e}")
         return False
@@ -219,26 +225,27 @@ async def aria2_purge_all():
         "params": []
     }
     try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            # Cari semua task yang sedang berjalan
-            async with session.post(ARIA2_RPC_URL, json=payload_active) as resp:
-                res = await resp.json()
-                if "result" in res:
-                    for task in res["result"]:
-                        gid = task.get("gid")
-                        if gid:
-                            # Bunuh paksa task yang nyangkut
-                            kill_payload = {
-                                "jsonrpc": "2.0",
-                                "id": "bot_kill",
-                                "method": "aria2.forceRemove",
-                                "params": [gid]
-                            }
-                            await session.post(ARIA2_RPC_URL, json=kill_payload)
-                            
-            # Bersihkan cache memori bot kita
-            ACTIVE_DOWNLOADS.clear()
+        global _ARIA2_SESSION
+        if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
+            _ARIA2_SESSION = aiohttp.ClientSession()
+        session = _ARIA2_SESSION
+
+        # Cari semua task yang sedang berjalan
+        async with session.post(ARIA2_RPC_URL, json=payload_active) as resp:
+            res = await resp.json()
+            if "result" in res:
+                for task in res["result"]:
+                    gid = task.get("gid")
+                    if gid:
+                        kill_payload = {
+                            "jsonrpc": "2.0",
+                            "id": "bot_kill",
+                            "method": "aria2.forceRemove",
+                            "params": [gid]
+                        }
+                        await session.post(ARIA2_RPC_URL, json=kill_payload)
+                        
+        ACTIVE_DOWNLOADS.clear()
     except Exception:
         pass
 
