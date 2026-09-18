@@ -74,29 +74,47 @@ class DirectUpload:
         self.listener = listener
         self.user_dict = listener.user_dict if listener else {}
 
+# --- [FIX] MANAJER SESI GLOBAL UNTUK UPLOADER ---
+_GLOBAL_UPLOAD_SESSION = None
+
+def get_upload_session():
+    global _GLOBAL_UPLOAD_SESSION
+    if _GLOBAL_UPLOAD_SESSION is None or _GLOBAL_UPLOAD_SESSION.closed:
+        # limit=0 mematikan limitasi TCP bawaan aiohttp (100) 
+        # agar unggahan paralel file raksasa tidak mengalami bottleneck.
+        conn = aiohttp.TCPConnector(limit=0)
+        _GLOBAL_UPLOAD_SESSION = aiohttp.ClientSession(connector=conn)
+    return _GLOBAL_UPLOAD_SESSION
+
+async def close_upload_session():
+    global _GLOBAL_UPLOAD_SESSION
+    if _GLOBAL_UPLOAD_SESSION and not _GLOBAL_UPLOAD_SESSION.closed:
+        await _GLOBAL_UPLOAD_SESSION.close()
+# ------------------------------------------------
+
     # ============================
     # GOFILE HANDLER (AIOHTTP)
     # ============================
     async def gofile_get_server(self):
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get("https://api.gofile.io/servers", timeout=10) as r:
-                    res = await r.json()
-                    if res.get('status') == 'ok':
-                        return res['data']['servers'][0]['name']
+            session = get_upload_session()
+            async with session.get("https://api.gofile.io/servers", timeout=10) as r:
+                res = await r.json()
+                if res.get('status') == 'ok':
+                    return res['data']['servers'][0]['name']
         except: pass
         return "store1"
 
     async def gofile_get_root(self, token):
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"https://api.gofile.io/accounts/getid?token={token}", timeout=10) as r1:
-                    res1 = await r1.json()
-                    if res1.get('status') == 'ok':
-                        acc_id = res1['data']['id']
-                        async with session.get(f"https://api.gofile.io/accounts/{acc_id}?token={token}", timeout=10) as r2:
-                            res2 = await r2.json()
-                            return res2['data']['rootFolder']
+            session = get_upload_session()
+            async with session.get(f"https://api.gofile.io/accounts/getid?token={token}", timeout=10) as r1:
+                res1 = await r1.json()
+                if res1.get('status') == 'ok':
+                    acc_id = res1['data']['id']
+                    async with session.get(f"https://api.gofile.io/accounts/{acc_id}?token={token}", timeout=10) as r2:
+                        res2 = await r2.json()
+                        return res2['data']['rootFolder']
         except Exception as e:
             from bot.logger import LOGGER
             LOGGER.error(f"Gofile Get Root Error: {e}")
@@ -105,10 +123,10 @@ class DirectUpload:
     async def gofile_create_folder_async(self, token, parent_id, name):
         try:
             data = {'token': token, 'parentFolderId': parent_id, 'folderName': name}
-            async with aiohttp.ClientSession() as session:
-                async with session.post("https://api.gofile.io/contents/createFolder", data=data, timeout=15) as r:
-                    res = await r.json()
-                    if res.get('status') == 'ok': return res['data']
+            session = get_upload_session()
+            async with session.post("https://api.gofile.io/contents/createFolder", data=data, timeout=15) as r:
+                res = await r.json()
+                if res.get('status') == 'ok': return res['data']
         except: pass
         return None
 
@@ -127,12 +145,12 @@ class DirectUpload:
         data.add_field('file', wrapper, filename=filename)
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
-                    res = await resp.json()
-                    wrapper.close()
-                    if res.get('status') == 'ok':
-                        return res['data']['downloadPage']
+            session = get_upload_session()
+            async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+                res = await resp.json()
+                wrapper.close()
+                if res.get('status') == 'ok':
+                    return res['data']['downloadPage']
         except Exception as e:
             wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
@@ -155,11 +173,11 @@ class DirectUpload:
     async def buzzheavier_get_root(self, token):
         try:
             headers = {"Authorization": f"Bearer {token}"}
-            async with aiohttp.ClientSession() as session:
-                async with session.get("https://buzzheavier.com/api/fs", headers=headers, timeout=10) as r:
-                    res = await r.json()
-                    if res.get('code') == 200: 
-                        return res['data']['id']
+            session = get_upload_session()
+            async with session.get("https://buzzheavier.com/api/fs", headers=headers, timeout=10) as r:
+                res = await r.json()
+                if res.get('code') == 200: 
+                    return res['data']['id']
         except Exception as e: 
             from bot.logger import LOGGER
             LOGGER.error(f"Buzzheavier Get Root Error: {e}")
@@ -174,27 +192,27 @@ class DirectUpload:
             headers = {"Authorization": f"Bearer {token}"}
             data = {"name": name, "parentId": parent_id}
             
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=data, timeout=15) as r:
-                    res = await r.json()
+            session = get_upload_session()
+            async with session.post(url, headers=headers, json=data, timeout=15) as r:
+                res = await r.json()
+                
+                if res.get('code') == 200 or res.get('code') == 201: 
+                    return res['data']['id']
                     
-                    if res.get('code') == 200 or res.get('code') == 201: 
-                        return res['data']['id']
+                # --- KEMBALIKAN LOGIKA 409: FOLDER SUDAH ADA ---
+                elif res.get('code') == 409:
+                    import re
+                    # Deteksi apakah sudah ada angka di belakang nama, misal "(1)"
+                    match = re.search(r"\s\((\d+)\)$", name)
+                    if match:
+                        num = int(match.group(1)) + 1
+                        new_name = re.sub(r"\s\(\d+\)$", f" ({num})", name)
+                    else:
+                        new_name = f"{name} (1)"
                         
-                    # --- KEMBALIKAN LOGIKA 409: FOLDER SUDAH ADA ---
-                    elif res.get('code') == 409:
-                        import re
-                        # Deteksi apakah sudah ada angka di belakang nama, misal "(1)"
-                        match = re.search(r"\s\((\d+)\)$", name)
-                        if match:
-                            num = int(match.group(1)) + 1
-                            new_name = re.sub(r"\s\(\d+\)$", f" ({num})", name)
-                        else:
-                            new_name = f"{name} (1)"
-                        
-                        # Coba buat ulang dengan nama baru
-                        return await self.buzzheavier_create_folder_async(token, parent_id, new_name)
-                    # -----------------------------------------------
+                    # Coba buat ulang dengan nama baru
+                    return await self.buzzheavier_create_folder_async(token, parent_id, new_name)
+                # -----------------------------------------------
                     
         except Exception as e:
             from bot.logger import LOGGER
@@ -212,12 +230,12 @@ class DirectUpload:
         
         wrapper = ProgressFileWrapper(filepath, details)
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.put(url, headers=headers, data=wrapper, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
-                    res = await resp.json()
-                    wrapper.close()
-                    if res.get('code') == 201:
-                        return f"https://buzzheavier.com/{res['data']['id']}"
+            session = get_upload_session()
+            async with session.put(url, headers=headers, data=wrapper, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+                res = await resp.json()
+                wrapper.close()
+                if res.get('code') == 201:
+                    return f"https://buzzheavier.com/{res['data']['id']}"
         except Exception as e:
             wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
@@ -241,10 +259,10 @@ class DirectUpload:
         # Ganti fungsi get_srv sinkron menjadi ini:
         srv = None
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get("https://vikingfile.com/api/get-server", timeout=10) as r:
-                    res = await r.json()
-                    srv = res.get('server')
+            session = get_upload_session()
+            async with session.get("https://vikingfile.com/api/get-server", timeout=10) as r:
+                res = await r.json()
+                srv = res.get('server')
         except: pass
 
         if not srv: 
@@ -259,30 +277,30 @@ class DirectUpload:
         data.add_field('file', wrapper, filename=filename)
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(srv, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
-                    raw_text = await resp.text()
-                    wrapper.close()
-                    
-                    # --- [FIX PARSER & DIAGNOSTIK] ---
-                    try:
-                        res = json.loads(raw_text)
-                        if res.get('url'): return res['url']
-                    except:
-                        # re.DOTALL (re.S) agar bisa melacak JSON multi-baris di dalam HTML
-                        import re
-                        match = re.search(r'(\{.*?\})', raw_text, re.DOTALL)
-                        if match:
-                            try:
-                                res = json.loads(match.group(1))
-                                if res.get('url'): return res['url']
-                                else: LOGGER.warning(f"Viking Regex nemu JSON tapi tidak ada URL: {res}")
-                            except: pass
-                            
-                    # Jika sampai di baris ini, berarti server Vikingfile memberikan pesan error!
-                    LOGGER.error(f"Viking Response Mentah: {raw_text[:500]}")
-                    # ---------------------------------
-                            
+            session = get_upload_session()
+            async with session.post(srv, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+                raw_text = await resp.text()
+                wrapper.close()
+                
+                # --- [FIX PARSER & DIAGNOSTIK] ---
+                try:
+                    res = json.loads(raw_text)
+                    if res.get('url'): return res['url']
+                except:
+                    # re.DOTALL (re.S) agar bisa melacak JSON multi-baris di dalam HTML
+                    import re
+                    match = re.search(r'(\{.*?\})', raw_text, re.DOTALL)
+                    if match:
+                        try:
+                            res = json.loads(match.group(1))
+                            if res.get('url'): return res['url']
+                            else: LOGGER.warning(f"Viking Regex nemu JSON tapi tidak ada URL: {res}")
+                        except: pass
+                        
+                # Jika sampai di baris ini, berarti server Vikingfile memberikan pesan error!
+                LOGGER.error(f"Viking Response Mentah: {raw_text[:500]}")
+                # ---------------------------------
+                        
         except Exception as e:
             wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
