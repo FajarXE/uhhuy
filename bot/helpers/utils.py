@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/utils.py] - QUEUE REMOVED & ANTI-FLOODWAIT
+# [GANTI SELURUH ISI FILE: bot/helpers/utils.py]
 
 import os
 import math
@@ -9,6 +9,7 @@ import typing
 import requests
 import re
 import time 
+import aiohttp # <-- Tambahan import untuk exception handling
 
 from pathlib import Path
 from urllib.parse import quote
@@ -46,16 +47,20 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
             else:
                 LOGGER.warning(f"Aria2 attempt {attempt} gagal/dibatalkan...")
                 
-                # --- Bersihkan file korup sebelum retry ---
                 try:
                     if os.path.exists(path): os.remove(path)
                     if os.path.exists(f"{path}.aria2"): os.remove(f"{path}.aria2")
                 except Exception as e:
                     LOGGER.debug(f"Gagal menghapus file sisa Aria2 '{path}': {e}")
-                # ------------------------------------------
                 
+        # --- [FIX] PENANGANAN ERROR SPESIFIK DOWNLOAD ---
+        except asyncio.TimeoutError:
+            LOGGER.warning(f"Download Timeout pada percobaan {attempt}")
+        except aiohttp.ClientError as e:
+            LOGGER.warning(f"Download Network Error pada percobaan {attempt}: {e}")
         except Exception as e:
-            LOGGER.error(f"Download gagal: {e}")
+            LOGGER.error(f"Download Error Umum: {e}")
+        # ------------------------------------------------
             
         if attempt == retries: 
             return f"Gagal mengunduh file setelah {retries} percobaan."
@@ -115,7 +120,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
     from bot.settings import bot_set
     from .utils import get_readable_file_size, get_readable_time
     
-    # --- [FIX] AMBIL STATE DARI UI_MANAGER ---
     from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS, GLOBAL_STATE_LOCK
 
     sem = asyncio.Semaphore(limit)
@@ -143,9 +147,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                     if hasattr(task, 'close'): task.close()
                     return None
                 
-                # --- [FIX ZOMBIE TRACK] BATAS WAKTU 10 MENIT PER LAGU ---
                 res = await asyncio.wait_for(task, timeout=600.0)
-                # --------------------------------------------------------
                 
         except asyncio.TimeoutError:
             from bot.logger import LOGGER
@@ -221,7 +223,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                         'timestamp': time.time()
                     }
                 
-                # Loop jeda 1 detik
                 for _ in range(10): 
                     if not is_running or batch_id in ui_module.GLOBAL_CANCEL_DICT:
                         break
@@ -496,35 +497,49 @@ def get_readable_file_size(size_in_bytes) -> str:
         size_in_bytes /= 1024.0
     return f"{size_in_bytes:.2f} YB"
 
-
+# --- [FIX] PERBAIKAN FUNGSI CLEANUP DENGAN JEDA OS ---
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
+        import time
+        time.sleep(0.5) # Jeda kecil agar OS melepas handle file sebelum direktori dibabat
+        
         if metadata:
             try:
                 folder_path = metadata.get('folderpath')
                 if isinstance(folder_path, str) and os.path.isdir(folder_path): 
-                    shutil.rmtree(folder_path)
+                    shutil.rmtree(folder_path, ignore_errors=True)
                 elif isinstance(folder_path, list):
                     for i in folder_path: 
-                        if os.path.exists(i): os.remove(i)
+                        if os.path.exists(i):
+                            try: os.remove(i)
+                            except OSError: pass
                 if metadata.get('zip_path'):
                     zip_files = metadata['zip_path']
                     if isinstance(zip_files, str): zip_files = [zip_files]
                     for zp in zip_files: 
-                        if os.path.exists(zp): os.remove(zp)
+                        if os.path.exists(zp):
+                            try: os.remove(zp)
+                            except OSError: pass
             except Exception as e: 
                 from bot.logger import LOGGER
                 LOGGER.debug(f"Cleanup metadata error: {e}")
                 
         if user:
-            try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/")
-            except Exception as e: 
+            try: 
+                target_dir = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
+                if os.path.exists(target_dir):
+                    shutil.rmtree(target_dir, ignore_errors=True)
+            except OSError as e: 
                 from bot.logger import LOGGER
-                LOGGER.debug(f"Cleanup user dir error: {e}")
+                LOGGER.debug(f"Cleanup user dir OSError: {e}")
                 
-            try: shutil.rmtree(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
-            except Exception as e: 
+            try: 
+                temp_dir = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+            except OSError as e: 
                 from bot.logger import LOGGER
-                LOGGER.debug(f"Cleanup user temp dir error: {e}")
+                LOGGER.debug(f"Cleanup user temp dir OSError: {e}")
 
     await asyncio.to_thread(_sync_cleanup)
+# ----------------------------------------------------
