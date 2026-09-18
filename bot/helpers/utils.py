@@ -29,112 +29,8 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
 
 BOT_START_TIME = time.time()
-
-GLOBAL_CANCEL_DICT = set()
-GLOBAL_TASKS = {}
-GLOBAL_UI_MSG = {}
-GLOBAL_UI_PAGES = {}
-GLOBAL_UI_LAST_UPDATE = {}
-
-# --- TAMBAHKAN LOCK INI ---
-GLOBAL_STATE_LOCK = asyncio.Lock()
-# --------------------------
-
-# PENGHAPUSAN: GLOBAL_TASK_LOCK dan GLOBAL_QUEUE_COUNT telah dihapus.
-
-async def get_status_text(page=1, limit=5):
-    current_time = time.time()
-    
-    # Kunci akses ke dictionary selama proses kalkulasi Papan Status!
-    async with GLOBAL_STATE_LOCK:
-        stale = []
-        for k, v in list(GLOBAL_TASKS.items()):
-            action = str(v.get('action', '')).lower()
-            time_limit = 900 if 'zipping' in action else 120 
-                
-            if current_time - v.get('timestamp', current_time) > time_limit:
-                stale.append(k)
-                
-        for k in stale:
-            GLOBAL_TASKS.pop(k, None)
-
-        tasks = list(GLOBAL_TASKS.values())
-    if not tasks:
-        return "💤 **There are no tasks currently running.**", None
-
-    total_tasks = len(tasks)
-    max_pages = (total_tasks + limit - 1) // limit
-    if page > max_pages: page = max_pages
-    if page < 1: page = 1
-
-    start_idx = (page - 1) * limit
-    end_idx = start_idx + limit
-    tasks_page = tasks[start_idx:end_idx]
-
-    # PENGHAPUSAN: Teks 📊 GLOBAL STATUS (Page 1/1) dihapus sesuai permintaan
-    text = ""
-    for i, t in enumerate(tasks_page, start=start_idx + 1):
-        text += f"**{i:02d}. {t['action']} {t['type']}**: `{t['title']}`\n"
-        text += f"**Since**: {t['since']}\n\n"
-        text += f"**Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
-        text += f"**{t['processed_label']}**: {t['processed']}\n"
-        text += f"**Current_Speed**: {t['speed']}\n"
-        text += f"**Machine_type**: {t['machine']}\n"
-        text += f"**Destination_mode**: {t['mode']}\n"
-        text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
-        text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
-        
-        if i < (start_idx + len(tasks_page)) and i < total_tasks:
-            text += "\n\n"
-
-    total_dl_raw = 0
-    total_ul_raw = 0
-    
-    for t in tasks:
-        total_dl_raw += t.get('speed_dl_raw', 0)
-        total_ul_raw += t.get('speed_ul_raw', 0)
-        
-    global_dl = f"{get_readable_file_size(total_dl_raw)}/s" if total_dl_raw > 0 else "0B/s"
-    global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
-        
-    try:
-        import psutil
-        cpu_usage = psutil.cpu_percent(interval=None)
-        ram_usage = psutil.virtual_memory().percent
-    except ImportError:
-        cpu_usage = 0.0
-        ram_usage = 0.0
-
-    import shutil
-    total, used, free = shutil.disk_usage(Config.DOWNLOAD_BASE_DIR)
-    free_storage = free / (1024 ** 3)
-
-    uptime_seconds = int(time.time() - BOT_START_TIME)
-    h, rem = divmod(uptime_seconds, 3600)
-    m, s = divmod(rem, 60)
-
-    text += f"\nCPU: {cpu_usage:.1f}% | FREE: {free_storage:.2f} GB\n"
-    text += f"RAM: {ram_usage:.1f}% | UPTIME: {h}h {m}m {s}s\n"
-    text += f"🔻 {global_dl} | 🔺 {global_ul}\n"
-
-    buttons = []
-    nav_row = []
-    if page > 1:
-        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"status_page_{page-1}", style=ButtonStyle.PRIMARY))
-    if page < max_pages:
-        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"status_page_{page+1}", style=ButtonStyle.PRIMARY))
-
-    if nav_row:
-        buttons.append(nav_row)
-
-    buttons.append([
-        InlineKeyboardButton("♻️ Refresh", callback_data=f"status_refresh_{page}", style=ButtonStyle.SUCCESS),
-        InlineKeyboardButton("❌ Close", callback_data="status_close", style=ButtonStyle.DANGER)
-    ])     
-
-    return text, InlineKeyboardMarkup(buttons)
-
 MAX_SIZE = 1.9 * 1024 * 1024 * 1024 
+
 
 async def download_file(url, path, retries=3, timeout=30, details=None):
     if not url: return "URL is empty"
@@ -150,13 +46,13 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
             else:
                 LOGGER.warning(f"Aria2 attempt {attempt} gagal/dibatalkan...")
                 
-                # --- TAMBAHKAN BLOK INI: Bersihkan file korup sebelum retry ---
+                # --- Bersihkan file korup sebelum retry ---
                 try:
                     if os.path.exists(path): os.remove(path)
                     if os.path.exists(f"{path}.aria2"): os.remove(f"{path}.aria2")
                 except Exception as e:
                     LOGGER.debug(f"Gagal menghapus file sisa Aria2 '{path}': {e}")
-                # --------------------------------------------------------------
+                # ------------------------------------------
                 
         except Exception as e:
             LOGGER.error(f"Download gagal: {e}")
@@ -167,6 +63,7 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
         await asyncio.sleep(2)
         
     return "Failed"
+
 
 async def format_string(text:str, data:dict, user=None):
     def safe_get(key):
@@ -209,13 +106,17 @@ async def format_string(text:str, data:dict, user=None):
         text = text.replace(R'{user}', user.get('name') or '').replace(R'{username}', user.get('user_name') or '')
     return text
 
+
 async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 20):
     import asyncio
     import hashlib
     import time
     import math
     from bot.settings import bot_set
-    from .utils import get_readable_file_size, get_readable_time, GLOBAL_CANCEL_DICT, GLOBAL_TASKS
+    from .utils import get_readable_file_size, get_readable_time
+    
+    # --- [FIX] AMBIL STATE DARI UI_MANAGER ---
+    from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS, GLOBAL_STATE_LOCK
 
     sem = asyncio.Semaphore(limit)
     total_tasks = len(tasks)
@@ -251,7 +152,6 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
             LOGGER.warning("⚠️ 1 Lagu dilewati karena macet (Timeout > 10 Menit). Playlist dilanjutkan.")
             res = None
         except Exception as e:
-            # --- [FIX ERROR EATER] JANGAN KEMBALIKAN NONE, KEMBALIKAN ERRORNYA ---
             res = e
             
         completed_tasks += 1
@@ -261,7 +161,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
 
     async def live_updater():
         from .aria2_helper import get_aria2_global_stat
-        import bot.helpers.utils as utils_module # <-- Cara aman memanggil variabel global
+        import bot.helpers.ui_manager as ui_module 
         from bot.logger import LOGGER
         
         try:
@@ -272,7 +172,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
             
         try:
             while is_running:
-                if batch_id in utils_module.GLOBAL_CANCEL_DICT:
+                if batch_id in ui_module.GLOBAL_CANCEL_DICT:
                     for t in pending_tasks:
                         if not t.done():
                             t.cancel()
@@ -299,8 +199,8 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                     action = update_details.get('action', 'Download').capitalize()
                     task_type = update_details.get('type', 'Task').capitalize()
 
-                async with GLOBAL_STATE_LOCK:
-                    utils_module.GLOBAL_TASKS[batch_id] = {
+                async with ui_module.GLOBAL_STATE_LOCK:
+                    ui_module.GLOBAL_TASKS[batch_id] = {
                         'action': action,
                         'type': task_type,
                         'title': title,
@@ -323,12 +223,12 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                 
                 # Loop jeda 1 detik
                 for _ in range(10): 
-                    if not is_running or batch_id in utils_module.GLOBAL_CANCEL_DICT:
+                    if not is_running or batch_id in ui_module.GLOBAL_CANCEL_DICT:
                         break
                     await asyncio.sleep(0.1)
                     
         except Exception as e:
-            LOGGER.error(f"Live Updater CRASH: {e}") # <-- Jika error, langsung teriak ke terminal
+            LOGGER.error(f"Live Updater CRASH: {e}") 
 
     updater_task = asyncio.create_task(live_updater())
     
@@ -345,14 +245,13 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
             try: await edit_message(update_details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
             except: pass
             
-        # --- TAMBAHKAN LOCK DI SINI SAAT MENGHAPUS (POP) ---
         async with GLOBAL_STATE_LOCK:
             GLOBAL_TASKS.pop(batch_id, None) 
-        # ---------------------------------------------------
         
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
         
     return results
+
 
 async def create_link(path, basepath):
     from pathlib import Path
@@ -365,7 +264,6 @@ async def create_link(path, basepath):
     if bot_set.link_options == 'RCLONE' or bot_set.link_options == 'Both':
         target_dest = f"{Config.RCLONE_DEST}/{path}"
         
-        # MENGGUNAKAN EXEC ALIH-ALIH SHELL
         task = await asyncio.create_subprocess_exec(
             "rclone", "link", "--config", "./rclone.conf", target_dest,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -379,6 +277,7 @@ async def create_link(path, basepath):
             index_link = Config.INDEX_LINK + '/' + quote(path)
 
     return rclone_link, index_link
+
 
 async def zip_handler(folderpath):
     loop = asyncio.get_running_loop()
@@ -398,12 +297,12 @@ async def zip_handler(folderpath):
 
     if user_mode == 'Telegram':
         LOGGER.info(f"[ZIP] Mode Telegram: Menggunakan Split Zip (.zip, .part2.zip)")
-        # [FIX] Ganti ProcessPoolExecutor yang berat dengan asyncio.to_thread (Thread Pool yang efisien)
         return await asyncio.to_thread(split_zip_folder, folderpath)
     else:
         LOGGER.info(f"[ZIP] Mode {user_mode}: Menggunakan System Zip (Single File Utuh)")
         zip_file = await create_zip_system(folderpath)
         return zip_file
+
 
 async def create_zip_system(folderpath):
     zip_path = f"{folderpath}.zip"
@@ -419,10 +318,10 @@ async def create_zip_system(folderpath):
         await process.communicate()
         if process.returncode == 0: return zip_path
         else:
-            # [FIX] Pindahkan fallback zip_folder ke Thread
             return await asyncio.to_thread(zip_folder, folderpath)
     except:
         return await asyncio.to_thread(zip_folder, folderpath)
+
 
 def split_zip_folder(folderpath) -> list:
     zip_paths = []
@@ -438,7 +337,6 @@ def split_zip_folder(folderpath) -> list:
                 zipf.write(file_path, arcname)
         return zip_path
 
-    # [FIX] Menggunakan os.scandir untuk traversal super cepat (Single Stat Call)
     def scan_dir_recursive(path):
         for entry in os.scandir(path):
             if entry.is_dir(follow_symlinks=False):
@@ -448,7 +346,6 @@ def split_zip_folder(folderpath) -> list:
 
     for entry in scan_dir_recursive(folderpath):
         file_path = entry.path
-        # Langsung tarik atribut ukuran dari cache OS (Tanpa getsize tambahan)
         file_size = entry.stat().st_size
         arcname = os.path.relpath(file_path, folderpath)
 
@@ -466,6 +363,7 @@ def split_zip_folder(folderpath) -> list:
 
     return zip_paths
 
+
 def zip_folder(folderpath) -> str:
     zip_path = f"{folderpath}.zip"
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED, allowZip64=True) as zipf:
@@ -480,6 +378,7 @@ def zip_folder(folderpath) -> str:
             zipf.write(entry.path, os.path.relpath(entry.path, folderpath))
     return zip_path
 
+
 async def move_sorted_playlist(metadata, user) -> str:
     def _sync_move():
         source_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{metadata['provider']}"
@@ -491,6 +390,7 @@ async def move_sorted_playlist(metadata, user) -> str:
         return destination_folder
 
     return await asyncio.to_thread(_sync_move)
+
 
 def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, bool]:
     raw_id = users.get("user_id")
@@ -514,6 +414,7 @@ def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, boo
     poster = check("art_poster")
 
     return (pl_zip, al_zip, ar_zip, poster)
+
 
 async def post_art_poster(user:dict, meta:dict):
     photo = meta.get('cover')
@@ -545,6 +446,7 @@ async def post_art_poster(user:dict, meta:dict):
         return msg
     return None
 
+
 async def create_simple_text(meta, user):
     name = meta.get('title', 'N/A')
     type_ = meta.get('type', 'N/A').title()
@@ -552,14 +454,17 @@ async def create_simple_text(meta, user):
     quality = meta.get('quality', 'N/A')
     return f"NAME : {name}\nTYPE : {type_}\nPROVIDER : {provider}\nQUALITY : {quality}"
 
+
 async def edit_art_poster(metadata, user, r_link, i_link, caption):
     markup = links_button(r_link, i_link)
     await edit_message(metadata['poster_msg'], caption, markup)
+
 
 async def post_simple_message(user, meta, r_link=None, i_link=None):
     caption = await create_simple_text(meta, user)
     markup = links_button(r_link, i_link)
     await send_message(user, caption, markup=markup)
+
 
 def get_readable_time(seconds: int) -> str:
     count = 0
@@ -581,6 +486,7 @@ def get_readable_time(seconds: int) -> str:
     ping_time += ":".join(time_list)
     return ping_time if ping_time else "0s"
 
+
 def get_readable_file_size(size_in_bytes) -> str:
     if not size_in_bytes:
         return "0B"
@@ -590,173 +496,6 @@ def get_readable_file_size(size_in_bytes) -> str:
         size_in_bytes /= 1024.0
     return f"{size_in_bytes:.2f} YB"
 
-async def progress_message(done, total, details):
-    if not details or not details.get('msg'):
-        return
-    import time
-    import math
-    import random
-    now = time.time()
-    
-    # Jeda internal kalkulasi agar tidak boros CPU
-    if 'last_updated' in details:
-        delay = 1.0  # Cukup 1 detik karena UI sudah dihandle Worker
-        if now - details['last_updated'] < delay and done < total:
-            return
-    details['last_updated'] = now
-
-    if 'start_time' not in details:
-        details['start_time'] = now
-        
-    diff = now - details['start_time']
-    if diff < 1: diff = 1 
-        
-    speed = done / diff
-    percentage = (done / total) * 100 if total > 0 else 0
-    
-    filled_blocks = math.floor((percentage / 100) * 12)
-    empty_blocks = 12 - filled_blocks
-    progress_bar = "■" * filled_blocks + "□" * empty_blocks
-    
-    from bot.helpers.utils import get_readable_file_size, get_readable_time
-    if total > 1000:
-        done_str = get_readable_file_size(done)
-        total_str = get_readable_file_size(total)
-        speed_str = f"{get_readable_file_size(speed)}/s"
-        progress_label = "Processed_bytes"
-    else: 
-        done_str = str(done)
-        total_str = str(total)
-        speed_str = "0B/s"
-        progress_label = "Processed_tasks"
-        
-    since_str = get_readable_time(int(diff))
-    
-    title = details.get('title', 'Unknown File')
-    action = details.get('action', 'Download').capitalize()
-    task_type = details.get('type', 'Task').capitalize()
-    
-    # --- [FIX TEKS KEMBAR] ---
-    if task_type.lower() == action.lower() or task_type == 'Download':
-        task_type = 'Track'
-    # -------------------------
-    
-    if details and details.get('msg'):
-        import hashlib
-        task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16]
-    else:
-        task_id = details.get('task_id', 'unknown')
-    
-    from bot.settings import bot_set
-    try:
-        user_id = details['msg'].chat.id
-        dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode)
-    except:
-        dest_mode = bot_set.upload_mode
-        
-    from .aria2_helper import get_aria2_global_stat
-    try:
-        stats = await get_aria2_global_stat()
-        speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
-        speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-    except:
-        speed_dl = 0
-        speed_ul = 0
-
-    machine = details.get('machine', 'Aria2c 1.37.0')
-
-    if action.lower() == 'upload':
-        speed_ul += speed
-    elif action.lower() == 'download' and machine == 'Telegram API':
-        speed_dl += speed
-
-    from bot.helpers.utils import GLOBAL_TASKS
-    GLOBAL_TASKS[task_id] = {
-        'action': action,
-        'type': task_type,
-        'title': title,
-        'since': since_str,
-        'progress_bar': progress_bar,
-        'percentage': f"{percentage:.2f}%",
-        'processed_label': progress_label,
-        'processed': f"{done_str} of {total_str}",
-        'speed': speed_str,
-        'machine': machine,
-        'mode': dest_mode,
-        'cancel_id': task_id,
-        'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-        'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-        'speed_dl_raw': speed_dl,
-        'speed_ul_raw': speed_ul,
-        'user_id': details['msg'].chat.id if details and details.get('msg') else 0,
-        'timestamp': now
-    }
-    
-    from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
-    try: 
-        targets = {}
-        if details and details.get('msg'):
-            targets[details['msg'].chat.id] = details['msg']
-        
-        if GLOBAL_UI_MSG:
-            for cid, m in list(GLOBAL_UI_MSG.items()): 
-                targets[cid] = m
-                
-        from bot.helpers.message import edit_message
-        
-        for cid, m in targets.items():
-            msg_id = m.id
-            # Rem Per-Pesan: Blokir update dengan jeda acak
-            delay_ui = 10.0 + random.uniform(0, 1.0)
-            if msg_id in GLOBAL_UI_LAST_UPDATE and (now - GLOBAL_UI_LAST_UPDATE[msg_id] < delay_ui) and done < total:
-                continue
-                
-            GLOBAL_UI_LAST_UPDATE[msg_id] = now
-            current_page = GLOBAL_UI_PAGES.get(cid, 1) 
-            g_text, g_markup = await get_status_text(page=current_page)
-            
-            try: 
-                await edit_message(m, g_text, g_markup, False)
-                # --- [ANTI-FLOODWAIT] JEDA ANTAR CHAT ---
-                await asyncio.sleep(0.15)
-            except: 
-                pass
-    except FloodWait: pass
-    except MessageNotModified: pass
-    except Exception: pass
-
-# --- TAMBAHKAN FUNGSI DEDICATED WORKER INI ---
-async def dedicated_ui_worker():
-    """
-    Mandor UI (Daemon) yang berputar di latar belakang setiap 8 detik.
-    Tugasnya murni hanya memperbarui Papan Status ke Telegram secara rapi
-    agar tidak terjadi bentrokan API (Anti-FloodWait).
-    """
-    import asyncio
-    from bot.helpers.message import edit_message
-    from bot.logger import LOGGER
-
-    while True:
-        await asyncio.sleep(2.5)
-
-        if not GLOBAL_UI_MSG:
-            continue  # Jika tidak ada yang buka Papan Status, tidur lagi
-
-        # Ambil salinan agar dictionary aman saat diloop
-        targets = list(GLOBAL_UI_MSG.items()) 
-        
-        for chat_id, msg in targets:
-            try:
-                page = GLOBAL_UI_PAGES.get(chat_id, 1)
-                g_text, g_markup = await get_status_text(page=page)
-                
-                await edit_message(msg, g_text, g_markup, antiflood=False)
-                
-                # Rem presisi agar Telegram tidak mengamuk (Limit 30 msg/detik)
-                await asyncio.sleep(0.15)
-            except Exception:
-                pass
-# ---------------------------------------------
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
