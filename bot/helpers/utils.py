@@ -1,4 +1,4 @@
-# [GANTI SELURUH ISI FILE: bot/helpers/utils.py]
+# [FILE: bot/helpers/utils.py]
 
 import os
 import math
@@ -9,7 +9,7 @@ import typing
 import requests
 import re
 import time 
-import aiohttp # <-- Tambahan import untuk exception handling
+import aiohttp 
 
 from pathlib import Path
 from urllib.parse import quote
@@ -53,14 +53,12 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
                 except Exception as e:
                     LOGGER.debug(f"Gagal menghapus file sisa Aria2 '{path}': {e}")
                 
-        # --- [FIX] PENANGANAN ERROR SPESIFIK DOWNLOAD ---
         except asyncio.TimeoutError:
             LOGGER.warning(f"Download Timeout pada percobaan {attempt}")
         except aiohttp.ClientError as e:
             LOGGER.warning(f"Download Network Error pada percobaan {attempt}: {e}")
         except Exception as e:
             LOGGER.error(f"Download Error Umum: {e}")
-        # ------------------------------------------------
             
         if attempt == retries: 
             return f"Gagal mengunduh file setelah {retries} percobaan."
@@ -136,21 +134,16 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
     
     async def run_with_sem(task):
         nonlocal completed_tasks
-        
         if batch_id in GLOBAL_CANCEL_DICT:
             if hasattr(task, 'close'): task.close() 
             return None
-            
         try:
             async with sem:
                 if batch_id in GLOBAL_CANCEL_DICT:
                     if hasattr(task, 'close'): task.close()
                     return None
-                
                 res = await asyncio.wait_for(task, timeout=600.0)
-                
         except asyncio.TimeoutError:
-            from bot.logger import LOGGER
             LOGGER.warning("⚠️ 1 Lagu dilewati karena macet (Timeout > 10 Menit). Playlist dilanjutkan.")
             res = None
         except Exception as e:
@@ -203,24 +196,13 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
 
                 async with ui_module.GLOBAL_STATE_LOCK:
                     ui_module.GLOBAL_TASKS[batch_id] = {
-                        'action': action,
-                        'type': task_type,
-                        'title': title,
-                        'since': since_str,
-                        'progress_bar': progress_bar,
-                        'percentage': f"{percentage:.2f}%",
-                        'processed_label': "Processed_tasks",
-                        'processed': f"{completed_tasks} of {total_tasks}",
-                        'speed': speed_str,
-                        'machine': "Aria2c 1.37.0",
-                        'mode': dest_mode,
-                        'cancel_id': batch_id,
-                        'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-                        'ul_speed': f"{get_readable_file_size(speed_ul)}/s",
-                        'speed_dl_raw': speed_dl, 
-                        'speed_ul_raw': speed_ul, 
-                        'user_id': user_id,
-                        'timestamp': time.time()
+                        'action': action, 'type': task_type, 'title': title, 'since': since_str,
+                        'progress_bar': progress_bar, 'percentage': f"{percentage:.2f}%",
+                        'processed_label': "Processed_tasks", 'processed': f"{completed_tasks} of {total_tasks}",
+                        'speed': speed_str, 'machine': "Aria2c 1.37.0", 'mode': dest_mode,
+                        'cancel_id': batch_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
+                        'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl, 
+                        'speed_ul_raw': speed_ul, 'user_id': user_id, 'timestamp': time.time()
                     }
                 
                 for _ in range(10): 
@@ -280,8 +262,8 @@ async def create_link(path, basepath):
     return rclone_link, index_link
 
 
+# --- [FIX] OPTIMASI NATIVE SYSTEM ZIP UNTUK SPLIT ---
 async def zip_handler(folderpath):
-    loop = asyncio.get_running_loop()
     user_mode = bot_set.upload_mode
     try:
         parts = folderpath.split(os.sep)
@@ -297,12 +279,49 @@ async def zip_handler(folderpath):
     except: pass
 
     if user_mode == 'Telegram':
-        LOGGER.info(f"[ZIP] Mode Telegram: Menggunakan Split Zip (.zip, .part2.zip)")
-        return await asyncio.to_thread(split_zip_folder, folderpath)
+        LOGGER.info(f"[ZIP] Mode Telegram: Menggunakan Native OS Split Zip (1900MB)")
+        return await split_zip_system(folderpath)
     else:
         LOGGER.info(f"[ZIP] Mode {user_mode}: Menggunakan System Zip (Single File Utuh)")
-        zip_file = await create_zip_system(folderpath)
-        return zip_file
+        return await create_zip_system(folderpath)
+
+
+async def split_zip_system(folderpath):
+    zip_path = f"{folderpath}.zip"
+    base_name = os.path.basename(folderpath)
+    parent_dir = os.path.dirname(folderpath)
+    
+    # Bersihkan sisa zip part lama jika folder diulang
+    for f in os.listdir(parent_dir):
+        if f == f"{base_name}.zip" or (f.startswith(f"{base_name}.z") and f.replace(f"{base_name}.z", "").isdigit()):
+            try: os.remove(os.path.join(parent_dir, f))
+            except: pass
+            
+    # Menggunakan Native OS Zip (Jauh lebih ringan untuk CPU/RAM)
+    # "-0" berarti Store (Tanpa Kompresi) agar super cepat karena file MP3/FLAC sudah terkompresi
+    cmd = ["zip", "-r", "-0", "-s", "1900m", zip_path, "."]
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd, cwd=folderpath,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        await process.communicate()
+        
+        if process.returncode == 0:
+            zip_files = []
+            for f in os.listdir(parent_dir):
+                if f == f"{base_name}.zip" or (f.startswith(f"{base_name}.z") and f.replace(f"{base_name}.z", "").isdigit()):
+                    zip_files.append(os.path.join(parent_dir, f))
+            
+            # Sort agar .z01, .z02, ..., .zip terkirim berurutan
+            zip_files.sort()
+            return zip_files
+        else:
+            LOGGER.warning("System split zip gagal, fallback ke Python Zipfile.")
+            return await asyncio.to_thread(split_zip_folder, folderpath)
+    except Exception as e:
+        LOGGER.error(f"Split zip system error: {e}")
+        return await asyncio.to_thread(split_zip_folder, folderpath)
 
 
 async def create_zip_system(folderpath):
@@ -325,6 +344,7 @@ async def create_zip_system(folderpath):
 
 
 def split_zip_folder(folderpath) -> list:
+    """Fallback Python-based Split Zip jika Native OS Zip tidak tersedia"""
     zip_paths = []
     part_num = 1
     current_size = 0
@@ -378,6 +398,7 @@ def zip_folder(folderpath) -> str:
         for entry in scan_dir_recursive(folderpath):
             zipf.write(entry.path, os.path.relpath(entry.path, folderpath))
     return zip_path
+# ----------------------------------------------------
 
 
 async def move_sorted_playlist(metadata, user) -> str:
@@ -395,13 +416,11 @@ async def move_sorted_playlist(metadata, user) -> str:
 
 def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, bool]:
     raw_id = users.get("user_id")
-    if not raw_id:
-        return (False, False, False, False)
+    if not raw_id: return (False, False, False, False)
         
     user_id = int(raw_id)
     mem_data = bot_set.user_data.get(user_id)
-    if not mem_data:
-        mem_data = bot_set.user_data.get(str(user_id), {})
+    if not mem_data: mem_data = bot_set.user_data.get(str(user_id), {})
 
     def check(key_base):
         if key_base.lower() in mem_data: return bool(mem_data[key_base.lower()])
@@ -409,12 +428,7 @@ def fetch_zip_settings(users: typing.Dict) -> typing.Tuple[bool, bool, bool, boo
         if hasattr(bot_set, key_base.lower()): return bool(getattr(bot_set, key_base.lower()))
         return False
 
-    pl_zip = check("playlist_zip")
-    al_zip = check("album_zip")
-    ar_zip = check("artist_zip")
-    poster = check("art_poster")
-
-    return (pl_zip, al_zip, ar_zip, poster)
+    return (check("playlist_zip"), check("album_zip"), check("artist_zip"), check("art_poster"))
 
 
 async def post_art_poster(user:dict, meta:dict):
@@ -431,11 +445,9 @@ async def post_art_poster(user:dict, meta:dict):
         if isinstance(photo, str) and photo.startswith('http'):
             temp_thumb = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-poster.jpg"
             err = await download_file(photo, temp_thumb)
-            if not err:
-                photo = temp_thumb 
+            if not err: photo = temp_thumb 
         
-        try:
-            msg = await send_message(user, photo, 'pic', caption)
+        try: msg = await send_message(user, photo, 'pic', caption)
         except Exception as e:
             LOGGER.error(f"Failed to send poster: {e}")
             msg = None
@@ -475,33 +487,29 @@ def get_readable_time(seconds: int) -> str:
     while count < 4:
         count += 1
         remainder, result = divmod(seconds, 60) if count < 3 else divmod(seconds, 24)
-        if seconds == 0 and remainder == 0:
-            break
+        if seconds == 0 and remainder == 0: break
         time_list.append(int(result))
         seconds = int(remainder)
     for x in range(len(time_list)):
         time_list[x] = str(time_list[x]) + time_suffix_list[x]
-    if len(time_list) == 4:
-        ping_time += time_list.pop() + ", "
+    if len(time_list) == 4: ping_time += time_list.pop() + ", "
     time_list.reverse()
     ping_time += ":".join(time_list)
     return ping_time if ping_time else "0s"
 
 
 def get_readable_file_size(size_in_bytes) -> str:
-    if not size_in_bytes:
-        return "0B"
+    if not size_in_bytes: return "0B"
     for unit in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:
-        if size_in_bytes < 1024.0:
-            return f"{size_in_bytes:.2f} {unit}"
+        if size_in_bytes < 1024.0: return f"{size_in_bytes:.2f} {unit}"
         size_in_bytes /= 1024.0
     return f"{size_in_bytes:.2f} YB"
 
-# --- [FIX] PERBAIKAN FUNGSI CLEANUP DENGAN JEDA OS ---
+
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
     def _sync_cleanup():
         import time
-        time.sleep(0.5) # Jeda kecil agar OS melepas handle file sebelum direktori dibabat
+        time.sleep(0.5) 
         
         if metadata:
             try:
@@ -527,19 +535,16 @@ async def cleanup(user=None, metadata=None, user_dict: dict=None):
         if user:
             try: 
                 target_dir = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
-                if os.path.exists(target_dir):
-                    shutil.rmtree(target_dir, ignore_errors=True)
+                if os.path.exists(target_dir): shutil.rmtree(target_dir, ignore_errors=True)
             except OSError as e: 
                 from bot.logger import LOGGER
                 LOGGER.debug(f"Cleanup user dir OSError: {e}")
                 
             try: 
                 temp_dir = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir, ignore_errors=True)
+                if os.path.exists(temp_dir): shutil.rmtree(temp_dir, ignore_errors=True)
             except OSError as e: 
                 from bot.logger import LOGGER
                 LOGGER.debug(f"Cleanup user temp dir OSError: {e}")
 
     await asyncio.to_thread(_sync_cleanup)
-# ----------------------------------------------------
