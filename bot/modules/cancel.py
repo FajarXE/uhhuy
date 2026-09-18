@@ -5,7 +5,8 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ChatType
 from bot.helpers.aria2_helper import aria2_cancel, ACTIVE_DOWNLOADS
-from bot.helpers.utils import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
+# --- [FIX] Mengimpor dari ui_manager alih-alih utils ---
+from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
 from bot.settings import bot_set
 from bot.helpers.database.mongo_async import database # <-- [TAMBAHAN IMPORT]
 
@@ -54,13 +55,14 @@ async def force_unlock_handler(client: Client, message: Message):
         await message.reply("❌ **Akses Ditolak:** Hanya Admin yang bisa mereset sistem.")
         return
         
-    import bot.helpers.utils as utils
+    # --- [FIX] Membersihkan memori dari ui_manager ---
+    import bot.helpers.ui_manager as ui_manager
     
     # 1. Bersihkan sisa task hantu di Papan Global
-    utils.GLOBAL_TASKS.clear()
+    ui_manager.GLOBAL_TASKS.clear()
     
     # 2. Bersihkan sinyal batal yang nyangkut
-    utils.GLOBAL_CANCEL_DICT.clear()
+    ui_manager.GLOBAL_CANCEL_DICT.clear()
     await database.clear_all_cancels() # <-- [SINKRONISASI KE DATABASE]
     
     # 3. Bunuh paksa semua unduhan Aria2 yang nyangkut di latar belakang
