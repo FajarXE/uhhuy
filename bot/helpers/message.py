@@ -51,8 +51,12 @@ async def check_user(uid=None, msg=None, restricted=False) -> bool:
         bot_set.user_data[actual_uid] = user_db_data or {}
         
         if user_db_data:
-            from .utils import sync_single_user_managers 
+            # --- [FIX ERROR] ---
+            # Hapus baris 'from .utils import sync_single_user_managers'
+            # Karena fungsinya sudah ada di file ini sendiri, kita bisa langsung memanggilnya
+            import asyncio
             asyncio.create_task(sync_single_user_managers(actual_uid, user_db_data))
+            # -------------------
 
     if restricted:
         if actual_uid in bot_set.admins: return True
