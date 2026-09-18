@@ -372,27 +372,28 @@ async def run_download_task(link: str, user: dict):
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
             # --- DAFTARKAN KE PAPAN GLOBAL SECARA LANGSUNG ---
-            ui_manager.GLOBAL_TASKS[cancel_id] = {
-                'action': 'Processing',
-                'type': 'Task',
-                'title': link,
-                'since': '', 
-                'progress_bar': '', 
-                'percentage': '',
-                'processed_label': 'Status',
-                'processed': 'Fetching metadata...',
-                'speed': '',
-                'machine': 'Initializing',
-                'mode': '',
-                'cancel_id': cancel_id,
-                'dl_speed': '0B/s',
-                'ul_speed': '0B/s',
-                'speed_dl_raw': 0,
-                'speed_ul_raw': 0,
-                'user_id': chat_id,
-                'timestamp': time.time(),
-                'is_queue': False
-            }
+            async with ui_manager.GLOBAL_STATE_LOCK:
+                ui_manager.GLOBAL_TASKS[cancel_id] = {
+                    'action': 'Processing',
+                    'type': 'Task',
+                    'title': link,
+                    'since': '', 
+                    'progress_bar': '', 
+                    'percentage': '',
+                    'processed_label': 'Status',
+                    'processed': 'Fetching metadata...',
+                    'speed': '',
+                    'machine': 'Initializing',
+                    'mode': '',
+                    'cancel_id': cancel_id,
+                    'dl_speed': '0B/s',
+                    'ul_speed': '0B/s',
+                    'speed_dl_raw': 0,
+                    'speed_ul_raw': 0,
+                    'user_id': chat_id,
+                    'timestamp': time.time(),
+                    'is_queue': False
+                }
 
             await edit_message(user['bot_msg'], '🚀 Starting task...')
             
@@ -581,7 +582,8 @@ async def run_download_task(link: str, user: dict):
                     final_task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
                     
                     # 1. HAPUS DARI PAPAN GLOBAL UTAMA
-                    ui_manager.GLOBAL_TASKS.pop(final_task_id, None)
+                    async with ui_manager.GLOBAL_STATE_LOCK:
+                        ui_manager.GLOBAL_TASKS.pop(final_task_id, None)
 
                     # --- [FIX MEMORY LEAK] HAPUS DARI DAFTAR CANCEL ---
                     if final_task_id in ui_manager.GLOBAL_CANCEL_DICT:
