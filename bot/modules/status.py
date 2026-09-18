@@ -5,8 +5,8 @@ from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, Message
 from pyrogram.errors import FloodWait, MessageNotModified
 
-# Mengimpor GLOBAL_UI_MSG dan GLOBAL_UI_PAGES untuk menyambungkan kabel radar Papan Global
-from bot.helpers.utils import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+# --- [FIX] Mengimpor dari ui_manager untuk menyambungkan kabel radar Papan Global ---
+from bot.helpers.ui_manager import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
 from bot.logger import LOGGER
 from bot.helpers.database.mongo_async import database # <-- [TAMBAHAN IMPORT MONGODB]
 
