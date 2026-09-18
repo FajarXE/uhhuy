@@ -225,8 +225,10 @@ async def set_metadata(metadata:dict, user_id: int = None):
         ext = os.path.splitext(path)[1].lower().strip()
         h = None
         
+        # --- [FIX] STRICT EXTENSION VALIDATION ---
+        # Untuk mencegah korupsi file akibat spoofed extension 
+        # (misal file aslinya M4A tapi dikasih nama .mp3 dari penyedia sumber)
         try:
-            # Bypass deteksi otomatis File(), langsung eksekusi berdasarkan ekstensi (Jauh lebih cepat!)
             if ext == '.flac': 
                 h = FLAC(path)
             elif ext in ['.m4a', '.mp4', '.m4b']: 
@@ -240,14 +242,13 @@ async def set_metadata(metadata:dict, user_id: int = None):
             elif ext == '.wav': 
                 h = WAVE(path)
             else:
-                # Fallback jika ekstensinya aneh/tidak diketahui
-                h = File(path)
-        except Exception:
-            # Jika gagal (misal header sedikit berantakan), panggil si detektif sebagai upaya terakhir
-            try:
-                h = File(path)
-            except Exception:
-                h = None
+                h = File(path) # Fallback untuk format lain
+        except Exception as e:
+            # Jika Mutagen gagal membaca secara spesifik, ini indikasi file corrupt/spoofed.
+            # JANGAN memanggil File(path) secara buta karena bisa memaksakan header yang salah.
+            from bot.logger import LOGGER
+            LOGGER.error(f"Format Audio Tidak Valid / Spoofed Extension pada {path}: {e}")
+            h = None
                 
         return h
 
