@@ -133,7 +133,7 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
 # FUNGSI PROGRESS TERPISAH (STANDALONE)
 # ==========================================================
 async def standalone_local_progress(current, total, p_state: dict, user, text, task_type):
-    from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
+    from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS, GLOBAL_STATE_LOCK
     from bot.helpers.utils import get_readable_file_size, get_readable_time
     from bot.helpers.aria2_helper import get_aria2_global_stat
     
@@ -183,18 +183,24 @@ async def standalone_local_progress(current, total, p_state: dict, user, text, t
         
         file_title = os.path.basename(text) if isinstance(text, str) else "Unknown File"
         
-        GLOBAL_TASKS[p_state['cancel_id']] = {
-            'action': 'Upload', 'type': task_type, 'title': file_title,
-            'since': get_readable_time(int(diff)), 'progress_bar': progress_bar,
-            'percentage': f"{percentage:.2f}%", 'processed_label': "Processed_bytes",
-            'processed': f"{get_readable_file_size(current)} of {get_readable_file_size(total)}",
-            'speed': f"{get_readable_file_size(speed)}/s", 'machine': "Telegram API",
-            'mode': dest_mode, 'cancel_id': p_state['cancel_id'],
-            'dl_speed': f"{get_readable_file_size(speed_dl)}/s", 'ul_speed': f"{get_readable_file_size(speed)}/s",
-            'speed_dl_raw': speed_dl, 'speed_ul_raw': speed,
-            'user_id': p_state['msg'].chat.id if p_state['msg'] else 0,
-            'timestamp': now
-        }
+        # --- [FIX] UPDATE DICTIONARY DALAM LOCK MEMORI ---
+        async with GLOBAL_STATE_LOCK:
+            if p_state['cancel_id'] not in GLOBAL_TASKS:
+                GLOBAL_TASKS[p_state['cancel_id']] = {}
+                
+            GLOBAL_TASKS[p_state['cancel_id']].update({
+                'action': 'Upload', 'type': task_type, 'title': file_title,
+                'since': get_readable_time(int(diff)), 'progress_bar': progress_bar,
+                'percentage': f"{percentage:.2f}%", 'processed_label': "Processed_bytes",
+                'processed': f"{get_readable_file_size(current)} of {get_readable_file_size(total)}",
+                'speed': f"{get_readable_file_size(speed)}/s", 'machine': "Telegram API",
+                'mode': dest_mode, 'cancel_id': p_state['cancel_id'],
+                'dl_speed': f"{get_readable_file_size(speed_dl)}/s", 'ul_speed': f"{get_readable_file_size(speed)}/s",
+                'speed_dl_raw': speed_dl, 'speed_ul_raw': speed,
+                'user_id': p_state['msg'].chat.id if p_state['msg'] else 0,
+                'timestamp': now
+            })
+        # -------------------------------------------------
         p_state['last_update_time'] = now
 
 # ==========================================================
