@@ -6,6 +6,7 @@ import aiofiles
 import base64
 import hashlib
 import asyncio
+import weakref
 from datetime import datetime
 
 # Import Mutagen
@@ -23,9 +24,8 @@ from mutagen.id3 import TALB, TCOP, TDRC, TIT2, TPE1, TRCK, APIC, \
 from config import Config
 from bot.logger import LOGGER
 
-# --- TAMBAHKAN INI DI BAWAH IMPORT ---
-COVER_LOCKS = {}
-# -------------------------------------
+# Ganti dictionary biasa dengan WeakValueDictionary
+COVER_LOCKS = weakref.WeakValueDictionary()
 
 try:
     from bot.helpers.lyrics.manager import lyrics_manager
@@ -911,15 +911,18 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
     temp_dir = meta.get('tempfolder', '.')
     cover_path = os.path.join(temp_dir, filename)
     
-    # --- OPTIMASI: LOCK PER-FILE GAMBAR (ANTI DOWNLOAD GANDA) ---
-    if cover_path not in COVER_LOCKS:
-        COVER_LOCKS[cover_path] = asyncio.Lock()
+    # --- [FIX] OPTIMASI: LOCK DENGAN WEAK-REFERENCE ---
+    # Lock akan otomatis lenyap dari RAM jika sudah tidak ada task yang memakainya
+    lock = COVER_LOCKS.get(cover_path)
+    if lock is None:
+        lock = asyncio.Lock()
+        COVER_LOCKS[cover_path] = lock
 
-    async with COVER_LOCKS[cover_path]:
+    async with lock:
         # Cek ulang setelah masuk antrean lock, siapa tahu sudah didownload oleh task sebelumnya
         if not os.path.exists(cover_path) or os.path.getsize(cover_path) == 0:
             await _download_cover_with_headers(url, cover_path, proxy=proxy)
-    # ------------------------------------------------------------
+    # --------------------------------------------------
     
     if os.path.exists(cover_path) and os.path.getsize(cover_path) > 0:
         return cover_path
