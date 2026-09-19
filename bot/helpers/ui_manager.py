@@ -198,9 +198,36 @@ async def progress_message(done, total, details):
 async def dedicated_ui_worker():
     """ Mandor UI (Daemon) yang berputar di latar belakang """
     from bot.helpers.message import edit_message
+    
+    last_memory_sweep = time.time()
 
     while True:
         await asyncio.sleep(2.5)
+        
+        now = time.time()
+        
+        # --- [GARBAGE COLLECTOR OTONOM] ---
+        # Membersihkan RAM setiap 60 detik tanpa menunggu interaksi pengguna
+        if now - last_memory_sweep > 60:
+            last_memory_sweep = now
+            async with GLOBAL_STATE_LOCK:
+                stale_tasks = []
+                for k, v in list(GLOBAL_TASKS.items()):
+                    action = str(v.get('action', '')).lower()
+                    time_limit = 900 if 'zipping' in action else 120 
+                    
+                    if now - v.get('timestamp', now) > time_limit:
+                        stale_tasks.append(k)
+                
+                for k in stale_tasks:
+                    GLOBAL_TASKS.pop(k, None)
+                    GLOBAL_CANCEL_DICT.discard(k) # Bersihkan juga ID Cancel agar RAM tidak bocor
+                
+                # Bersihkan memori paginasi (halaman) yang ditinggalkan
+                stale_pages = [cid for cid in GLOBAL_UI_PAGES if cid not in GLOBAL_UI_MSG]
+                for cid in stale_pages:
+                    GLOBAL_UI_PAGES.pop(cid, None)
+        # ----------------------------------
 
         if not GLOBAL_UI_MSG: continue
 
