@@ -5,6 +5,7 @@ import asyncio
 import aiohttp
 from aiohttp.client_exceptions import ClientError, ServerDisconnectedError
 from bot.logger import LOGGER
+from bot.helpers.proxy_manager import proxy_manager
 
 ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc"
 ACTIVE_DOWNLOADS = {}
@@ -68,6 +69,15 @@ async def aria2_download(url, filepath, details=None):
         if proxy_string.startswith("socks5h://"):
             proxy_string = proxy_string.replace("socks5h://", "socks5://", 1)
         options["all-proxy"] = proxy_string
+
+    # --- INTEGASI SENTRAL PROXY MANAGER ---
+    used_proxy = None
+    if details and 'proxy' in details and details['proxy']:
+        used_proxy = await proxy_manager.get_proxy(details['proxy'])
+        formatted_proxy = proxy_manager.format_for_aria2(used_proxy)
+        if formatted_proxy:
+            options["all-proxy"] = formatted_proxy
+    # --------------------------------------
     
     payload_add = {
         "jsonrpc": "2.0",
@@ -163,12 +173,16 @@ async def aria2_download(url, filepath, details=None):
                 ACTIVE_DOWNLOADS.pop(gid, None)
                 if not file_name.split('.')[-1].isdigit():
                     LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
+                if used_proxy:
+                    await proxy_manager.report_success(used_proxy) # <-- Lapor Sukses
                 return True
                 
             elif state in ["error", "removed"]:
                 ACTIVE_DOWNLOADS.pop(gid, None)
                 err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
                 LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
+                if used_proxy:
+                    await proxy_manager.report_fail(used_proxy) # <-- Lapor Gagal
                 return False
                 
             await asyncio.sleep(2.0)
