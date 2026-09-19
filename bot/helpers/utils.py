@@ -1,4 +1,4 @@
-# [FILE: bot/helpers/utils.py]
+# [GANTI TOTAL ISI FILE: bot/helpers/utils.py]
 
 import os
 import math
@@ -298,14 +298,27 @@ async def split_zip_system(folderpath):
             except: pass
             
     # Menggunakan Native OS Zip (Jauh lebih ringan untuk CPU/RAM)
-    # "-0" berarti Store (Tanpa Kompresi) agar super cepat karena file MP3/FLAC sudah terkompresi
     cmd = ["zip", "-r", "-0", "-s", "1900m", zip_path, "."]
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd, cwd=folderpath,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        await process.communicate()
+        
+        # --- [PERBAIKAN: STREAM CONSUMER] ---
+        # Membaca pipe secara asinkron lalu membuangnya untuk mencegah Buffer Penuh & Deadlock
+        async def consume_stream(stream):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+
+        await asyncio.gather(
+            consume_stream(process.stdout),
+            consume_stream(process.stderr),
+            process.wait()
+        )
+        # ------------------------------------
         
         if process.returncode == 0:
             zip_files = []
@@ -335,7 +348,21 @@ async def create_zip_system(folderpath):
             *cmd, cwd=folderpath,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        await process.communicate()
+        
+        # --- [PERBAIKAN: STREAM CONSUMER] ---
+        async def consume_stream(stream):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+
+        await asyncio.gather(
+            consume_stream(process.stdout),
+            consume_stream(process.stderr),
+            process.wait()
+        )
+        # ------------------------------------
+        
         if process.returncode == 0: return zip_path
         else:
             return await asyncio.to_thread(zip_folder, folderpath)
