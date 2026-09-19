@@ -197,6 +197,9 @@ async def start_services():
     if deezer_manager and deezer_manager.clients: bot_set.deezer = True 
     if beatport_manager and beatport_manager.clients: bot_set.beatport = True 
 
+    logging.info("Main: Menyiapkan TTL Index MongoDB untuk manajemen memori...")
+    await database.setup_ttl_indexes()
+
     logging.info("Main: Memuat Database Pengguna...")
     await bot_set.initialize_users()
     
