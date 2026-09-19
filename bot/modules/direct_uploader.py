@@ -11,6 +11,7 @@ import aiohttp
 from urllib.parse import quote
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from aiohttp.client_exceptions import ServerDisconnectedError, ClientConnectorError
 from bot.logger import LOGGER
 
 class ProgressFileWrapper(io.IOBase):
@@ -71,12 +72,18 @@ class ProgressFileWrapper(io.IOBase):
 # --- MANAJER SESI GLOBAL UNTUK UPLOADER ---
 _GLOBAL_UPLOAD_SESSION = None
 
-def get_upload_session():
+def get_upload_session(force_refresh=False):
     global _GLOBAL_UPLOAD_SESSION
+    if force_refresh:
+        if _GLOBAL_UPLOAD_SESSION and not _GLOBAL_UPLOAD_SESSION.closed:
+            # Jadwalkan penutupan di background agar tidak membekukan IO
+            asyncio.create_task(_GLOBAL_UPLOAD_SESSION.close())
+        _GLOBAL_UPLOAD_SESSION = None
+
     if _GLOBAL_UPLOAD_SESSION is None or _GLOBAL_UPLOAD_SESSION.closed:
         # limit=0 mematikan limitasi TCP bawaan aiohttp (100) 
         # agar unggahan paralel file raksasa tidak mengalami bottleneck.
-        conn = aiohttp.TCPConnector(limit=0)
+        conn = aiohttp.TCPConnector(limit=0, keepalive_timeout=60, enable_cleanup_closed=True)
         _GLOBAL_UPLOAD_SESSION = aiohttp.ClientSession(connector=conn)
     return _GLOBAL_UPLOAD_SESSION
 
@@ -164,6 +171,12 @@ class DirectUpload:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Gofile Upload Error: {e}")
+                
+                # --- [FIX ANTI ZOMBIE CONNECTION] ---
+                if isinstance(e, (ServerDisconnectedError, ClientConnectorError, asyncio.TimeoutError)):
+                    get_upload_session(force_refresh=True)
+                    LOGGER.info("Cloud Uploader: Sesi aiohttp Gofile dibuang karena terdeteksi mati.")
+                # ------------------------------------
         return None
 
     # ============================
@@ -244,6 +257,12 @@ class DirectUpload:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Buzzheavier Upload Error: {e}")
+                
+                # --- [FIX ANTI ZOMBIE CONNECTION] ---
+                if isinstance(e, (ServerDisconnectedError, ClientConnectorError, asyncio.TimeoutError)):
+                    get_upload_session(force_refresh=True)
+                    LOGGER.info("Cloud Uploader: Sesi aiohttp Buzzheavier dibuang karena terdeteksi mati.")
+                # ------------------------------------
         return None
 
     # ============================
@@ -306,6 +325,12 @@ class DirectUpload:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Viking Upload Error: {e}")
+                
+                # --- [FIX ANTI ZOMBIE CONNECTION] ---
+                if isinstance(e, (ServerDisconnectedError, ClientConnectorError, asyncio.TimeoutError)):
+                    get_upload_session(force_refresh=True)
+                    LOGGER.info("Cloud Uploader: Sesi aiohttp Viking dibuang karena terdeteksi mati.")
+                # ------------------------------------
         return None
 
     # ============================
