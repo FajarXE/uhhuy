@@ -863,19 +863,12 @@ async def _download_cover_with_headers(url: str, destination: str, proxy: str = 
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     
-    # Konfigurasi proxy untuk aiohttp jika disediakan
-    connector = None
-    client_proxy = None
-    if proxy:
-        if proxy.startswith('socks'):
-            try:
-                from aiohttp_socks import ProxyConnector
-                safe_proxy = proxy.replace('socks5h://', 'socks5://').replace('socks4a://', 'socks4://')
-                connector = ProxyConnector.from_url(safe_proxy)
-            except Exception:
-                pass
-        else:
-            client_proxy = proxy
+    from bot.helpers.proxy_manager import proxy_manager
+    used_proxy = await proxy_manager.get_proxy(proxy)
+    connector = proxy_manager.get_aiohttp_connector(used_proxy)
+    
+    # Jika menggunakan proksi HTTP biasa (bukan socks), pasang via argumen get()
+    client_proxy = used_proxy if used_proxy and not used_proxy.startswith('socks') else None
 
     try:
         dir_path = os.path.dirname(destination)
@@ -888,11 +881,18 @@ async def _download_cover_with_headers(url: str, destination: str, proxy: str = 
                 
             async with session.get(url, timeout=30, **get_kwargs) as resp:
                 if resp.status == 200:
+                    import aiofiles
                     async with aiofiles.open(destination, 'wb') as f:
                         await f.write(await resp.read())
+                    if used_proxy:
+                        await proxy_manager.report_success(used_proxy)
                 else:
+                    if used_proxy:
+                        await proxy_manager.report_fail(used_proxy)
                     LOGGER.error(f"Gagal download cover: HTTP {resp.status} | URL: {url}")
     except Exception as e:
+        if used_proxy:
+            await proxy_manager.report_fail(used_proxy)
         LOGGER.error(f"Gagal download cover: {type(e).__name__} {e} | URL: {url}")
 
 async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = None): 
