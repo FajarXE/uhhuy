@@ -1,8 +1,9 @@
-# [FILE: bot/helpers/aria2_helper.py]
+# [GANTI TOTAL ISI FILE: bot/helpers/aria2_helper.py]
 
 import os
 import asyncio
 import aiohttp
+from aiohttp.client_exceptions import ClientError, ServerDisconnectedError
 from bot.logger import LOGGER
 
 ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc"
@@ -10,11 +11,25 @@ ACTIVE_DOWNLOADS = {}
 
 _ARIA2_SESSION = None
 
+# --- [TAMBAHAN] MANAJEMEN SESI DINAMIS ---
+async def get_aria2_session(force_refresh=False):
+    global _ARIA2_SESSION
+    # Hancurkan sesi lama jika dipaksa refresh (misal saat terdeteksi bengong/putus)
+    if force_refresh and _ARIA2_SESSION and not _ARIA2_SESSION.closed:
+        await _ARIA2_SESSION.close()
+        _ARIA2_SESSION = None
+
+    if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
+        # Gunakan TCPConnector dengan keepalive_timeout 30 detik
+        connector = aiohttp.TCPConnector(keepalive_timeout=30)
+        timeout = aiohttp.ClientTimeout(total=15)
+        _ARIA2_SESSION = aiohttp.ClientSession(connector=connector, timeout=timeout)
+    return _ARIA2_SESSION
+# -----------------------------------------
+
 async def aria2_download(url, filepath, details=None):
-    # --- [FIX] Import dari ui_manager untuk menghindari circular import ---
     from bot.helpers.ui_manager import progress_message 
 
-    # --- FIX: Ubah path menjadi Absolut agar daemon Aria2 tidak nyasar ---
     dir_path = os.path.abspath(os.path.dirname(filepath))
     file_name = os.path.basename(filepath)
     
@@ -27,7 +42,6 @@ async def aria2_download(url, filepath, details=None):
         "allow-overwrite": "true",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
         
-        # --- PENAMBAHAN BYPASS CDN ---
         "header": [
             "Accept: */*",
             "Accept-Encoding: gzip, deflate, br",
@@ -35,36 +49,25 @@ async def aria2_download(url, filepath, details=None):
         ],
         "disable-ipv6": "true",       
         "check-certificate": "false", 
-        # -----------------------------
         
         "continue": "false",
         "max-tries": "3",
         "retry-wait": "2",
         "timeout": "45",
         
-        # Hapus atau beri komentar pada baris lowest-speed-limit
-        # "lowest-speed-limit": "10K", 
-        
         "content-disposition-default-utf8": "true" 
     }
     
-    # Jika ada headers dari layanan musik, pasangkan ke opsi Aria2!
     if details and 'headers' in details and isinstance(details['headers'], dict):
         header_list = [f"{k}: {v}" for k, v in details['headers'].items()]
         if header_list:
             options["header"] = header_list
-    # ------------------------------------------------------
 
-    # --- FIX AKAMAI 403: Pasangkan Proxy ke Aria2 ---
     if details and 'proxy' in details and details['proxy']:
         proxy_string = details['proxy']
-        
-        # Sanitasi scheme socks5h ke socks5 untuk kompatibilitas daemon Aria2c
         if proxy_string.startswith("socks5h://"):
             proxy_string = proxy_string.replace("socks5h://", "socks5://", 1)
-            
         options["all-proxy"] = proxy_string
-    # ------------------------------------------------
     
     payload_add = {
         "jsonrpc": "2.0",
@@ -72,40 +75,40 @@ async def aria2_download(url, filepath, details=None):
         "method": "aria2.addUri",
         "params": [
             [url],
-            options # <--- Masukkan opsi yang sudah ditambahkan headers
+            options 
         ]
     }
     
     try:
-        # --- [FIX] GUNAKAN GLOBAL SESSION ARIA2 ---
-        global _ARIA2_SESSION
-        if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
-            _ARIA2_SESSION = aiohttp.ClientSession()
-        session = _ARIA2_SESSION
-        # ------------------------------------------
+        # --- [FIX] AMBIL SESI DINAMIS ---
+        session = await get_aria2_session()
+        
+        # 1. Mengirim perintah ke Aria2 dengan penanganan Drop Koneksi
+        try:
+            async with session.post(ARIA2_RPC_URL, json=payload_add) as resp:
+                res = await resp.json()
+        except (ClientError, asyncio.TimeoutError) as net_err:
+            LOGGER.warning(f"Aria2 RPC Drop saat AddURI: {net_err}. Menyegarkan sesi...")
+            session = await get_aria2_session(force_refresh=True)
+            async with session.post(ARIA2_RPC_URL, json=payload_add) as resp:
+                res = await resp.json()
+        # --------------------------------
 
-        # 1. Mengirim perintah ke Aria2
-        async with session.post(ARIA2_RPC_URL, json=payload_add) as resp:
-            res = await resp.json()
-            if "error" in res:
-                LOGGER.error(f"Aria2 Add Error: {res['error']['message']}")
-                return False
-            
-            # Mendapatkan Task ID (GID) asli dari Aria2
-            gid = res["result"]
-            ACTIVE_DOWNLOADS[gid] = file_name
-            
-            # --- FIX: Sembunyikan log 'Memulai Unduhan' untuk file berakhiran angka (.0, .1) ---
-            if not file_name.split('.')[-1].isdigit():
-                LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
-            
-            # Menyiapkan data untuk UI Progress Bar
-            if details:
-                details['task_id'] = gid
-                details['title'] = file_name
-                details['type'] = 'Download'
+        if "error" in res:
+            LOGGER.error(f"Aria2 Add Error: {res['error']['message']}")
+            return False
+        
+        gid = res["result"]
+        ACTIVE_DOWNLOADS[gid] = file_name
+        
+        if not file_name.split('.')[-1].isdigit():
+            LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
+        
+        if details:
+            details['task_id'] = gid
+            details['title'] = file_name
+            details['type'] = 'Download'
 
-        # 2. Polling status unduhan secara Live
         payload_status = {
             "jsonrpc": "2.0",
             "id": "bot_status",
@@ -113,57 +116,61 @@ async def aria2_download(url, filepath, details=None):
             "params": [gid]
         }
         
+        # 2. Polling status unduhan secara Live
         while True:
-            # --- [FIX ZOMBIE TASK] CEK SINYAL BATAL GLOBAL DARI UI_MANAGER ---
             if details and 'task_id' in details:
                 from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT
                 if details['task_id'] in GLOBAL_CANCEL_DICT:
-                    await aria2_cancel(gid) # Hancurkan task di sisi server Aria2
+                    await aria2_cancel(gid) 
                     LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
                     return False
-            # -------------------------------------------------
 
-            async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
-                res = await resp.json()
-                if "error" in res:
-                    ACTIVE_DOWNLOADS.pop(gid, None)
-                    return False
-                    
-                status = res["result"]
-                state = status.get("status")
+            # --- [FIX] KETAHANAN SESI SAAT POLLING ---
+            try:
+                async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
+                    res = await resp.json()
+            except (ClientError, ServerDisconnectedError, asyncio.TimeoutError) as poll_err:
+                LOGGER.warning(f"Aria2 RPC Network Error (Polling): {poll_err}. Mengabaikan frame ini dan menyegarkan sesi...")
+                # Refresh koneksi dan coba polling lagi di loop berikutnya
+                session = await get_aria2_session(force_refresh=True)
+                await asyncio.sleep(2.0)
+                continue
+            # -----------------------------------------
+
+            if "error" in res:
+                ACTIVE_DOWNLOADS.pop(gid, None)
+                return False
                 
-                # Ambil angka bytes untuk progress bar
-                total_length = int(status.get("totalLength", 0))
-                completed_length = int(status.get("completedLength", 0))
+            status = res["result"]
+            state = status.get("status")
+            
+            total_length = int(status.get("totalLength", 0))
+            completed_length = int(status.get("completedLength", 0))
+            
+            if details:
+                if total_length > 0:
+                    await progress_message(completed_length, total_length, details)
+                else:
+                    from bot.helpers.ui_manager import GLOBAL_TASKS
+                    import time
+                    task_id = details.get('task_id')
+                    if task_id and task_id in GLOBAL_TASKS:
+                        GLOBAL_TASKS[task_id]['timestamp'] = time.time()
+                        GLOBAL_TASKS[task_id]['action'] = 'Connecting'
+                        GLOBAL_TASKS[task_id]['processed'] = 'Mengalokasikan file...'
+            
+            if state == "complete":
+                ACTIVE_DOWNLOADS.pop(gid, None)
+                if not file_name.split('.')[-1].isdigit():
+                    LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
+                return True
                 
-                # --- [FIX GHOST TASK] JANTUNG BUATAN ---
-                if details:
-                    if total_length > 0:
-                        await progress_message(completed_length, total_length, details)
-                    else:
-                        # Memompa detak jantung meski Aria2 nyangkut agar tidak dihapus sistem
-                        from bot.helpers.ui_manager import GLOBAL_TASKS
-                        import time
-                        task_id = details.get('task_id')
-                        if task_id and task_id in GLOBAL_TASKS:
-                            GLOBAL_TASKS[task_id]['timestamp'] = time.time()
-                            GLOBAL_TASKS[task_id]['action'] = 'Connecting'
-                            GLOBAL_TASKS[task_id]['processed'] = 'Mengalokasikan file...'
-                # ----------------------------------------
+            elif state in ["error", "removed"]:
+                ACTIVE_DOWNLOADS.pop(gid, None)
+                err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
+                LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
+                return False
                 
-                if state == "complete":
-                    ACTIVE_DOWNLOADS.pop(gid, None)
-                    # Sembunyikan log pecahan DASH (.0, .1) agar terminal tidak kotor/lag
-                    if not file_name.split('.')[-1].isdigit():
-                        LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
-                    return True
-                    
-                elif state in ["error", "removed"]:
-                    ACTIVE_DOWNLOADS.pop(gid, None)
-                    err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
-                    LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
-                    return False
-                    
             await asyncio.sleep(2.0)
 
     except Exception as e:
@@ -171,7 +178,6 @@ async def aria2_download(url, filepath, details=None):
         return False
 
 async def aria2_cancel(gid):
-    global _ARIA2_SESSION
     payload = {
         "jsonrpc": "2.0",
         "id": "bot_cancel",
@@ -179,45 +185,34 @@ async def aria2_cancel(gid):
         "params": [gid]
     }
     try:
-        if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
-            _ARIA2_SESSION = aiohttp.ClientSession()
-            
-        async with _ARIA2_SESSION.post(ARIA2_RPC_URL, json=payload) as resp:
+        session = await get_aria2_session()
+        async with session.post(ARIA2_RPC_URL, json=payload) as resp:
             res = await resp.json()
             if "error" not in res:
                 ACTIVE_DOWNLOADS.pop(gid, None)
                 return True
-    except:
+    except Exception:
         pass
     return False
 
 async def get_aria2_global_stat():
-    """Mengambil total kecepatan download Aria2 secara realtime (Tanpa Memory Leak)"""
-    global _ARIA2_SESSION
-    
     payload = {
         "jsonrpc": "2.0",
         "id": "bot_global_stat",
         "method": "aria2.getGlobalStat",
         "params": []
     }
-    
     try:
-        # Jika sesi belum ada atau tertutup, buat baru SATU KALI SAJA
-        if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
-            _ARIA2_SESSION = aiohttp.ClientSession()
-            
-        async with _ARIA2_SESSION.post(ARIA2_RPC_URL, json=payload) as resp:
+        session = await get_aria2_session()
+        async with session.post(ARIA2_RPC_URL, json=payload) as resp:
             res = await resp.json()
             if "error" not in res:
                 return res["result"]
     except Exception:
         pass
-        
     return None
 
 async def aria2_purge_all():
-    """Membersihkan SEMUA task Aria2 yang nyangkut di background saat bot baru nyala"""
     payload_active = {
         "jsonrpc": "2.0",
         "id": "bot_purge",
@@ -225,12 +220,7 @@ async def aria2_purge_all():
         "params": []
     }
     try:
-        global _ARIA2_SESSION
-        if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
-            _ARIA2_SESSION = aiohttp.ClientSession()
-        session = _ARIA2_SESSION
-
-        # Cari semua task yang sedang berjalan
+        session = await get_aria2_session()
         async with session.post(ARIA2_RPC_URL, json=payload_active) as resp:
             res = await resp.json()
             if "result" in res:
@@ -250,9 +240,7 @@ async def aria2_purge_all():
         pass
 
 async def close_aria2_session():
-    """Fungsi untuk menutup sesi aiohttp secara aman saat bot dimatikan"""
     global _ARIA2_SESSION
     if _ARIA2_SESSION and not _ARIA2_SESSION.closed:
         await _ARIA2_SESSION.close()
-        from bot.logger import LOGGER
         LOGGER.info("Aria2: Sesi aiohttp global berhasil ditutup dengan aman.")
