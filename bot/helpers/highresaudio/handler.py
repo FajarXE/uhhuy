@@ -29,21 +29,16 @@ from ...settings import bot_set
 import bot.helpers.translations as lang
 from bot.logger import LOGGER
 
-# --- [TAMBAHAN] Import Manajer Proksi Sentral ---
+# --- Import Manajer Proksi Sentral ---
 from bot.helpers.proxy_manager import proxy_manager
 
 
 async def start_highresaudio(url: str, user: dict):
-    # --- RE-LOGIN OTOMATIS ---
     try:
         user_id = user.get('user_id')
         client = highresaudio_manager.get_client(user_id)
-        
-        if client:
-            if hasattr(client, 're_login'):
-                await asyncio.to_thread(client.re_login)
-            else:
-                LOGGER.warning(f"HighResAudio: Client {user_id} tidak memiliki method 're_login'.")
+        if client and hasattr(client, 're_login'):
+            await asyncio.to_thread(client.re_login)
     except Exception as e:
         LOGGER.error(f"HighResAudio: Gagal menyegarkan sesi (Re-login): {e}")
 
@@ -58,14 +53,9 @@ async def start_highresaudio(url: str, user: dict):
         raise e 
 
 async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
-    
     client = highresaudio_manager.get_client(user.get('user_id'))
-    
-    if not client:
-         raise HighResAudioError("Tidak ada klien HighResAudio yang tersedia (Silakan login akun sendiri atau hubungi Admin).")
-
-    if not track_meta:
-        raise HighResAudioError("start_track dipanggil tanpa track_meta.")
+    if not client: raise HighResAudioError("Klien HighResAudio tidak tersedia.")
+    if not track_meta: raise HighResAudioError("start_track dipanggil tanpa track_meta.")
             
     if not filepath:
         filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
@@ -79,18 +69,12 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         return False
 
     track_meta['folderpath'] = filepath
-    
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
     
-    # --- FIX FILE NAME TOO LONG ---
-    safe_filename = sanitize_filepath(raw_filename)
-    # Potong nama file lagu maksimal 120 karakter
-    safe_filename = safe_filename[:120].strip()
-    
+    safe_filename = sanitize_filepath(raw_filename)[:120].strip()
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
-    # --- SUNTIKAN KABEL RADAR UI TELEGRAM ---
     details = None
     if upload and 'bot_msg' in user:
         details = {
@@ -102,7 +86,6 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        # --- MESIN PENGUNDUH HYBRID (ARIA2 -> AIOHTTP TURBO) ---
         cookie_str = "; ".join([f"{k}={v}" for k, v in client.s.cookies.items()])
         headers_dict = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
@@ -110,65 +93,79 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             "Cookie": cookie_str
         }
         
-        if details is None:
-            details = {}
-            
+        if details is None: details = {}
         details['headers'] = headers_dict
         
-        # --- [PERBAIKAN] SERAHKAN SEMUA JENIS PROXY KE PROXY MANAGER ---
         if client.proxy:
             details['proxy'] = client.proxy 
-        # ---------------------------------------------------------------
 
-        # Langkah 1: Coba kekuatan penuh Aria2 (retries=1 agar cepat beralih jika ditolak server)
+        # Langkah 1: Aria2
         err = await download_file(download_url, track_meta['filepath'], retries=1, details=details)
         
         if err:
             LOGGER.warning(f"HighResAudio: Aria2 gagal/ditolak server. Mengaktifkan AIOHTTP Turbo Fallback...")
             
-            # --- [FIX CLEANUP GHOST FILE ARIA2] ---
-            aria2_file = track_meta['filepath'] + '.aria2'
-            if os.path.exists(aria2_file):
-                try: os.remove(aria2_file)
+            if os.path.exists(track_meta['filepath'] + '.aria2'):
+                try: os.remove(track_meta['filepath'] + '.aria2')
                 except: pass
                 
             if os.path.exists(track_meta['filepath']):
                 try: os.remove(track_meta['filepath'])
                 except: pass
-            # --------------------------------------
             
-            # --- [PERBAIKAN] INTEGRASI AIOHTTP KE PROXY MANAGER ---
-            headers_dict["Range"] = "bytes=0-"
+            # --- [PERBAIKAN 1] HAPUS HEADER RANGE YANG MEMBINGUNGKAN CDN ---
+            if "Range" in headers_dict:
+                del headers_dict["Range"]
             
             used_proxy = await proxy_manager.get_proxy(client.proxy)
             connector = proxy_manager.get_aiohttp_connector(used_proxy)
 
-            async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
-                get_kwargs = {}
-                if used_proxy and not used_proxy.startswith('socks'):
-                    get_kwargs['proxy'] = used_proxy
+            # --- [PERBAIKAN 2] SISTEM RETRY UNTUK AIOHTTP ---
+            max_aio_retries = 3
+            aio_success = False
+            
+            for attempt in range(max_aio_retries):
+                try:
+                    async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
+                        get_kwargs = {}
+                        if used_proxy and not used_proxy.startswith('socks'):
+                            get_kwargs['proxy'] = used_proxy
+                            
+                        safe_url = yarl.URL(download_url, encoded=True)
+                        
+                        # Timeout dinaikkan agar tidak putus di tengah
+                        timeout = aiohttp.ClientTimeout(total=3600, sock_read=60)
+                        async with session.get(safe_url, timeout=timeout, **get_kwargs) as r:
+                            r.raise_for_status()
+                            total_size = int(r.headers.get('content-length', 0))
+                            downloaded = 0
+                            start_time = time.time()
+                            last_update = start_time
+                            
+                            async with aiofiles.open(track_meta['filepath'], 'wb') as f:
+                                async for chunk in r.content.iter_chunked(256 * 1024):
+                                    if chunk:
+                                        await f.write(chunk)
+                                        downloaded += len(chunk)
+                                        
+                                        if details and 'msg' in details:
+                                            now = time.time()
+                                            if now - last_update > 2.0 or downloaded == total_size:
+                                                last_update = now
+                                                from bot.helpers.utils import progress_message
+                                                await progress_message(downloaded, total_size, details)
+                    aio_success = True
+                    break # Berhasil, keluar dari loop
                     
-                safe_url = yarl.URL(download_url, encoded=True)
-                
-                async with session.get(safe_url, **get_kwargs) as r:
-                    r.raise_for_status()
-                    total_size = int(r.headers.get('content-length', 0))
-                    downloaded = 0
-                    start_time = time.time()
-                    last_update = start_time
-                    
-                    async with aiofiles.open(track_meta['filepath'], 'wb') as f:
-                        async for chunk in r.content.iter_chunked(256 * 1024):
-                            if chunk:
-                                await f.write(chunk)
-                                downloaded += len(chunk)
-                                
-                                if details and 'msg' in details:
-                                    now = time.time()
-                                    if now - last_update > 2.0 or downloaded == total_size:
-                                        last_update = now
-                                        from bot.helpers.utils import progress_message
-                                        await progress_message(downloaded, total_size, details)
+                except aiohttp.ClientPayloadError as e:
+                    LOGGER.error(f"HighResAudio AIOHTTP payload error (Coba {attempt+1}/{max_aio_retries}): {e}")
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    LOGGER.error(f"HighResAudio AIOHTTP gagal (Coba {attempt+1}/{max_aio_retries}): {e}")
+                    await asyncio.sleep(2)
+
+            if not aio_success:
+                raise Exception("AIOHTTP Turbo Fallback gagal setelah percobaan maksimal (ContentLengthError).")
             # --------------------------------------------------------
         
     except Exception as e:
@@ -215,7 +212,6 @@ async def start_album(album_url: str, user: dict, upload=True):
     album_folder = sanitize_filepath(album_folder)
     album_meta['folderpath'] = album_folder 
 
-    # --- FITUR BARU: MODE BOOKLET ONLY ---
     if user.get('booklet_only'):
         await edit_message(user['bot_msg'], f"🔍 Mencari booklet untuk album: `{album_meta['title']}`...")
         
@@ -223,7 +219,6 @@ async def start_album(album_url: str, user: dict, upload=True):
             booklet_path = None
             try:
                 os.makedirs(album_folder, exist_ok=True)
-                
                 temp_path = os.path.join(album_folder, "Booklet.pdf")
                 dl_client = highresaudio_manager.get_client(user.get('user_id'))
                 
@@ -233,7 +228,6 @@ async def start_album(album_url: str, user: dict, upload=True):
                         booklet_path = temp_path
                 else:
                     raise Exception("Klien HighResAudio tidak tersedia.")
-                    
             except Exception as e:
                 await edit_message(user['bot_msg'], f"❌ Gagal mengunduh booklet: {e}")
                 return
@@ -254,7 +248,6 @@ async def start_album(album_url: str, user: dict, upload=True):
             await edit_message(user['bot_msg'], f"❌ Tidak ada booklet digital yang dirilis untuk album ini.")
         
         return
-    # -------------------------------------
 
     if upload:
         album_meta['poster_msg'] = await post_art_poster(user, album_meta)
