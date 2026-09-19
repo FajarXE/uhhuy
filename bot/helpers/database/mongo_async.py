@@ -1,5 +1,6 @@
 import logging
 import traceback
+import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from config import Config
 
@@ -101,7 +102,6 @@ class MongoDB:
         except Exception:
             logging.info(traceback.format_exc())
 
-    # --- PENAMBAHAN FUNGSI BARU DI SINI ---
     async def get_user_settings(self, user_id: int) -> dict:
         """
         Mengambil pengaturan user dari database.
@@ -114,7 +114,6 @@ class MongoDB:
         except Exception:
             logging.info(traceback.format_exc())
             return {}
-    # --------------------------------------
 
     async def get_bot_setting(self, key: str):
         """Mengambil pengaturan global bot dari koleksi music."""
@@ -135,14 +134,26 @@ class MongoDB:
         except Exception:
             logging.info(traceback.format_exc())
 
-    # --- PENAMBAHAN FUNGSI STATE CANCEL ---
-    async def add_cancel_task(self, task_id: str):
-        """Menyimpan ID tugas yang dibatalkan ke MongoDB"""
+    async def setup_ttl_indexes(self):
+        """Membuat index Time-To-Live (TTL) agar MongoDB otomatis menghapus sampah"""
         try:
-            # Menggunakan collection baru bernama 'cancelled_tasks'
+            # Hapus memori UI dari DB jika tidak disentuh selama 24 jam (86400 detik)
+            await self.client.ui_states.create_index("updated_at", expireAfterSeconds=86400)
+            # Hapus sinyal batal hantu dari DB setelah 24 jam
+            await self.client.cancelled_tasks.create_index("created_at", expireAfterSeconds=86400)
+            logging.info("MongoDB: TTL Indexes berhasil diterapkan.")
+        except Exception as e:
+            logging.error(f"Gagal membuat TTL Indexes: {e}")
+
+    async def add_cancel_task(self, task_id: str):
+        """Menyimpan ID tugas yang dibatalkan ke MongoDB dengan stempel waktu"""
+        try:
             await self.client.cancelled_tasks.update_one(
                 {'_id': task_id}, 
-                {'$set': {'status': 'cancelled'}}, 
+                {'$set': {
+                    'status': 'cancelled',
+                    'created_at': datetime.datetime.utcnow() # <-- Tambahan penanda TTL
+                }}, 
                 upsert=True
             )
         except Exception as e:
@@ -165,15 +176,17 @@ class MongoDB:
             await self.client.cancelled_tasks.delete_many({})
         except Exception as e:
             logging.error(f"Gagal menghapus cancel tasks di DB: {e}")
-    # --------------------------------------
 
-    # --- PENAMBAHAN FUNGSI STATE RADAR UI ---
     async def save_ui_state(self, chat_id: int, message_id: int, page: int = 1):
-        """Menyimpan ID pesan Radar Papan Global agar tidak hilang saat restart"""
+        """Menyimpan ID pesan Radar Papan Global dengan stempel waktu"""
         try:
             await self.client.ui_states.update_one(
                 {'_id': chat_id},
-                {'$set': {'message_id': message_id, 'page': page}},
+                {'$set': {
+                    'message_id': message_id, 
+                    'page': page,
+                    'updated_at': datetime.datetime.utcnow() # <-- Tambahan penanda TTL
+                }},
                 upsert=True
             )
         except Exception as e:
