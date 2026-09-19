@@ -12,21 +12,17 @@ ACTIVE_DOWNLOADS = {}
 
 _ARIA2_SESSION = None
 
-# --- [TAMBAHAN] MANAJEMEN SESI DINAMIS ---
 async def get_aria2_session(force_refresh=False):
     global _ARIA2_SESSION
-    # Hancurkan sesi lama jika dipaksa refresh (misal saat terdeteksi bengong/putus)
     if force_refresh and _ARIA2_SESSION and not _ARIA2_SESSION.closed:
         await _ARIA2_SESSION.close()
         _ARIA2_SESSION = None
 
     if _ARIA2_SESSION is None or _ARIA2_SESSION.closed:
-        # Gunakan TCPConnector dengan keepalive_timeout 30 detik
         connector = aiohttp.TCPConnector(keepalive_timeout=30)
         timeout = aiohttp.ClientTimeout(total=15)
         _ARIA2_SESSION = aiohttp.ClientSession(connector=connector, timeout=timeout)
     return _ARIA2_SESSION
-# -----------------------------------------
 
 async def aria2_download(url, filepath, details=None):
     from bot.helpers.ui_manager import progress_message 
@@ -42,7 +38,6 @@ async def aria2_download(url, filepath, details=None):
         "min-split-size": "5M",
         "allow-overwrite": "true",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-        
         "header": [
             "Accept: */*",
             "Accept-Encoding: gzip, deflate, br",
@@ -50,12 +45,10 @@ async def aria2_download(url, filepath, details=None):
         ],
         "disable-ipv6": "true",       
         "check-certificate": "false", 
-        
         "continue": "false",
         "max-tries": "3",
         "retry-wait": "2",
         "timeout": "45",
-        
         "content-disposition-default-utf8": "true" 
     }
     
@@ -64,20 +57,18 @@ async def aria2_download(url, filepath, details=None):
         if header_list:
             options["header"] = header_list
 
-    if details and 'proxy' in details and details['proxy']:
-        proxy_string = details['proxy']
-        if proxy_string.startswith("socks5h://"):
-            proxy_string = proxy_string.replace("socks5h://", "socks5://", 1)
-        options["all-proxy"] = proxy_string
-
-    # --- INTEGASI SENTRAL PROXY MANAGER ---
+    # --- [PERBAIKAN] INTEGASI SENTRAL PROXY MANAGER ---
     used_proxy = None
     if details and 'proxy' in details and details['proxy']:
         used_proxy = await proxy_manager.get_proxy(details['proxy'])
         formatted_proxy = proxy_manager.format_for_aria2(used_proxy)
         if formatted_proxy:
-            options["all-proxy"] = formatted_proxy
-    # --------------------------------------
+            # KEMBALIKAN PERLINDUNGAN: Aria2 menolak SOCKS5 di --all-proxy
+            if not formatted_proxy.startswith('socks'):
+                options["all-proxy"] = formatted_proxy
+            else:
+                LOGGER.info("Aria2: Mem-bypass penyuntikan SOCKS5 Proxy agar tidak RPC Error.")
+    # --------------------------------------------------
     
     payload_add = {
         "jsonrpc": "2.0",
@@ -90,10 +81,8 @@ async def aria2_download(url, filepath, details=None):
     }
     
     try:
-        # --- [FIX] AMBIL SESI DINAMIS ---
         session = await get_aria2_session()
         
-        # 1. Mengirim perintah ke Aria2 dengan penanganan Drop Koneksi
         try:
             async with session.post(ARIA2_RPC_URL, json=payload_add) as resp:
                 res = await resp.json()
@@ -102,7 +91,6 @@ async def aria2_download(url, filepath, details=None):
             session = await get_aria2_session(force_refresh=True)
             async with session.post(ARIA2_RPC_URL, json=payload_add) as resp:
                 res = await resp.json()
-        # --------------------------------
 
         if "error" in res:
             LOGGER.error(f"Aria2 Add Error: {res['error']['message']}")
@@ -126,7 +114,6 @@ async def aria2_download(url, filepath, details=None):
             "params": [gid]
         }
         
-        # 2. Polling status unduhan secara Live
         while True:
             if details and 'task_id' in details:
                 from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT
@@ -135,17 +122,14 @@ async def aria2_download(url, filepath, details=None):
                     LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
                     return False
 
-            # --- [FIX] KETAHANAN SESI SAAT POLLING ---
             try:
                 async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
                     res = await resp.json()
             except (ClientError, ServerDisconnectedError, asyncio.TimeoutError) as poll_err:
                 LOGGER.warning(f"Aria2 RPC Network Error (Polling): {poll_err}. Mengabaikan frame ini dan menyegarkan sesi...")
-                # Refresh koneksi dan coba polling lagi di loop berikutnya
                 session = await get_aria2_session(force_refresh=True)
                 await asyncio.sleep(2.0)
                 continue
-            # -----------------------------------------
 
             if "error" in res:
                 ACTIVE_DOWNLOADS.pop(gid, None)
@@ -174,7 +158,7 @@ async def aria2_download(url, filepath, details=None):
                 if not file_name.split('.')[-1].isdigit():
                     LOGGER.info(f"Aria2 Berhasil Mengunduh: {file_name}")
                 if used_proxy:
-                    await proxy_manager.report_success(used_proxy) # <-- Lapor Sukses
+                    await proxy_manager.report_success(used_proxy)
                 return True
                 
             elif state in ["error", "removed"]:
@@ -182,7 +166,7 @@ async def aria2_download(url, filepath, details=None):
                 err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
                 LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
                 if used_proxy:
-                    await proxy_manager.report_fail(used_proxy) # <-- Lapor Gagal
+                    await proxy_manager.report_fail(used_proxy)
                 return False
                 
             await asyncio.sleep(2.0)
