@@ -38,6 +38,8 @@ async def aria2_download(url, filepath, details=None):
         "min-split-size": "5M",
         "allow-overwrite": "true",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+        
+        # Header default ini akan ditimpa jika modul menyediakan custom header
         "header": [
             "Accept: */*",
             "Accept-Encoding: gzip, deflate, br",
@@ -52,23 +54,30 @@ async def aria2_download(url, filepath, details=None):
         "content-disposition-default-utf8": "true" 
     }
     
+    # --- [PERBAIKAN KUNCI]: KEMBALI KE LOGIKA OVERWRITE HEADER ---
     if details and 'headers' in details and isinstance(details['headers'], dict):
-        header_list = [f"{k}: {v}" for k, v in details['headers'].items()]
-        if header_list:
-            options["header"] = header_list
+        custom_headers = []
+        for k, v in details['headers'].items():
+            if k.lower() == 'user-agent':
+                options["user-agent"] = v
+            else:
+                custom_headers.append(f"{k}: {v}")
+                
+        if custom_headers:
+            # TIMPA SEPENUHNYA header bawaan agar lolos dari blokir peladen (WAF)
+            options["header"] = custom_headers
+    # -------------------------------------------------------------
 
-    # --- [PERBAIKAN] INTEGASI SENTRAL PROXY MANAGER ---
     used_proxy = None
     if details and 'proxy' in details and details['proxy']:
         used_proxy = await proxy_manager.get_proxy(details['proxy'])
         formatted_proxy = proxy_manager.format_for_aria2(used_proxy)
         if formatted_proxy:
-            # KEMBALIKAN PERLINDUNGAN: Aria2 menolak SOCKS5 di --all-proxy
+            # Aria2 RPC akan crash jika diberi SOCKS5. Kita bypass untuk Aria2.
             if not formatted_proxy.startswith('socks'):
                 options["all-proxy"] = formatted_proxy
             else:
                 LOGGER.info("Aria2: Mem-bypass penyuntikan SOCKS5 Proxy agar tidak RPC Error.")
-    # --------------------------------------------------
     
     payload_add = {
         "jsonrpc": "2.0",
@@ -126,7 +135,7 @@ async def aria2_download(url, filepath, details=None):
                 async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
                     res = await resp.json()
             except (ClientError, ServerDisconnectedError, asyncio.TimeoutError) as poll_err:
-                LOGGER.warning(f"Aria2 RPC Network Error (Polling): {poll_err}. Mengabaikan frame ini dan menyegarkan sesi...")
+                LOGGER.warning(f"Aria2 RPC Network Error (Polling): {poll_err}. Mengabaikan frame ini...")
                 session = await get_aria2_session(force_refresh=True)
                 await asyncio.sleep(2.0)
                 continue
