@@ -1,4 +1,4 @@
-# [GANTI SELURUH FILE: bot/helpers/highresaudio/handler.py]
+# [GANTI TOTAL ISI FILE: bot/helpers/highresaudio/handler.py]
 
 import aiohttp
 import aiofiles
@@ -28,6 +28,9 @@ from ..utils import fetch_zip_settings, run_concurrent_tasks, format_string, zip
 from ...settings import bot_set 
 import bot.helpers.translations as lang
 from bot.logger import LOGGER
+
+# --- [TAMBAHAN] Import Manajer Proksi Sentral ---
+from bot.helpers.proxy_manager import proxy_manager
 
 
 async def start_highresaudio(url: str, user: dict):
@@ -107,17 +110,15 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             "Cookie": cookie_str
         }
         
-        # --- [FIX BUG HEADER & PROXY ARIA2] ---
         if details is None:
             details = {}
             
         details['headers'] = headers_dict
         
-        # ARIA2 HANYA MENDUKUNG HTTP/HTTPS PROXY! 
-        # Jika proxy adalah SOCKS (misal socks5h://), JANGAN berikan ke Aria2 agar tidak error.
-        if client.proxy and not client.proxy.startswith('socks'):
+        # --- [PERBAIKAN] SERAHKAN SEMUA JENIS PROXY KE PROXY MANAGER ---
+        if client.proxy:
             details['proxy'] = client.proxy 
-        # --------------------------------------
+        # ---------------------------------------------------------------
 
         # Langkah 1: Coba kekuatan penuh Aria2 (retries=1 agar cepat beralih jika ditolak server)
         err = await download_file(download_url, track_meta['filepath'], retries=1, details=details)
@@ -126,42 +127,27 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             LOGGER.warning(f"HighResAudio: Aria2 gagal/ditolak server. Mengaktifkan AIOHTTP Turbo Fallback...")
             
             # --- [FIX CLEANUP GHOST FILE ARIA2] ---
-            # Hapus file .aria2 yang ditinggalkan oleh kegagalan Aria2
             aria2_file = track_meta['filepath'] + '.aria2'
             if os.path.exists(aria2_file):
                 try: os.remove(aria2_file)
                 except: pass
                 
-            # Jika file flac parsial hasil kegagalan Aria2 juga ada, hapus agar bersih sebelum ditimpa
             if os.path.exists(track_meta['filepath']):
                 try: os.remove(track_meta['filepath'])
                 except: pass
             # --------------------------------------
             
-            # --- [FIX BUG 403 AKAMAI] TERAPKAN PROXY & HEADER KE AIOHTTP ---
-            import yarl # Dimuat untuk mencegah encoding URL otomatis yang merusak token Akamai
-            
-            # [PERBAIKAN 1]: Suntikkan Header Range untuk melewati validasi Akamai
+            # --- [PERBAIKAN] INTEGRASI AIOHTTP KE PROXY MANAGER ---
             headers_dict["Range"] = "bytes=0-"
             
-            connector = None
-            if client.proxy and client.proxy.startswith('socks'):
-                try:
-                    from aiohttp_socks import ProxyConnector
-                    # [FIX]: Library menolak skema 'socks5h://'. Kita normalkan ke 'socks5://' secara internal
-                    safe_proxy = client.proxy.replace('socks5h://', 'socks5://').replace('socks4a://', 'socks4://')
-                    connector = ProxyConnector.from_url(safe_proxy)
-                except ImportError:
-                    LOGGER.warning("aiohttp_socks tidak terinstall, proxy SOCKS dilewati.")
-                except Exception as e:
-                    LOGGER.warning(f"Gagal memuat ProxyConnector: {e}")
+            used_proxy = await proxy_manager.get_proxy(client.proxy)
+            connector = proxy_manager.get_aiohttp_connector(used_proxy)
 
             async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
                 get_kwargs = {}
-                if client.proxy and not client.proxy.startswith('socks'):
-                    get_kwargs['proxy'] = client.proxy
+                if used_proxy and not used_proxy.startswith('socks'):
+                    get_kwargs['proxy'] = used_proxy
                     
-                # [PERBAIKAN 2]: Kunci URL agar karakter Token Akamai tidak di-encode ulang
                 safe_url = yarl.URL(download_url, encoded=True)
                 
                 async with session.get(safe_url, **get_kwargs) as r:
@@ -177,7 +163,6 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                                 await f.write(chunk)
                                 downloaded += len(chunk)
                                 
-                                # Update Radar UI (Hanya jika Single Track)
                                 if details and 'msg' in details:
                                     now = time.time()
                                     if now - last_update > 2.0 or downloaded == total_size:
@@ -223,8 +208,6 @@ async def start_album(album_url: str, user: dict, upload=True):
     except Exception as e:
         raise Exception(f"Gagal mendapatkan metadata album HighResAudio: {e}")
 
-    # --- FIX FILE NAME TOO LONG ---
-    # Batasi nama folder artis dan album maksimal 60 karakter
     safe_artist = album_meta['artist'][:60].strip()
     safe_title = album_meta['title'][:60].strip()
     
@@ -239,14 +222,12 @@ async def start_album(album_url: str, user: dict, upload=True):
         if album_meta.get('booklet_url'):
             booklet_path = None
             try:
-                # Pastikan direktori tersedia sebelum mengunduh
                 os.makedirs(album_folder, exist_ok=True)
                 
                 temp_path = os.path.join(album_folder, "Booklet.pdf")
                 dl_client = highresaudio_manager.get_client(user.get('user_id'))
                 
                 if dl_client:
-                    # Gunakan fungsi download_booklet bawaan (via to_thread karena requests itu sync)
                     await asyncio.to_thread(download_booklet, dl_client, album_meta['booklet_url'], temp_path)
                     if os.path.exists(temp_path):
                         booklet_path = temp_path
@@ -272,7 +253,6 @@ async def start_album(album_url: str, user: dict, upload=True):
         else:
             await edit_message(user['bot_msg'], f"❌ Tidak ada booklet digital yang dirilis untuk album ini.")
         
-        # RETURN EARLY: Hentikan eksekusi di sini agar lagu tidak diunduh!
         return
     # -------------------------------------
 
@@ -299,7 +279,6 @@ async def start_album(album_url: str, user: dict, upload=True):
     if not successful_tracks:
         raise Exception(f"Tidak ada lagu HighResAudio yang berhasil diunduh.")
 
-    # Booklet untuk pengunduhan album normal (beserta lagu-lagunya)
     booklet_path = None
     if 'booklet_url' in album_meta:
         LOGGER.info("HighResAudio: Mengunduh booklet...")
@@ -318,7 +297,6 @@ async def start_album(album_url: str, user: dict, upload=True):
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
     if upload:
-        # Selalu kirim Booklet secara terpisah ke Telegram (terlepas dari mode ZIP atau Batch)
         if booklet_path and os.path.exists(booklet_path):
             try:
                 await user['bot_msg'].reply_document(
@@ -328,5 +306,4 @@ async def start_album(album_url: str, user: dict, upload=True):
             except Exception as e:
                 LOGGER.error(f"HighResAudio: Gagal mengunggah booklet: {e}")
         
-        # Zipping dan upload album diurus sepenuhnya secara otomatis oleh uploader.py
         await album_upload(album_meta, user)
