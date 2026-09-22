@@ -84,12 +84,14 @@ class BotSettings:
         self.user_data = LRUCache(maxsize=1000)
         self.can_enable_tidal = Config.ENABLE_TIDAL
 
-    def check_upload_mode(self):
+    async def check_upload_mode(self):
         if os.path.exists('rclone.conf'):
             self.rclone = True
         elif Config.RCLONE_CONFIG:
             if Config.RCLONE_CONFIG.startswith('http'):
-                rclone = requests.get(Config.RCLONE_CONFIG, allow_redirects=True)
+                # [FIX] Pindahkan operasi blocking 'requests' ke background thread
+                import asyncio
+                rclone = await asyncio.to_thread(requests.get, Config.RCLONE_CONFIG, allow_redirects=True)
                 if rclone.status_code != 200:
                     LOGGER.info("RCLONE : Error retreiving file from Config URL")
                     self.rclone = False
@@ -110,11 +112,8 @@ class BotSettings:
         self.link_options = link_option if self.rclone and link_option else 'False'
     
     async def set_language(self):
-        # --- [FIX] AMBIL DATA DATABASE DI SINI ---
-        # Karena ini dieksekusi di start_services(), uvloop sudah pasti aktif!
         self.set_db = await database.get_variable()
         
-        # Isi semua pengaturan yang sebelumnya ada di __init__
         self.auth_users = self.set_db.get('AUTH_USERS', [])
         self.auth_chats = self.set_db.get('AUTH_CHATS', [])
         self.anti_spam = self.set_db.get('ANTI_SPAM', "OFF")
@@ -128,9 +127,8 @@ class BotSettings:
         self.playlist_zip = self.set_db.get('PLAYLIST_ZIP')
         self.artist_zip = self.set_db.get('ARTIST_ZIP')
         
-        # Eksekusi pengecekan mode upload setelah set_db terisi
-        self.check_upload_mode()
-        # -----------------------------------------
+        # [FIX] Jangan lupa tambahkan await karena fungsinya sekarang asinkron!
+        await self.check_upload_mode()
 
         self.bot_lang = self.set_db.get("BOT_LANGUAGE", "en")
         for item in lang_available:
