@@ -481,10 +481,26 @@ async def rclone_upload(user, realpath):
     else: path_to_upload = realpath 
     path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
     
+    # 1. Arahkan stdout dan stderr ke PIPE agar tidak menumpuk di console/buffer OS default
     task = await asyncio.create_subprocess_exec(
-        "rclone", "copy", "--config", "./rclone.conf", path, Config.RCLONE_DEST
+        "rclone", "copy", "--config", "./rclone.conf", path, Config.RCLONE_DEST,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
-    await task.wait()
+    
+    # 2. Buat Consumer Stream untuk membuang output rclone secara terus-menerus
+    async def consume_stream(stream):
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+
+    # 3. Jalankan penyedotan output bersamaan dengan proses rclone itu sendiri
+    await asyncio.gather(
+        consume_stream(task.stdout),
+        consume_stream(task.stderr),
+        task.wait()
+    )
+
     r_link, i_link = await create_link(realpath, base_path)
     return r_link, i_link
 
