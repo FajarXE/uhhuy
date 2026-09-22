@@ -6,7 +6,6 @@ import aiofiles
 import base64
 import hashlib
 import asyncio
-import weakref
 from datetime import datetime
 
 # Import Mutagen
@@ -24,8 +23,7 @@ from mutagen.id3 import TALB, TCOP, TDRC, TIT2, TPE1, TRCK, APIC, \
 from config import Config
 from bot.logger import LOGGER
 
-# Ganti dictionary biasa dengan WeakValueDictionary
-COVER_LOCKS = weakref.WeakValueDictionary()
+COVER_LOCKS = {}
 
 try:
     from bot.helpers.lyrics.manager import lyrics_manager
@@ -912,18 +910,24 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
     temp_dir = meta.get('tempfolder', '.')
     cover_path = os.path.join(temp_dir, filename)
     
-    # --- [FIX] OPTIMASI: LOCK DENGAN WEAK-REFERENCE ---
-    # Lock akan otomatis lenyap dari RAM jika sudah tidak ada task yang memakainya
+    # --- [FIX] PENGGUNAAN DICTIONARY STANDAR DENGAN PEMBERSIHAN MANUAL ---
     lock = COVER_LOCKS.get(cover_path)
     if lock is None:
         lock = asyncio.Lock()
         COVER_LOCKS[cover_path] = lock
 
-    async with lock:
-        # Cek ulang setelah masuk antrean lock, siapa tahu sudah didownload oleh task sebelumnya
-        if not os.path.exists(cover_path) or os.path.getsize(cover_path) == 0:
-            await _download_cover_with_headers(url, cover_path, proxy=proxy)
-    # --------------------------------------------------
+    try:
+        async with lock:
+            # Cek ulang setelah masuk antrean lock, siapa tahu sudah didownload oleh task sebelumnya
+            if not os.path.exists(cover_path) or os.path.getsize(cover_path) == 0:
+                await _download_cover_with_headers(url, cover_path, proxy=proxy)
+    finally:
+        # Bersihkan lock dari RAM setelah selesai digunakan (mencegah memory leak)
+        # Jika ada antrean lain yang sedang menunggu lock yang sama, 
+        # mereka akan tetap berjalan karena sudah memegang instance lock-nya di variabel lokal.
+        if cover_path in COVER_LOCKS:
+            COVER_LOCKS.pop(cover_path, None)
+    # ---------------------------------------------------------------------
     
     if os.path.exists(cover_path) and os.path.getsize(cover_path) > 0:
         return cover_path
