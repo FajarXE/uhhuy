@@ -13,8 +13,8 @@ plugins = dict(
 )
 
 PORT = int(os.getenv("PORT", "0"))
-# Simpan objek proses agar bisa dikontrol nanti
-gunicorn_process = subprocess.Popen(f"gunicorn server:app --bind 0.0.0.0:{PORT} --threads 4", shell=True)
+# [FIX] Tambahkan 'exec' agar subprocess bisa dibunuh dengan tuntas oleh .terminate()
+gunicorn_process = subprocess.Popen(f"exec gunicorn server:app --bind 0.0.0.0:{PORT} --threads 4", shell=True)
 
 class CMD(object):
     START = ["start"]
