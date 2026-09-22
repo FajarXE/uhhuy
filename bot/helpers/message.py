@@ -17,7 +17,7 @@ from bot.settings import bot_set
 from bot.logger import LOGGER
 from config import Config
 
-current_user = []
+current_user = set()
 
 user_details = {
     'user_id': None, 'name': None, 'user_name': None, 'r_id': None, 
@@ -115,18 +115,21 @@ async def sync_single_user_managers(user_id, data):
     except Exception as e:
         LOGGER.debug(f"Gagal sinkronisasi manager JIT: {e}")
 
-
 async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
     if revoke:
-        if bot_set.anti_spam == 'CHAT+' and cid in current_user: current_user.remove(cid)
-        elif bot_set.anti_spam == 'USER' and uid in current_user: current_user.remove(uid)
+        # Menggunakan .discard() lebih aman daripada .remove() 
+        # untuk mencegah KeyError jika ada race-condition dari event loop.
+        if bot_set.anti_spam == 'CHAT+': 
+            current_user.discard(cid)
+        elif bot_set.anti_spam == 'USER': 
+            current_user.discard(uid)
     else:
         if bot_set.anti_spam == 'CHAT+':
             if cid in current_user: return True
-            current_user.append(cid)
+            current_user.add(cid)
         elif bot_set.anti_spam == 'USER':
             if uid in current_user: return True
-            current_user.append(uid)
+            current_user.add(uid)
         return False
 
 # ==========================================================
