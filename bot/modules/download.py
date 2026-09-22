@@ -662,12 +662,6 @@ async def download_track(c, msg:Message):
         
         user = await fetch_user_details(msg, reply=bool(msg.reply_to_message))
         
-        try:
-            resolved_link = await resolve_shortlink(link)
-            if resolved_link != link:
-                link = resolved_link 
-        except Exception: pass 
-        
         user['link'] = link
         user['booklet_only'] = booklet_only # <-- Simpan flag ke dalam user dict
         
