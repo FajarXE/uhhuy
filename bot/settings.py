@@ -30,7 +30,8 @@ class LRUCache(OrderedDict):
             self.move_to_end(key)
             return value
         except KeyError:
-            return {} # Fallback aman jika user belum diset
+            self[key] = {} # [FIX] Registrasikan ke cache agar data tidak menguap
+            return self[key]
 
     def __setitem__(self, key, value):
         if key in self:
