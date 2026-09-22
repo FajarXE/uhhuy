@@ -118,13 +118,17 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                 del headers_dict["Range"]
             
             used_proxy = await proxy_manager.get_proxy(client.proxy)
-            connector = proxy_manager.get_aiohttp_connector(used_proxy)
 
             # --- [PERBAIKAN 2] SISTEM RETRY UNTUK AIOHTTP ---
             max_aio_retries = 3
             aio_success = False
             
             for attempt in range(max_aio_retries):
+                # [FIX: PINDAHKAN KE DALAM LOOP] 
+                # Konektor harus dibuat baru pada setiap iterasi karena 
+                # aiohttp.ClientSession akan menutup konektor saat keluar dari blok 'async with'
+                connector = proxy_manager.get_aiohttp_connector(used_proxy)
+                
                 try:
                     async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
                         get_kwargs = {}
