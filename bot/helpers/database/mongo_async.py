@@ -17,7 +17,12 @@ class MongoDB:
     def db(self):
         # Klien baru dibuat saat dipanggil pertama kali di dalam uvloop
         if self._db is None:
-            self._db = AsyncIOMotorClient(Config.DATABASE_URL)
+            self._db = AsyncIOMotorClient(
+                Config.DATABASE_URL,
+                serverSelectionTimeoutMS=5000, # Batal mencoba jika server mati > 5 detik
+                connectTimeoutMS=10000,        # Batas waktu handshake
+                maxPoolSize=200                # Angkat batas koneksi simultan untuk konkurensi tinggi
+            )
         return self._db
         
     @property
