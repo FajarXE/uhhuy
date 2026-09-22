@@ -28,7 +28,7 @@ class Bot(Client):
             bot_token=Config.TG_BOT_TOKEN,
             plugins=plugins,
             workdir=Config.WORK_DIR,
-            in_memory=True,
+            in_memory=False,
             ipv6=False,
             workers=20,
             sleep_threshold=30
