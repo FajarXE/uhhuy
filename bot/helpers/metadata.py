@@ -24,6 +24,7 @@ from config import Config
 from bot.logger import LOGGER
 
 COVER_LOCKS = {}
+_COVER_SESSIONS = {}
 
 try:
     from bot.helpers.lyrics.manager import lyrics_manager
@@ -852,19 +853,40 @@ async def get_audio_extension(path):
     except:
         return 'mp3'
 
+async def get_cover_session(used_proxy=None):
+    """
+    Mengambil atau membuat aiohttp.ClientSession global.
+    Karena aiohttp mengikat tipe Connector per-Session, 
+    kita memisahkan Session berdasarkan proxy yang dipakai.
+    """
+    global _COVER_SESSIONS
+    
+    if used_proxy not in _COVER_SESSIONS or _COVER_SESSIONS[used_proxy].closed:
+        from bot.helpers.proxy_manager import proxy_manager
+        connector = proxy_manager.get_aiohttp_connector(used_proxy)
+        
+        # Jika bukan SOCKS proxy, gunakan konektor TCP standar yang dioptimalkan
+        if not connector:
+            connector = aiohttp.TCPConnector(keepalive_timeout=30, enable_cleanup_closed=True)
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # Simpan ke cache memory
+        _COVER_SESSIONS[used_proxy] = aiohttp.ClientSession(headers=headers, connector=connector)
+        
+    return _COVER_SESSIONS[used_proxy]
+# ----------------------------------------------------
+
 async def _download_cover_with_headers(url: str, destination: str, proxy: str = None):
     if not url: return
     
     if url.startswith("//"):
         url = "https:" + url
         
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
-    
     from bot.helpers.proxy_manager import proxy_manager
     used_proxy = await proxy_manager.get_proxy(proxy)
-    connector = proxy_manager.get_aiohttp_connector(used_proxy)
     
     # Jika menggunakan proksi HTTP biasa (bukan socks), pasang via argumen get()
     client_proxy = used_proxy if used_proxy and not used_proxy.startswith('socks') else None
@@ -873,26 +895,27 @@ async def _download_cover_with_headers(url: str, destination: str, proxy: str = 
         dir_path = os.path.dirname(destination)
         os.makedirs(dir_path, exist_ok=True)
         
-        async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
-            get_kwargs = {}
-            if client_proxy:
-                get_kwargs['proxy'] = client_proxy
-                
-            async with session.get(url, timeout=30, **get_kwargs) as resp:
-                if resp.status == 200:
-                    import aiofiles
-                    async with aiofiles.open(destination, 'wb') as f:
-                        await f.write(await resp.read())
-                    if used_proxy:
-                        await proxy_manager.report_success(used_proxy)
-                else:
-                    if used_proxy:
-                        await proxy_manager.report_fail(used_proxy)
-                    LOGGER.error(f"Gagal download cover: HTTP {resp.status} | URL: {url}")
+        # MENGGUNAKAN GLOBAL SESSION (Menghemat Overhead Koneksi / Socket TIME_WAIT)
+        session = await get_cover_session(used_proxy)
+        
+        get_kwargs = {}
+        if client_proxy:
+            get_kwargs['proxy'] = client_proxy
+            
+        async with session.get(url, timeout=30, **get_kwargs) as resp:
+            if resp.status == 200:
+                import aiofiles
+                async with aiofiles.open(destination, 'wb') as f:
+                    await f.write(await resp.read())
+                if used_proxy:
+                    await proxy_manager.report_success(used_proxy)
+            else:
+                if used_proxy:
+                    await proxy_manager.report_fail(used_proxy)
+                LOGGER.error(f"Gagal download cover: HTTP {resp.status} | URL: {url}")
     except Exception as e:
         if used_proxy:
             await proxy_manager.report_fail(used_proxy)
-        # [FIX]
         LOGGER.exception(f"Gagal download cover | URL: {url}")
 
 async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = None): 
