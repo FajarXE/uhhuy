@@ -218,16 +218,21 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
     if not client or not chat_id: return None
 
     if type == 'text':
-        try:
-            msg = await client.send_message(chat_id, text, reply_markup=markup)
-            await copy_to_channel(client, msg)
-            return msg
-        except Exception as e:
-            if "FloodWait" in str(e.__class__.__name__):
-                if antiflood:
-                    await asyncio.sleep(e.value)
-                    return await send_message(user, text, type, markup, antiflood, meta, caption, progress, progress_args)
-            return None
+        # Menerapkan iterasi untuk mencegah rekursi FloodWait
+        for attempt in range(3):
+            try:
+                msg = await client.send_message(chat_id, text, reply_markup=markup)
+                await copy_to_channel(client, msg)
+                return msg
+            except Exception as e:
+                if "FloodWait" in str(e.__class__.__name__):
+                    if antiflood:
+                        wait_time = getattr(e, 'value', 0)
+                        if wait_time > 300: return None
+                        await asyncio.sleep(wait_time)
+                        continue # Mengulang iterasi tanpa menambah tumpukan thread
+                return None
+        return None
     else:
         from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
         start_time = time.time()
@@ -247,64 +252,54 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             'is_local': is_local, 'chat_id': chat_id
         }
         
-        try:
-            final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
-            thumb = meta.get('cover') if meta and meta.get('cover') else None
-            task_type = "File" if type == 'doc' else type.capitalize()
-            
-            # Penetapan callback progres
-            if progress is not None:
-                prog_func = progress
-                p_args = progress_args or ()
-            else:
-                prog_func = standalone_local_progress if is_local else None
-                p_args = (p_state, user, text, task_type)
+        # Iterasi aman untuk Upload Media
+        for attempt in range(3):
+            try:
+                final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
+                thumb = meta.get('cover') if meta and meta.get('cover') else None
+                task_type = "File" if type == 'doc' else type.capitalize()
+                
+                if progress is not None:
+                    prog_func = progress
+                    p_args = progress_args or ()
+                else:
+                    prog_func = standalone_local_progress if is_local else None
+                    p_args = (p_state, user, text, task_type)
 
-            res = None
-            if type == 'audio':
-                res = await client.send_audio(chat_id, audio=text, caption=final_caption, duration=meta.get('duration', 0) if meta else 0, performer=meta.get('artist', '') if meta else '', title=meta.get('title', '') if meta else '', thumb=thumb, progress=prog_func, progress_args=p_args)
-            elif type == 'doc':
-                res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
-            elif type in ['photo', 'pic']:
-                try: res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func, progress_args=p_args)
-                except Exception as pic_err:
-                    if "IMAGE_PROCESS_FAILED" in str(pic_err) or "PHOTO_INVALID_DIMENSIONS" in str(pic_err):
-                        res = await client.send_document(chat_id, document=text, caption=final_caption, progress=prog_func, progress_args=p_args)
-                    else: raise pic_err
-            elif type == 'video':
-                res = await client.send_video(chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
-            else:
-                res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
-                
-            if res:
-                try: await copy_to_channel(client, res)
-                except: pass
-                
-            # Pelindungan radar
-            if p_state['msg']:
-                is_protected = False
-                if isinstance(user, dict):
-                    if user.get('bot_msg') and p_state['msg'].id == user['bot_msg'].id: is_protected = True
-                    if user.get('radar_msg') and p_state['msg'].id == user['radar_msg'].id: is_protected = True
-                if not is_protected:
-                    try: await aio.delete_messages(chat_id, p_state['msg'].id)
+                res = None
+                if type == 'audio':
+                    res = await client.send_audio(chat_id, audio=text, caption=final_caption, duration=meta.get('duration', 0) if meta else 0, performer=meta.get('artist', '') if meta else '', title=meta.get('title', '') if meta else '', thumb=thumb, progress=prog_func, progress_args=p_args)
+                elif type == 'doc':
+                    res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
+                elif type in ['photo', 'pic']:
+                    try: res = await client.send_photo(chat_id, photo=text, caption=final_caption, progress=prog_func, progress_args=p_args)
+                    except Exception as pic_err:
+                        if "IMAGE_PROCESS_FAILED" in str(pic_err) or "PHOTO_INVALID_DIMENSIONS" in str(pic_err):
+                            res = await client.send_document(chat_id, document=text, caption=final_caption, progress=prog_func, progress_args=p_args)
+                        else: raise pic_err
+                elif type == 'video':
+                    res = await client.send_video(chat_id, video=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
+                else:
+                    res = await client.send_document(chat_id, document=text, caption=final_caption, thumb=thumb, progress=prog_func, progress_args=p_args)
+                    
+                if res:
+                    try: await copy_to_channel(client, res)
                     except: pass
+                    
+                # Pelindungan radar
+                if p_state['msg']:
+                    is_protected = False
+                    if isinstance(user, dict):
+                        if user.get('bot_msg') and p_state['msg'].id == user['bot_msg'].id: is_protected = True
+                        if user.get('radar_msg') and p_state['msg'].id == user['radar_msg'].id: is_protected = True
+                    if not is_protected:
+                        try: await aio.delete_messages(chat_id, p_state['msg'].id)
+                        except: pass
 
-            return res
+                return res
 
-        except asyncio.CancelledError:
-            GLOBAL_TASKS.pop(cancel_id, None)
-            if p_state['msg']: 
-                try: await edit_message(p_state['msg'], "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
-                except: pass
-            if isinstance(user, dict) and 'bot_msg' in user:
-                try: await edit_message(user['bot_msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
-                except: pass
-            raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
-            
-        except Exception as e:
-            GLOBAL_TASKS.pop(cancel_id, None)
-            if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
+            except asyncio.CancelledError:
+                GLOBAL_TASKS.pop(cancel_id, None)
                 if p_state['msg']: 
                     try: await edit_message(p_state['msg'], "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
                     except: pass
@@ -313,47 +308,76 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                     except: pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
                 
-            elif "FloodWait" in str(e.__class__.__name__):
-                if hasattr(e, 'value'):
-                    if e.value > 300: return None
-                    await asyncio.sleep(e.value)
-                    return await send_message(user, text, type, markup, antiflood, meta, caption, progress, progress_args)
-            else:
-                LOGGER.error(f"Gagal mengirim {type}: {e}")
-                if p_state['msg']: await edit_message(p_state['msg'], f"❌ **Gagal Mengunggah:** {e}", None, False)
-            return None
+            except Exception as e:
+                if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
+                    GLOBAL_TASKS.pop(cancel_id, None)
+                    if p_state['msg']: 
+                        try: await edit_message(p_state['msg'], "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
+                        except: pass
+                    if isinstance(user, dict) and 'bot_msg' in user:
+                        try: await edit_message(user['bot_msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                        except: pass
+                    raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+                    
+                elif "FloodWait" in str(e.__class__.__name__):
+                    wait_time = getattr(e, 'value', 0)
+                    if wait_time > 300: 
+                        GLOBAL_TASKS.pop(cancel_id, None)
+                        return None
+                    await asyncio.sleep(wait_time)
+                    continue # Mengulang upload jika terkena tilang singkat
+                else:
+                    GLOBAL_TASKS.pop(cancel_id, None)
+                    LOGGER.error(f"Gagal mengirim {type}: {e}")
+                    if p_state['msg']: await edit_message(p_state['msg'], f"❌ **Gagal Mengunggah:** {e}", None, False)
+                    return None
+                    
+        GLOBAL_TASKS.pop(cancel_id, None)
+        return None
 
 # ==========================================================
 # EDIT MESSAGE
 # ==========================================================
 async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
     if not msg: return None
-    try:
-        if msg._client and msg._client.is_connected:
-            return await msg.edit_text(text=text, reply_markup=markup)
-        elif aio.is_connected:
-            return await aio.edit_message_text(chat_id=msg.chat.id, message_id=msg.id, text=text, reply_markup=markup)
-    except MessageNotModified: pass 
-    except FloodWait as e:
-        if antiflood:
-            if e.value > 60: return None
-            await asyncio.sleep(e.value)
-            return await edit_message(msg, text, markup, antiflood)
-    except MessageIdInvalid:
-        from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES
-        chat_id = msg.chat.id
-        GLOBAL_UI_MSG.pop(chat_id, None)
-        GLOBAL_UI_PAGES.pop(chat_id, None)
-    except RPCError as e:
-        err_str = str(e)
-        if any(err in err_str for err in ["INPUT_USER_DEACTIVATED", "USER_IS_BLOCKED", "PEER_ID_INVALID", "CHAT_WRITE_FORBIDDEN"]):
-            try:
-                from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES, GLOBAL_UI_LAST_UPDATE
-                chat_id = msg.chat.id
-                if chat_id in GLOBAL_UI_MSG: del GLOBAL_UI_MSG[chat_id]
-                if chat_id in GLOBAL_UI_PAGES: del GLOBAL_UI_PAGES[chat_id]
-                if msg.id in GLOBAL_UI_LAST_UPDATE: del GLOBAL_UI_LAST_UPDATE[msg.id]
-            except: pass
-    except (aiohttp.ClientConnectionError, aiohttp.ServerTimeoutError, TimeoutError) as e:
-        if "SSL shutdown" not in str(e): LOGGER.error(f"Connection Error Edit: {e}")
-    except Exception: return None
+    
+    # Membungkus edit_message dalam iterasi aman
+    for attempt in range(3):
+        try:
+            if msg._client and msg._client.is_connected:
+                return await msg.edit_text(text=text, reply_markup=markup)
+            elif aio.is_connected:
+                return await aio.edit_message_text(chat_id=msg.chat.id, message_id=msg.id, text=text, reply_markup=markup)
+            break
+        except MessageNotModified: 
+            break 
+        except FloodWait as e:
+            if antiflood:
+                if e.value > 60: return None
+                await asyncio.sleep(e.value)
+                continue # Coba edit ulang setelah delay
+            break
+        except MessageIdInvalid:
+            from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+            chat_id = msg.chat.id
+            GLOBAL_UI_MSG.pop(chat_id, None)
+            GLOBAL_UI_PAGES.pop(chat_id, None)
+            break
+        except RPCError as e:
+            err_str = str(e)
+            if any(err in err_str for err in ["INPUT_USER_DEACTIVATED", "USER_IS_BLOCKED", "PEER_ID_INVALID", "CHAT_WRITE_FORBIDDEN"]):
+                try:
+                    from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES, GLOBAL_UI_LAST_UPDATE
+                    chat_id = msg.chat.id
+                    if chat_id in GLOBAL_UI_MSG: del GLOBAL_UI_MSG[chat_id]
+                    if chat_id in GLOBAL_UI_PAGES: del GLOBAL_UI_PAGES[chat_id]
+                    if msg.id in GLOBAL_UI_LAST_UPDATE: del GLOBAL_UI_LAST_UPDATE[msg.id]
+                except: pass
+            break
+        except (aiohttp.ClientConnectionError, aiohttp.ServerTimeoutError, TimeoutError) as e:
+            if "SSL shutdown" not in str(e): LOGGER.error(f"Connection Error Edit: {e}")
+            break
+        except Exception: 
+            break
+            
+    return None
