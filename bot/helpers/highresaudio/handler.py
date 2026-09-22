@@ -119,34 +119,55 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             
             used_proxy = await proxy_manager.get_proxy(client.proxy)
 
-            # --- [PERBAIKAN 2] SISTEM RETRY UNTUK AIOHTTP ---
-            max_aio_retries = 3
+            # --- [PERBAIKAN 2] SISTEM RETRY & RESUME UNTUK AIOHTTP ---
+            # Kita tingkatkan batas percobaan karena proksi tidak stabil
+            max_aio_retries = 5 
             aio_success = False
             
             for attempt in range(max_aio_retries):
-                # [FIX: PINDAHKAN KE DALAM LOOP] 
-                # Konektor harus dibuat baru pada setiap iterasi karena 
-                # aiohttp.ClientSession akan menutup konektor saat keluar dari blok 'async with'
                 connector = proxy_manager.get_aiohttp_connector(used_proxy)
                 
+                # Salin header agar tidak tercemar antar-iterasi
+                current_headers = headers_dict.copy()
+                
+                # Fitur Resume: Cek apakah ada file yang terputus di disk
+                downloaded = 0
+                file_mode = 'wb'
+                if os.path.exists(track_meta['filepath']):
+                    downloaded = os.path.getsize(track_meta['filepath'])
+                    if downloaded > 0:
+                        # Minta server melanjutkan unduhan dari byte terakhir
+                        current_headers['Range'] = f"bytes={downloaded}-"
+                        file_mode = 'ab' # Append mode (gabungkan data baru ke data lama)
+                
                 try:
-                    async with aiohttp.ClientSession(headers=headers_dict, connector=connector) as session:
+                    async with aiohttp.ClientSession(headers=current_headers, connector=connector) as session:
                         get_kwargs = {}
                         if used_proxy and not used_proxy.startswith('socks'):
                             get_kwargs['proxy'] = used_proxy
                             
                         safe_url = yarl.URL(download_url, encoded=True)
-                        
-                        # Timeout dinaikkan agar tidak putus di tengah
                         timeout = aiohttp.ClientTimeout(total=3600, sock_read=60)
+                        
                         async with session.get(safe_url, timeout=timeout, **get_kwargs) as r:
                             r.raise_for_status()
-                            total_size = int(r.headers.get('content-length', 0))
-                            downloaded = 0
+                            
+                            content_length = int(r.headers.get('content-length', 0))
+                            
+                            # Cek apakah server mendukung resume (Status 206 Partial Content)
+                            if r.status == 200 and downloaded > 0:
+                                # Server menolak resume, terpaksa ulang dari awal
+                                downloaded = 0
+                                file_mode = 'wb'
+                                total_size = content_length
+                            else:
+                                # Server menerima resume
+                                total_size = downloaded + content_length
+                                
                             start_time = time.time()
                             last_update = start_time
                             
-                            async with aiofiles.open(track_meta['filepath'], 'wb') as f:
+                            async with aiofiles.open(track_meta['filepath'], file_mode) as f:
                                 async for chunk in r.content.iter_chunked(256 * 1024):
                                     if chunk:
                                         await f.write(chunk)
@@ -158,18 +179,20 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
                                                 last_update = now
                                                 from bot.helpers.utils import progress_message
                                                 await progress_message(downloaded, total_size, details)
+                                                
+                    # Jika berhasil mencapai titik ini tanpa terputus, tandai sukses
                     aio_success = True
-                    break # Berhasil, keluar dari loop
+                    break 
                     
                 except aiohttp.ClientPayloadError as e:
-                    LOGGER.error(f"HighResAudio AIOHTTP payload error (Coba {attempt+1}/{max_aio_retries}): {e}")
+                    LOGGER.error(f"HighResAudio AIOHTTP payload error (Coba {attempt+1}/{max_aio_retries}) terputus di {downloaded} bytes: {e}")
                     await asyncio.sleep(2)
                 except Exception as e:
-                    LOGGER.error(f"HighResAudio AIOHTTP gagal (Coba {attempt+1}/{max_aio_retries}): {e}")
+                    LOGGER.error(f"HighResAudio AIOHTTP gagal (Coba {attempt+1}/{max_aio_retries}) terputus di {downloaded} bytes: {e}")
                     await asyncio.sleep(2)
 
             if not aio_success:
-                raise Exception("AIOHTTP Turbo Fallback gagal setelah percobaan maksimal (ContentLengthError).")
+                raise Exception(f"AIOHTTP Turbo Fallback gagal setelah {max_aio_retries} percobaan. Proksi terlalu sering memutus koneksi.")
             # --------------------------------------------------------
         
     except Exception as e:
