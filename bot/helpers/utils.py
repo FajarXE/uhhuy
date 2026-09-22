@@ -534,10 +534,10 @@ def get_readable_file_size(size_in_bytes) -> str:
 
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
+    # Memindahkan jeda waktu ke ruang asinkron agar tidak memblokir thread pool
+    await asyncio.sleep(0.5)
+    
     def _sync_cleanup():
-        import time
-        time.sleep(0.5) 
-        
         if metadata:
             try:
                 folder_path = metadata.get('folderpath')
