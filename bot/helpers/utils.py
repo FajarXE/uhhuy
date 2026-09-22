@@ -145,9 +145,10 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 2
                 res = await asyncio.wait_for(task, timeout=600.0)
         except asyncio.TimeoutError:
             LOGGER.warning("⚠️ 1 Lagu dilewati karena macet (Timeout > 10 Menit). Playlist dilanjutkan.")
-            res = None
+            res = False
         except Exception as e:
-            res = e
+            LOGGER.error(f"Task Error di Concurrent: {e}")
+            res = False
             
         completed_tasks += 1
         return res
