@@ -258,7 +258,8 @@ async def set_metadata(metadata:dict, user_id: int = None):
             
     except Exception as e:
         from bot.logger import LOGGER
-        LOGGER.error(f"Gagal membuka file {audio_path}: {e}")
+        # [FIX] Gunakan exception agar traceback terbaca
+        LOGGER.exception(f"Gagal membuka file {audio_path}:")
         return
 
     if handle is None:
@@ -325,10 +326,10 @@ async def set_metadata(metadata:dict, user_id: int = None):
                                 lf.write(lyrics_text)
                         except Exception as e:
                             from bot.logger import LOGGER
-                            LOGGER.error(f"Gagal menulis file lirik fisik: {e}")
+                            LOGGER.exception("Gagal menulis file lirik fisik:")
             except Exception as e:
                 from bot.logger import LOGGER
-                LOGGER.error(f"Error fetching lyrics: {e}")
+                LOGGER.exception("Error fetching lyrics:")
 
     # --- 3. ROUTING KE HANDLER SPESIFIK ---
     try:
@@ -352,9 +353,8 @@ async def set_metadata(metadata:dict, user_id: int = None):
             else:
                 await set_mp3(metadata, handle, dur_ms)  
     except Exception as e:
-        LOGGER.error(f"Gagal menulis metadata: {e}")
-        import traceback
-        traceback.print_exc()
+        # [FIX] Cukup gunakan exception(), tidak perlu import traceback manual
+        LOGGER.exception("Gagal menulis metadata audio:")
 
 
 # ==========================================
@@ -787,12 +787,12 @@ async def savePic(handle, metadata):
         return
 
     try:
-        # Membaca gambar secara asinkron
         import aiofiles
         async with aiofiles.open(album_art, "rb") as f:
             data = await f.read()
     except Exception as e:
-        LOGGER.error(f"Error membaca file cover art: {e}")
+        # [FIX]
+        LOGGER.exception(f"Error membaca file cover art {album_art}:")
         return
     
     # --- 1. Handler FLAC ---
@@ -822,7 +822,8 @@ async def savePic(handle, metadata):
             handle["METADATA_BLOCK_PICTURE"] = [encoded_data]
             
         except Exception as e:
-            LOGGER.error(f"Gagal set cover art OGG: {e}")
+            # [FIX]
+            LOGGER.exception("Gagal set cover art OGG:")
 
     # --- 3. Handler MP4 (M4A) ---
     elif isinstance(handle, MP4):
@@ -891,7 +892,8 @@ async def _download_cover_with_headers(url: str, destination: str, proxy: str = 
     except Exception as e:
         if used_proxy:
             await proxy_manager.report_fail(used_proxy)
-        LOGGER.error(f"Gagal download cover: {type(e).__name__} {e} | URL: {url}")
+        # [FIX]
+        LOGGER.exception(f"Gagal download cover | URL: {url}")
 
 async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = None): 
     if not url: return './project-siesta.png'
