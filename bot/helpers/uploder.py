@@ -53,17 +53,82 @@ def create_cloud_caption(metadata):
     explicit = str(metadata.get('explicit', False))
     return f"<b>ᴛɪᴛʟᴇ</b> : {title}\n<b>ᴀʀᴛɪsᴛ</b> : {artist}\n<b>ʀᴇʟᴇᴀsᴇ ᴅᴀᴛᴇ</b> : {date}\n<b>ᴛᴏᴛᴀʟ ᴛʀᴀᴄᴋs</b> : {total_tracks}\n<b>ᴛᴏᴛᴀʟ ᴠᴏʟᴜᴍᴇs</b> : {total_volumes}\n<b>ǫᴜᴀʟɪᴛʏ</b> : {quality}\n<b>ᴘʀᴏᴠɪᴅᴇʀ</b> : {provider}\n<b>ᴇxᴘʟɪᴄɪᴛ</b> : {explicit}"
 
+# ==========================================
+# CLOUD UPLOAD STRATEGIES (ADAPTOR)
+# ==========================================
+class CloudStrategy:
+    async def prepare_folder(self, uploader, token, folder_name): pass
+    def get_upload_kwargs(self): return {}
+    def format_result(self, uploaded_links): return None
+
+class GofileStrategy(CloudStrategy):
+    def __init__(self):
+        self.folder_id = None
+        self.folder_code = None
+
+    async def prepare_folder(self, uploader, token, folder_name):
+        try:
+            root_id = await uploader.gofile_get_root(token)
+            new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
+            if new_folder:
+                self.folder_id = new_folder['id']
+                self.folder_code = new_folder['code']
+        except Exception as e:
+            LOGGER.warning(f"Gofile Folder API Error/Lambat: {e}")
+
+    def get_upload_kwargs(self):
+        return {'upload_type': 'gofile', 'specific_folder_id': self.folder_id}
+
+    def format_result(self, uploaded_links):
+        if self.folder_code: return f"https://gofile.io/d/{self.folder_code}"
+        return "\n".join(uploaded_links) if uploaded_links else None
+
+class BuzzheavierStrategy(CloudStrategy):
+    def __init__(self):
+        self.folder_id = None
+
+    async def prepare_folder(self, uploader, token, folder_name):
+        try:
+            root_id = await uploader.buzzheavier_get_root(token)
+            self.folder_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
+        except Exception as e:
+            LOGGER.warning(f"Buzzheavier Folder API Error/Lambat: {e}")
+
+    def get_upload_kwargs(self):
+        return {'upload_type': 'buzzheavier', 'specific_folder_id': self.folder_id}
+
+    def format_result(self, uploaded_links):
+        if self.folder_id: return f"https://buzzheavier.com/{self.folder_id}"
+        return "\n".join(uploaded_links) if uploaded_links else None
+
+class VikingfilesStrategy(CloudStrategy):
+    def get_upload_kwargs(self):
+        return {'upload_type': 'viking'}
+
+    def format_result(self, uploaded_links):
+        return "\n".join(uploaded_links) if uploaded_links else None
+# ==========================================
+
 async def upload_to_cloud_handler(filepath, user, metadata, mode):
     user_id = user['user_id']
     user_data = bot_set.user_data.get(user_id, {})
     mode = mode.title() if mode else 'Telegram'
     
-    if mode == 'Gofile': token = user_data.get('gofile_token')
-    elif mode == 'Buzzheavier': token = user_data.get('buzzheavier_token')
-    elif mode == 'Vikingfiles': token = user_data.get('viking_token')
-    else: token = None
+    strategy = None
+    token = None
     
-    if not token:
+    # 1. Pemilihan Strategi Berdasarkan Mode
+    if mode == 'Gofile': 
+        token = user_data.get('gofile_token')
+        strategy = GofileStrategy()
+    elif mode == 'Buzzheavier': 
+        token = user_data.get('buzzheavier_token')
+        strategy = BuzzheavierStrategy()
+    elif mode == 'Vikingfiles': 
+        token = user_data.get('viking_token')
+        strategy = VikingfilesStrategy()
+        
+    if not token or not strategy:
         await send_message(user, f"⚠️ <b>{mode} Token Missing!</b>", 'text')
         return None
 
@@ -73,9 +138,22 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
         "vikingfiles": {"api": user_data.get('viking_token')}
     }
     
-    if isinstance(filepath, list): base_path = os.path.dirname(filepath[0])
-    elif os.path.isfile(filepath): base_path = os.path.dirname(filepath)
-    else: base_path = os.path.dirname(filepath.rstrip('/'))
+    # 2. Normalisasi Input (Menyatukan Logika List, File Tunggal, dan Direktori)
+    files_to_upload = []
+    if isinstance(filepath, list):
+        files_to_upload = filepath
+        base_path = os.path.dirname(filepath[0])
+    elif os.path.isfile(filepath):
+        files_to_upload = [filepath]
+        base_path = os.path.dirname(filepath)
+    elif os.path.isdir(filepath):
+        files_to_upload = [os.path.join(filepath, f) for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
+        base_path = filepath
+    else:
+        base_path = os.path.dirname(filepath.rstrip('/'))
+
+    if not files_to_upload:
+        return None
         
     listener = FakeListener(server_dict)
     uploader = DirectUpload(listener=listener, path=base_path)
@@ -91,119 +169,28 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
 
     try:
         folder_name = metadata.get('title', 'Unknown Album')
-        if isinstance(filepath, list):
-            if mode == 'Gofile':
-                root_id = await uploader.gofile_get_root(token)
-                new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
-                if new_folder:
-                    folder_id = new_folder['id']
-                    final_link = new_folder['code']
-                    for index, file_part in enumerate(filepath, 1):
-                        if details: details['title'] = f"Part {index}: {os.path.basename(file_part)}"
-                        await uploader.upload(os.path.basename(file_part), 0, 'gofile', specific_folder_id=folder_id, details=details)
-                    return f"https://gofile.io/d/{final_link}"
+        
+        # 3. Persiapan Folder (Didelegasikan ke Strategy masing-masing)
+        await strategy.prepare_folder(uploader, token, folder_name)
+        
+        uploaded_links = []
+        upload_kwargs = strategy.get_upload_kwargs()
+        total_files = len(files_to_upload)
+        
+        # 4. Iterasi Eksekusi Upload Seragam (Bebas Duplikasi)
+        for index, file_part in enumerate(files_to_upload, 1):
+            filename = os.path.basename(file_part)
+            if details:
+                details['title'] = f"[{index}/{total_files}] {filename}" if total_files > 1 else filename
+                    
+            res = await uploader.upload(filename, 0, details=details, **upload_kwargs)
+            if res: 
+                uploaded_links.append(list(res.values())[0])
 
-            elif mode == 'Buzzheavier':
-                root_id = await uploader.buzzheavier_get_root(token)
-                parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
-                target_folder = parent_id if parent_id else None
-                
-                uploaded_links = []
-                for index, file_part in enumerate(filepath, 1):
-                    if details: details['title'] = f"Part {index}: {os.path.basename(file_part)}"
-                    res = await uploader.upload(os.path.basename(file_part), 0, 'buzzheavier', specific_folder_id=target_folder, details=details)
-                    if res: uploaded_links.append(list(res.values())[0])
-                
-                if target_folder: return f"https://buzzheavier.com/{target_folder}"
-                else: return "\n".join(uploaded_links)
+        # 5. Ekstraksi Hasil (Didelegasikan ke Strategy)
+        return strategy.format_result(uploaded_links)
 
-            elif mode == 'Vikingfiles':
-                links = []
-                for index, file_part in enumerate(filepath, 1):
-                    if details: details['title'] = f"Part {index}: {os.path.basename(file_part)}"
-                    res = await uploader.upload(os.path.basename(file_part), 0, 'viking', details=details)
-                    if res: links.append(list(res.values())[0])
-                return "\n".join(links)
-
-        elif os.path.isfile(filepath):
-            if details: details['title'] = os.path.basename(filepath)
-            
-            if mode == 'Buzzheavier':
-                parent_id = None
-                try:
-                    root_id = await uploader.buzzheavier_get_root(token)
-                    parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
-                except Exception as e:
-                    LOGGER.warning(f"Buzzheavier Folder API lambat: {e}")
-                
-                res = await uploader.upload(os.path.basename(filepath), 0, 'buzzheavier', specific_folder_id=parent_id, details=details)
-                if res and parent_id: return f"https://buzzheavier.com/{parent_id}"
-                elif res: return list(res.values())[0]
-                
-            elif mode == 'Gofile':
-                new_folder = None
-                folder_id = None
-                try:
-                    root_id = await uploader.gofile_get_root(token)
-                    new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
-                    folder_id = new_folder['id'] if new_folder else None
-                except Exception as e:
-                    LOGGER.warning(f"Gofile Folder API lambat: {e}")
-                
-                res = await uploader.upload(os.path.basename(filepath), 0, 'gofile', specific_folder_id=folder_id, details=details)
-                if res and new_folder: return f"https://gofile.io/d/{new_folder['code']}"
-                elif res: return list(res.values())[0]
-            
-            elif mode == 'Vikingfiles':
-                res = await uploader.upload(os.path.basename(filepath), 0, 'viking', details=details)
-                if res: return list(res.values())[0]
-            
-            else:
-                res = await uploader.upload(os.path.basename(filepath), 0, mode.lower(), details=details)
-                if res: return list(res.values())[0]
-
-        elif os.path.isdir(filepath):
-            files = [f for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
-            
-            if mode == 'Buzzheavier':
-                uploader.path = filepath 
-                root_id = await uploader.buzzheavier_get_root(token)
-                parent_id = await uploader.buzzheavier_create_folder_async(token, root_id, folder_name)
-                target_folder = parent_id if parent_id else None
-
-                links = []
-                for index, filename in enumerate(files, 1):
-                    if details: details['title'] = f"[{index}/{len(files)}] {filename}"
-                    res = await uploader.upload(filename, 0, 'buzzheavier', specific_folder_id=target_folder, details=details)
-                    if res: links.append(list(res.values())[0])
-                
-                if target_folder: return f"https://buzzheavier.com/{target_folder}"
-                return "\n".join(links)
-
-            elif mode == 'Gofile':
-                uploader.path = filepath 
-                root_id = await uploader.gofile_get_root(token)
-                new_folder = await uploader.gofile_create_folder_async(token, root_id, folder_name)
-                
-                if new_folder:
-                    folder_id = new_folder['id']
-                    final_link = new_folder['code']
-                    for index, filename in enumerate(files, 1):
-                        if details: details['title'] = f"[{index}/{len(files)}] {filename}"
-                        await uploader.upload(filename, 0, 'gofile', specific_folder_id=folder_id, details=details)
-                    return f"https://gofile.io/d/{final_link}"
-                return None
-
-            elif mode == 'Vikingfiles':
-                uploader.path = filepath 
-                links = []
-                for index, filename in enumerate(files, 1):
-                    if details: details['title'] = f"[{index}/{len(files)}] {filename}"
-                    res = await uploader.upload(filename, 0, 'viking', details=details)
-                    if res: links.append(list(res.values())[0])
-                return "\n".join(links)
-
-    # --- [FIX] PENANGANAN ERROR SPESIFIK ---
+    # --- PENANGANAN ERROR SPESIFIK & TRACEBACK ---
     except asyncio.TimeoutError:
         LOGGER.error(f"[UPLOAD TIMEOUT] Cloud API {mode} terlalu lambat merespons.")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> Request Timeout.", 'text')
@@ -214,9 +201,9 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
         LOGGER.error(f"[UPLOAD KEY ERROR] Struktur respon API berubah: {e}")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> Respons API tidak terduga (Kehilangan key {e}).", 'text')
     except Exception as e:
-        LOGGER.error(f"[UPLOAD FATAL ERROR] Exception di Cloud Handler: {e}")
+        # Menggunakan .exception() agar traceback penuh tercetak di log
+        LOGGER.exception(f"[UPLOAD FATAL ERROR] Exception tidak terduga di Cloud Handler: {e}")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> {e}", 'text')
-    # ---------------------------------------
     
     return None
 
