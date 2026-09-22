@@ -7,6 +7,7 @@ import base64
 import hashlib
 import asyncio
 from datetime import datetime
+from typing import Union, Dict
 
 # Import Mutagen
 from mutagen import File
@@ -354,14 +355,15 @@ async def set_metadata(metadata:dict, user_id: int = None):
             else:
                 await set_mp3(metadata, handle, dur_ms)  
     except Exception as e:
-        # [FIX] Cukup gunakan exception(), tidak perlu import traceback manual
-        LOGGER.exception("Gagal menulis metadata audio:")
+        # [PENGAMANAN] Menangkap jenis handle dan path file untuk melacak penyebab silent failure
+        handle_type = type(handle).__name__ if handle else "Unknown/Corrupt"
+        LOGGER.exception(f"Gagal menulis metadata audio pada file {audio_path} (Tipe Handle: {handle_type}):")
 
 
 # ==========================================
 # HANDLER FLAC (VORBIS COMMENT)
 # ==========================================
-async def set_flac(data, handle, dur_ms=0):
+async def set_flac(data: Dict, handle: FLAC, dur_ms: int = 0):
     if handle.tags is None:
             handle.add_tags()
     
@@ -461,7 +463,7 @@ async def set_flac(data, handle, dur_ms=0):
 # ==========================================
 # HANDLER M4A (ITUNES ATOMS)
 # ==========================================
-async def set_m4a(data, handle):
+async def set_m4a(data: Dict, handle: MP4):
     if handle.tags is None:
         handle.add_tags()
     
@@ -567,7 +569,7 @@ async def set_m4a(data, handle):
 # ==========================================
 # HANDLER MP3 (ID3)
 # ==========================================
-async def set_mp3(data, handle, dur_ms=0):
+async def set_mp3(data: Dict, handle: Union[MP3, EasyMP3], dur_ms: int = 0):
     if handle.tags is None:
             handle.add_tags()
     
@@ -637,10 +639,10 @@ async def set_mp3(data, handle, dur_ms=0):
 # ==========================================
 # HANDLER WAV
 # ==========================================
-async def set_wav(data, handle, dur_ms=0):
+async def set_wav(data: Dict, handle: WAVE, dur_ms: int = 0):
     if not isinstance(handle, WAVE):
         try: handle = WAVE(data['filepath'])
-        except Exception: pass 
+        except Exception: pass
 
     if handle.tags is None:
         try: handle.add_tags()
@@ -684,7 +686,7 @@ async def set_wav(data, handle, dur_ms=0):
 # ==========================================
 # HANDLER OGG VORBIS (KHUSUS SPOTIFY)
 # ==========================================
-async def set_vorbis(data, handle, dur_ms=0):
+async def set_vorbis(data: Dict, handle: Union[OggVorbis, OggOpus], dur_ms: int = 0):
     """Handler khusus untuk file OGG (Spotify)"""
     # Pastikan container tags ada
     if handle.tags is None:
