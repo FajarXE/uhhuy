@@ -536,14 +536,13 @@ async def telegram_upload(track, user, batch_mode=False):
                 if os.path.exists(lyrics_path):
                     await send_message(user, lyrics_path, 'doc', caption=f"📝 Lyrics: {meta.get('title', 'Unknown')}", progress=tg_progress_callback, progress_args=(details,))
 
-    # --- [FIX] PENANGANAN ERROR SPESIFIK TELEGRAM ---
     except FileNotFoundError as e:
         LOGGER.error(f"[UPLOAD ERROR] File tidak ada: {e}")
         raise e
     except Exception as e:
-        LOGGER.error(f"[UPLOAD ERROR] send_message failed for {filepath}: {e}")
+        # [FIX] Jangan ditelan! Cetak hirarki lengkapnya
+        LOGGER.exception(f"[UPLOAD ERROR] send_message failed for {filepath}:")
         raise e
-    # ------------------------------------------------
 
 async def batch_telegram_upload(metadata, user):
     tracks_to_upload = []
@@ -570,4 +569,5 @@ async def batch_telegram_upload(metadata, user):
         except FileNotFoundError:
             pass
         except Exception as e:
-            LOGGER.error(f"Gagal mengunggah track: {e}")
+            # [FIX]
+            LOGGER.exception("Gagal mengunggah track dalam mode batch:")
