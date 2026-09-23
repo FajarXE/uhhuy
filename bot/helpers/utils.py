@@ -296,13 +296,11 @@ async def split_zip_system(folderpath):
     base_name = os.path.basename(folderpath)
     parent_dir = os.path.dirname(folderpath)
     
-    # Bersihkan sisa zip part lama jika folder diulang
     for f in os.listdir(parent_dir):
         if f == f"{base_name}.zip" or (f.startswith(f"{base_name}.z") and f.replace(f"{base_name}.z", "").isdigit()):
             try: os.remove(os.path.join(parent_dir, f))
             except: pass
             
-    # Menggunakan Native OS Zip (Jauh lebih ringan untuk CPU/RAM)
     cmd = ["zip", "-r", "-0", "-s", "1900m", zip_path, "."]
     try:
         process = await asyncio.create_subprocess_exec(
@@ -310,20 +308,25 @@ async def split_zip_system(folderpath):
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         
-        # --- [PERBAIKAN: STREAM CONSUMER] ---
-        # Membaca pipe secara asinkron lalu membuangnya untuk mencegah Buffer Penuh & Deadlock
         async def consume_stream(stream):
             while True:
                 line = await stream.readline()
                 if not line:
                     break
 
-        await asyncio.gather(
-            consume_stream(process.stdout),
-            consume_stream(process.stderr),
-            process.wait()
-        )
-        # ------------------------------------
+        try:
+            await asyncio.gather(
+                consume_stream(process.stdout),
+                consume_stream(process.stderr),
+                process.wait()
+            )
+        except asyncio.CancelledError:
+            # --- BUNUH ZOMBIE PROCESS ZIP ---
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            raise
         
         if process.returncode == 0:
             zip_files = []
@@ -331,12 +334,13 @@ async def split_zip_system(folderpath):
                 if f == f"{base_name}.zip" or (f.startswith(f"{base_name}.z") and f.replace(f"{base_name}.z", "").isdigit()):
                     zip_files.append(os.path.join(parent_dir, f))
             
-            # Sort agar .z01, .z02, ..., .zip terkirim berurutan
             zip_files.sort()
             return zip_files
         else:
             LOGGER.warning("System split zip gagal, fallback ke Python Zipfile.")
             return await asyncio.to_thread(split_zip_folder, folderpath)
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         LOGGER.error(f"Split zip system error: {e}")
         return await asyncio.to_thread(split_zip_folder, folderpath)
@@ -354,24 +358,32 @@ async def create_zip_system(folderpath):
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         
-        # --- [PERBAIKAN: STREAM CONSUMER] ---
         async def consume_stream(stream):
             while True:
                 line = await stream.readline()
                 if not line:
                     break
 
-        await asyncio.gather(
-            consume_stream(process.stdout),
-            consume_stream(process.stderr),
-            process.wait()
-        )
-        # ------------------------------------
+        try:
+            await asyncio.gather(
+                consume_stream(process.stdout),
+                consume_stream(process.stderr),
+                process.wait()
+            )
+        except asyncio.CancelledError:
+            # --- BUNUH ZOMBIE PROCESS ZIP ---
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            raise
         
         if process.returncode == 0: return zip_path
         else:
             return await asyncio.to_thread(zip_folder, folderpath)
-    except:
+    except asyncio.CancelledError:
+        raise
+    except Exception:
         return await asyncio.to_thread(zip_folder, folderpath)
 
 
