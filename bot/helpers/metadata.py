@@ -929,14 +929,19 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
     if 'cover_temp_obj' in meta and os.path.exists(meta['cover_temp_obj'].name):
         return meta['cover_temp_obj'].name
 
-    # 2. Delegasi file ke OS. File akan dihancurkan otomatis saat variabel ini lenyap.
-    temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=True)
+    # --- BAGIAN YANG DIMODIFIKASI ---
+    temp_dir = meta.get('tempfolder', '.')
+    os.makedirs(temp_dir, exist_ok=True) # Pastikan foldernya ada
+    
+    # Delegasi file ke OS, tapi minta OS menaruhnya di dalam folder bot kita
+    temp_file = tempfile.NamedTemporaryFile(dir=temp_dir, suffix='.jpg', delete=True)
     cover_path = temp_file.name
+    # --------------------------------
     
     # Ikat objek file ke metadata agar umur filenya sama persis dengan umur tugas (task) saat ini
     meta['cover_temp_obj'] = temp_file
 
-    # 3. Kunci unduhan berdasarkan URL agar tidak saling bertabrakan jika dipanggil secara paralel
+    # Kunci unduhan berdasarkan URL agar tidak saling bertabrakan jika dipanggil secara paralel
     lock = COVER_LOCKS.get(url)
     if lock is None:
         lock = asyncio.Lock()
