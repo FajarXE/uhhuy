@@ -17,7 +17,7 @@ RUN apt-get update -qq && \
 
 RUN curl -O https://downloads.rclone.org/v1.75.1/rclone-v1.75.1-linux-amd64.zip && \
     unzip rclone-v1.75.1-linux-amd64.zip && \
-    install -m 755 rclone-v1.70.2-linux-amd64/rclone /usr/bin/rclone && \
+    install -m 755 rclone-v1.75.1-linux-amd64/rclone /usr/bin/rclone && \
     rm -rf rclone-v1.75.1-linux-amd64*
 
 RUN wget https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-640.x86_64-unknown-linux.zip && \
