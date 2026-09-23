@@ -64,11 +64,6 @@ except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor livephish_manager.")
     livephish_manager = None
 try:
-    from ..helpers.khinsider.manager import khinsider_manager
-except ImportError:
-    LOGGER.warning("ProviderSettings: Gagal mengimpor khinsider_manager.")
-    khinsider_manager = None
-try:
     from ..helpers.genie.manager import genie_manager
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor genie_manager.")
@@ -707,35 +702,6 @@ async def livephish_qual_cb(c, cb:CallbackQuery):
 
 
 #----------------
-# KHINSIDER
-#----------------
-@Client.on_callback_query(filters.regex(pattern=r"^khiP")) 
-async def khinsider_cb(c, cb:CallbackQuery):
-    if await check_user(cb.from_user.id, restricted=True):
-        # HANYA FLAC DAN MP3 SEPERTI PERMINTAAN
-        quality = {
-            "flac": "FLAC",
-            "mp3": "MP3"
-        }
-        if not khinsider_manager:
-            return await edit_message(cb.message, "Layanan Khinsider tidak aktif.")
-            
-        current = khinsider_manager.quality
-        if current in quality:
-            quality[current] += '✅'
-            
-        await edit_message(cb.message, "**KHINSIDER PANEL**\nPilih prioritas format:", markup=khi_button(quality))
-
-@Client.on_callback_query(filters.regex(pattern=r"^khiQ")) 
-async def khinsider_qual_cb(c, cb:CallbackQuery):
-    if await check_user(cb.from_user.id, restricted=True):
-        to_set = cb.data.split('_')[1]
-        khinsider_manager.quality = to_set
-        await database.set_variable("KHINSIDER_QUALITY", to_set)
-        await khinsider_cb(c, cb)
-
-
-#----------------
 # AMAZON MUSIC (GLOBAL ADMIN)
 #----------------
 @Client.on_callback_query(filters.regex(pattern=r"^amzP"))
@@ -893,6 +859,7 @@ async def amz_global_verify_cb(client, query):
         if not amz_api.session.closed: await amz_api.close()
         if user_id in PENDING_AMAZON_GLOBAL_AUTH: del PENDING_AMAZON_GLOBAL_AUTH[user_id]
         await query.message.reply_text(f"❌ **Error:** {str(e)[:400]}")
+
 
 #----------------
 # GENIE
