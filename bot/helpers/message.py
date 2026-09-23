@@ -363,8 +363,15 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
         except MessageIdInvalid:
             from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES
             chat_id = msg.chat.id
-            GLOBAL_UI_MSG.pop(chat_id, None)
-            GLOBAL_UI_PAGES.pop(chat_id, None)
+            
+            # --- [PERBAIKAN GHOST PANEL] ---
+            # Pastikan pesan yang gagal diedit ADALAH pesan yang sedang aktif di memori.
+            # Jika berbeda, biarkan memori Radar terbaru tetap hidup.
+            current_radar = GLOBAL_UI_MSG.get(chat_id)
+            if current_radar and current_radar.id == msg.id:
+                GLOBAL_UI_MSG.pop(chat_id, None)
+                GLOBAL_UI_PAGES.pop(chat_id, None)
+            # -------------------------------
             break
         except RPCError as e:
             err_str = str(e)
