@@ -2141,30 +2141,6 @@ async def uset_livephish_handler(client, query):
     await uset_cb(client, query, "livephish")
 
 
-# --- HANDLER KHINSIDER SPECIFIC ---
-@Client.on_callback_query(filters.regex("^ukhis"))
-async def uset_khinsider_handler(client, query):
-    m = query.message
-    if not await check_user(msg=m):
-        return
-    
-    # Data format: ukhis_flac, ukhis_mp3
-    to_set = query.data.split('_')[1]
-    
-    if not khinsider_manager:
-        await query.answer("Layanan Khinsider tidak aktif!", show_alert=True)
-        return
-
-    user_id = query.from_user.id
-    
-    # Simpan ke Manager & DB
-    await khinsider_manager.setup_quality(user_id, to_set)
-    bot_set.user_data.setdefault(user_id, {})['khinsider_qual'] = to_set
-    await database.save_user_settings(user_id, {'khinsider_qual': to_set})
-    
-    await uset_cb(client, query, "khinsider")
-
-
 # --- HANDLER AMAZON SPECIFIC ---
 @Client.on_callback_query(filters.regex("^uamzs_"))
 async def uset_amazon(client, query):
@@ -2475,15 +2451,6 @@ async def debug(c, m):
     else:
         dt_hra += "Tidak ada klien HighResAudio yang aktif."
 
-    # KHINSIDER DEBUG
-    dt_khi = "\n\nKHINSIDER:\n"
-    if khinsider_manager:
-        dt_khi += f"Klien Khinsider aktif.\n"
-        dt_khi += f"Kualitas Default: {khinsider_manager.quality}\n"
-        dt_khi += f"Cache User (Global): {len([u for u in bot_set.user_data if 'khinsider_qual' in bot_set.user_data[u]])} pengguna"
-    else:
-        dt_khi += "Tidak ada klien Khinsider yang aktif."
-
     # =========================================
     # TAMBAHKAN AMAZON MUSIC DEBUG DI SINI
     # =========================================
@@ -2516,7 +2483,7 @@ async def debug(c, m):
     zips = f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
     
     # Combine all debug texts (Pastikan dt_amz ditambahkan ke dalam final_debug_text)
-    final_debug_text = dt_qb + dt_bp + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + zips
+    final_debug_text = dt_qb + dt_bp + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_amz + dt_gn + zips
     
     # Reply safely
     await m.reply(final_debug_text, True)
