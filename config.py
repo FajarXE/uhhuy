@@ -460,6 +460,15 @@ class Config:
         logging.info("Tidak ada proxy untuk Genie. Menggunakan koneksi langsung (Raw IP).")
 #--------------------
 # --- BATAS TAMBAHAN ---
+
+#--------------------    
+# KHINSIDER
+#--------------------
+    KHINSIDER_PROXY = getenv("KHINSIDER_PROXY", None)
+    if KHINSIDER_PROXY and KHINSIDER_PROXY.startswith("socks5h://"):
+        KHINSIDER_PROXY = KHINSIDER_PROXY.replace("socks5h://", "socks5://")
+#--------------------
+# --- BATAS TAMBAHAN ---
     
 #--------------------
 # RENDER MANAGEMENT
