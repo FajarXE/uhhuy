@@ -6,6 +6,7 @@ import aiofiles
 import base64
 import hashlib
 import asyncio
+import tempfile
 from datetime import datetime
 from typing import Union, Dict
 
@@ -922,39 +923,32 @@ async def _download_cover_with_headers(url: str, destination: str, proxy: str = 
 
 async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = None): 
     if not url: return './project-siesta.png'
+    if url.startswith("//"): url = "https:" + url
 
-    if url.startswith("//"):
-        url = "https:" + url
+    # 1. Jika objek temp file sudah ada di memori meta, gunakan kembali tanpa mengunduh ulang
+    if 'cover_temp_obj' in meta and os.path.exists(meta['cover_temp_obj'].name):
+        return meta['cover_temp_obj'].name
 
-    try:
-        import hashlib
-        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
-        filename = f"{url_hash}.jpg"
-    except Exception:
-        from datetime import datetime
-        filename = f"temp_cover_{datetime.now().timestamp()}.jpg"
+    # 2. Delegasi file ke OS. File akan dihancurkan otomatis saat variabel ini lenyap.
+    temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=True)
+    cover_path = temp_file.name
     
-    temp_dir = meta.get('tempfolder', '.')
-    cover_path = os.path.join(temp_dir, filename)
-    
-    # --- [FIX] PENGGUNAAN DICTIONARY STANDAR DENGAN PEMBERSIHAN MANUAL ---
-    lock = COVER_LOCKS.get(cover_path)
+    # Ikat objek file ke metadata agar umur filenya sama persis dengan umur tugas (task) saat ini
+    meta['cover_temp_obj'] = temp_file
+
+    # 3. Kunci unduhan berdasarkan URL agar tidak saling bertabrakan jika dipanggil secara paralel
+    lock = COVER_LOCKS.get(url)
     if lock is None:
         lock = asyncio.Lock()
-        COVER_LOCKS[cover_path] = lock
+        COVER_LOCKS[url] = lock
 
     try:
         async with lock:
-            # Cek ulang setelah masuk antrean lock, siapa tahu sudah didownload oleh task sebelumnya
-            if not os.path.exists(cover_path) or os.path.getsize(cover_path) == 0:
-                await _download_cover_with_headers(url, cover_path, proxy=proxy)
+            # Unduh gambar dan tulis ke path file sementara yang disediakan OS
+            await _download_cover_with_headers(url, cover_path, proxy=proxy)
     finally:
-        # Bersihkan lock dari RAM setelah selesai digunakan (mencegah memory leak)
-        # Jika ada antrean lain yang sedang menunggu lock yang sama, 
-        # mereka akan tetap berjalan karena sudah memegang instance lock-nya di variabel lokal.
-        if cover_path in COVER_LOCKS:
-            COVER_LOCKS.pop(cover_path, None)
-    # ---------------------------------------------------------------------
+        if url in COVER_LOCKS:
+            COVER_LOCKS.pop(url, None)
     
     if os.path.exists(cover_path) and os.path.getsize(cover_path) > 0:
         return cover_path
