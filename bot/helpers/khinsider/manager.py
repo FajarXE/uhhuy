@@ -144,6 +144,10 @@ class KhinsiderManager:
                 preferred_formats.insert(0, preferred_formats.pop(preferred_formats.index(self.quality)))
 
         async with self.session.get(track_url) as resp:
+            # --- [PERBAIKAN] TANGKAP ERROR 403 SEJAK AWAL ---
+            if resp.status != 200:
+                raise Exception(f"HTTP {resp.status} saat mengakses halaman track: {track_url}")
+            # ------------------------------------------------
             html = await resp.text()
         
         soup = BeautifulSoup(html, 'html.parser')
@@ -173,7 +177,7 @@ class KhinsiderManager:
                 final_url = found_links[final_fmt]
 
         if not final_url:
-            raise Exception("No download link found on track page.")
+            raise Exception("Tidak ada link unduhan di halaman track.")
 
         return final_url, final_fmt
 
