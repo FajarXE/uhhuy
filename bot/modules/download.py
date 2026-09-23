@@ -563,7 +563,6 @@ async def run_download_task(link: str, user: dict):
 
             admin_markup = None
             if "vip access required" in error_str.lower() or "limit reached" in error_str.lower():
-                from config import Config
                 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
                 from pyrogram.enums import ButtonStyle
                 admin_markup = InlineKeyboardMarkup([
