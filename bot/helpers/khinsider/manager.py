@@ -5,6 +5,9 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from ...logger import LOGGER
 
+from config import Config
+from bot.helpers.proxy_manager import proxy_manager
+
 class KhinsiderManager:
     def __init__(self):
         self.session = None
@@ -28,8 +31,16 @@ class KhinsiderManager:
         # ----------------------------------------
 
     async def initialize_clients(self):
-        self.session = aiohttp.ClientSession(headers=self.headers)
-        LOGGER.info("KhinsiderManager: Session initialized.")
+        connector = None
+        if Config.KHINSIDER_PROXY:
+            connector = proxy_manager.get_aiohttp_connector(Config.KHINSIDER_PROXY)
+            
+        if connector:
+            self.session = aiohttp.ClientSession(headers=self.headers, connector=connector)
+            LOGGER.info(f"KhinsiderManager: Session diinisialisasi DENGAN Proksi: {Config.KHINSIDER_PROXY}")
+        else:
+            self.session = aiohttp.ClientSession(headers=self.headers)
+            LOGGER.info("KhinsiderManager: Session diinisialisasi TANPA Proksi (Direct).")
 
     async def shutdown(self):
         if self.session:
