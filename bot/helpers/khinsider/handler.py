@@ -153,7 +153,6 @@ async def start_khinsider(url, user):
             
             # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
             from urllib.parse import quote
-            # [PENTING] Khinsider sering memiliki spasi di URL, aiohttp akan crash jika tidak di-encode
             safe_dl_url = quote(dl_url, safe="%/:=&?~#+!$,;'@()*[]")
 
             headers_dict = {
@@ -165,7 +164,13 @@ async def start_khinsider(url, user):
                 cookie_str = "; ".join([f"{c.key}={c.value}" for c in khinsider_manager.session.cookie_jar])
                 if cookie_str: headers_dict["Cookie"] = cookie_str
             
-            details_aria = {'msg': None, 'headers': headers_dict}
+            # --- [PERBAIKAN PROKSI] TERUSKAN KE MESIN DOWNLOAD ---
+            details_aria = {
+                'msg': None, 
+                'headers': headers_dict,
+                'proxy': Config.KHINSIDER_PROXY
+            }
+            # ----------------------------------------------------
             
             err = await download_file(safe_dl_url, filepath, retries=1, details=details_aria)
             
