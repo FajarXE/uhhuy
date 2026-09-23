@@ -91,12 +91,6 @@ try:
 except ImportError:
     highresaudio_manager = _DummyManager()
 
-# Impor Manajer Khinsider
-try:
-    from bot.helpers.khinsider.manager import khinsider_manager
-except ImportError:
-    khinsider_manager = None
-
 # Impor Manajer Amazon Music
 try:
     from bot.helpers.amazon.manager import amazon_manager
@@ -250,16 +244,6 @@ def providers_button():
                 InlineKeyboardButton(
                     text="HIGHRESAUDIO", 
                     callback_data='hraP'
-                )
-            ]
-        )
-
-    if khinsider_manager:
-        inline_keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text="KHINSIDER", 
-                    callback_data='khiP'
                 )
             ]
         )
@@ -1189,39 +1173,6 @@ def amazon_global_auth_buttons(active_clients: list):
     buttons.append([InlineKeyboardButton("🔙 Back to Quality", callback_data="amzP", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
-        
-def khi_button(quality: dict, user_id: int = None):
-    buttons = []
-    usetting = user_id is not None
-    prefix = "khiQ" if not usetting else f"ukhis"
-    
-    row = []
-    if "flac" in quality:
-        # Ambil value asli untuk cek warna
-        raw_txt = quality["flac"]
-        style = ButtonStyle.SUCCESS if "✅" in raw_txt else ButtonStyle.DEFAULT
-        
-        # Gunakan Teks Bersih "FLAC" untuk tombol
-        row.append(InlineKeyboardButton("FLAC", callback_data=f"{prefix}_flac", style=style))
-        
-    if "mp3" in quality:
-        raw_txt = quality["mp3"]
-        style = ButtonStyle.SUCCESS if "✅" in raw_txt else ButtonStyle.DEFAULT
-        
-        # Gunakan Teks Bersih "MP3" untuk tombol
-        row.append(InlineKeyboardButton("MP3", callback_data=f"{prefix}_mp3", style=style))
-    
-    if row:
-        buttons.append(row)
-
-    if usetting:
-        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
-        return InlineKeyboardMarkup(buttons)
-        
-    main_button, close_button = fetch_base_buttons()
-    buttons += main_button + close_button
-    return InlineKeyboardMarkup(buttons)
-
 
 def gn_button(quality: dict, user_id: int = None):
     buttons = []
@@ -1389,9 +1340,6 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
 
     if highresaudio_manager:
         buttons.append([InlineKeyboardButton(text=f"HighResAudio Quality", callback_data=f"uset_highresaudio")])
-    
-    if khinsider_manager:
-        buttons.append([InlineKeyboardButton(text=f"Khinsider Quality", callback_data=f"uset_khinsider")])
 
     if amazon_manager:
         # Gunakan 'clients' (bukan 'global_clients') sesuai dengan file manager.py Anda
