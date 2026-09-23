@@ -94,7 +94,6 @@ async def sync_single_user_managers(user_id, data):
             'bandcamp_qual': safe_import_mgr('bot.helpers.bandcamp.manager', 'bandcamp_manager'),
             'livephish_qual': safe_import_mgr('bot.helpers.livephish.manager', 'livephish_manager'),
             'beatstars_qual': safe_import_mgr('bot.helpers.beatstars.manager', 'beatstars_manager'),
-            'khinsider_qual': safe_import_mgr('bot.helpers.khinsider.manager', 'khinsider_manager'),
             'amazon_qual': safe_import_mgr('bot.helpers.amazon.manager', 'amazon_manager'),
             'genie_qual': safe_import_mgr('bot.helpers.genie.manager', 'genie_manager'),
         }
