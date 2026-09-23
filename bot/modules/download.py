@@ -13,6 +13,8 @@ import re
 
 import bot.helpers.utils as utils
 
+from config import Config
+
 # --- [PERBAIKAN: DUMMY SEMAPHORE UNTUK LIMIT 0] ---
 class DummySemaphore:
     """Semaphore bohongan yang selalu meloloskan task jika limit dinonaktifkan"""
