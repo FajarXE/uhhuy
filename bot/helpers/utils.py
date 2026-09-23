@@ -110,17 +110,21 @@ async def format_string(text:str, data:dict, user=None):
     return text
 
 
-async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = 20):
+async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = None):
     import asyncio
     import hashlib
     import time
     import math
+    from config import Config
     from bot.settings import bot_set
     from .utils import get_readable_file_size, get_readable_time
-    
     from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS, GLOBAL_STATE_LOCK
 
-    sem = asyncio.Semaphore(limit)
+    # --- [PERBAIKAN: MENGGUNAKAN VARIABEL SERVER] ---
+    actual_limit = limit if limit else Config.MAX_WORKERS
+    sem = asyncio.Semaphore(actual_limit)
+    # ------------------------------------------------
+    
     total_tasks = len(tasks)
     completed_tasks = 0
     is_running = True
