@@ -140,19 +140,13 @@ try:
 except ImportError:
     beatstars_manager = None
 
-# 16. Khinsider
-try:
-    from bot.helpers.khinsider.manager import khinsider_manager
-except ImportError:
-    khinsider_manager = None
-
-# 17. Amazon
+# 16. Amazon
 try:
     from bot.helpers.amazon.manager import amazon_manager
 except ImportError:
     amazon_manager = None
 
-# 18. Genie
+# 17. Genie
 try:
     from bot.helpers.genie.manager import genie_manager
 except ImportError:
@@ -255,13 +249,6 @@ except ImportError as e:
     LOGGER.error(f"Gagal Import BeatStars Handler: {err_bs}")
     async def start_beatstars(*args, **kwargs):
         raise NotImplementedError(f"Modul BeatStars Rusak: {err_bs}")
-
-# Khinsider
-try:
-    from ..helpers.khinsider.handler import start_khinsider
-except ImportError:
-    async def start_khinsider(*args, **kwargs):
-        raise NotImplementedError("Modul Khinsider belum diimplementasikan.")
 
 # Amazon
 try:
@@ -711,8 +698,6 @@ async def start_link(link: str, user: dict) -> None:
 
     beatstars = ["https://www.beatstars.com", "beatstars.com", "https://main.v2.beatstars.com", "https://bsta.rs", "bsta.rs"]
 
-    khinsider = ["https://downloads.khinsider.com", "downloads.khinsider.com", "http://downloads.khinsider.com"]
-
     amazon = ["https://music.amazon.com", "https://music.amazon.co.jp", "https://music.amazon.co.uk", "https://music.amazon.fr", "https://music.amazon.com.mx", "https://music.amazon.com.br", "https://music.amazon.de", "https://music.amazon.com.au", "https://music.amazon.ca", "https://music.amazon.it", "https://music.amazon.es", "https://music.amazon.com.ar", "https://music.amazon.com/es-ar", "https://music.amazon.com/en-ar", "https://music.amazon.in", "music.amazon"]
 
     genie = ["https://www.genie.co.kr", "genie.co.kr", "https://app.genie.co.kr"]
@@ -1138,20 +1123,6 @@ async def start_link(link: str, user: dict) -> None:
             return
         except Exception as e:
             LOGGER.error(f"BeatStars Gagal: {e}")
-            raise e
-
-    # Blok KHINSIDER
-    elif link.startswith(tuple(khinsider)):
-        user['provider'] = 'Khinsider'
-        if not khinsider_manager:
-            raise Exception("Modul Khinsider tidak dimuat (Folder/file helper hilang).")
-        
-        try:
-            await start_khinsider(link, user)
-            LOGGER.info("Khinsider: Unduhan berhasil.")
-            return
-        except Exception as e:
-            LOGGER.error(f"Khinsider Gagal: {e}")
             raise e
 
     # Blok AMAZON MUSIC
