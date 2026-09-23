@@ -64,11 +64,6 @@ except ImportError:
     logging.warning("UserSettings: Gagal mengimpor highresaudio_manager.")
     highresaudio_manager = None
 try:
-    from ..helpers.khinsider.manager import khinsider_manager
-except ImportError:
-    logging.warning("UserSettings: Gagal mengimpor khinsider_manager.")
-    khinsider_manager = None
-try:
     from ..helpers.qobuz.qopy import qobuz_manager
 except ImportError:
     logging.warning("UserSettings: Gagal mengimpor qobuz_manager.")
@@ -90,7 +85,7 @@ from ..helpers.buttons.settings import (
     usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
     sc_button, id_button, bugs_button, lyrics_button, mv_button,
-    lp_button, khi_button, beatport_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button
+    lp_button, beatport_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button
 )
 from ..helpers.database.mongo_async import database
 from ..helpers.utils import fetch_zip_settings
@@ -1652,26 +1647,6 @@ async def uset_cb(client, query, datatype=""):
         
         # Tampilkan tombol HRA
         return await edit_message(query.message, text, markup=hra_button(user_id))
-
-    # --- KHINSIDER MENU ---
-    if data[1] == "khinsider" or datatype == "khinsider":
-        text = f"Choose Khinsider Preferred Format:"
-        quality = {
-            "flac": "FLAC",
-            "mp3": "MP3"
-        }
-        if not khinsider_manager:
-             return await edit_message(query.message, "Layanan Khinsider tidak aktif!")
-        
-        main_user_dict = bot_set.user_data.get(user_id, {})
-        current = main_user_dict.get("khinsider_qual", khinsider_manager.quality)
-        
-        await khinsider_manager.setup_quality(user_id, current)
-        
-        if current in quality:
-            quality[current] += '✅'
-        
-        return await edit_message(query.message, text, markup=khi_button(quality, user_id))
 
     # --- AMAZON MUSIC MENU ---
     if data[1] == "amazon" or datatype == "amazon":
