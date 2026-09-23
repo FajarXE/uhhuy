@@ -144,20 +144,29 @@ class KhinsiderManager:
                 preferred_formats.insert(0, preferred_formats.pop(preferred_formats.index(self.quality)))
 
         async with self.session.get(track_url) as resp:
-            # --- [PERBAIKAN] TANGKAP ERROR 403 SEJAK AWAL ---
             if resp.status != 200:
                 raise Exception(f"HTTP {resp.status} saat mengakses halaman track: {track_url}")
-            # ------------------------------------------------
             html = await resp.text()
         
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
         soup = BeautifulSoup(html, 'html.parser')
         
         found_links = {}
+        
+        # Prioritas 1: Audio player src (Paling akurat & direct)
+        audio_tag = soup.find('audio', id='audio')
+        if audio_tag and audio_tag.get('src'):
+            src = audio_tag['src']
+            fmt_match = src.split('.')[-1].lower()
+            found_links[fmt_match] = urljoin(track_url, src)
+
+        # Prioritas 2: Ekstrak dari seluruh link (sebagai fallback)
         for a in soup.find_all('a', href=True):
             href = a['href']
             for fmt in ['flac', 'mp3', 'm4a', 'ogg']:
                 if href.lower().endswith(f".{fmt}"):
-                    found_links[fmt] = href
+                    found_links[fmt] = urljoin(track_url, href)
         
         final_url = None
         final_fmt = 'mp3'
@@ -177,7 +186,7 @@ class KhinsiderManager:
                 final_url = found_links[final_fmt]
 
         if not final_url:
-            raise Exception("Tidak ada link unduhan di halaman track.")
+            raise Exception("Tidak ada link unduhan di halaman track. Struktur web mungkin berubah.")
 
         return final_url, final_fmt
 
