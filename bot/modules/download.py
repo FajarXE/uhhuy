@@ -13,7 +13,17 @@ import re
 
 import bot.helpers.utils as utils
 
-USER_SEMAPHORES = collections.defaultdict(lambda: asyncio.Semaphore(1))
+# --- [PERBAIKAN: DUMMY SEMAPHORE UNTUK LIMIT 0] ---
+class DummySemaphore:
+    """Semaphore bohongan yang selalu meloloskan task jika limit dinonaktifkan"""
+    async def __aenter__(self): return self
+    async def __aexit__(self, exc_type, exc_val, exc_tb): pass
+    def locked(self): return False
+
+USER_SEMAPHORES = collections.defaultdict(
+    lambda: asyncio.Semaphore(Config.USER_MAX_TASKS) if Config.USER_MAX_TASKS > 0 else DummySemaphore()
+)
+
 # --- DICTIONARY UNTUK MENCATAT HISTORY LIMIT ---
 USER_DOWNLOAD_HISTORY = collections.defaultdict(lambda: {'album': [], 'playlist': [], 'artist': [], 'video': [], 'track': []})
 BOT_UPTIME = time.time()
@@ -331,9 +341,9 @@ async def run_download_task(link: str, user: dict):
     # --- [FITUR ANTI-SPAM] ANTREAN PRIBADI PER-USER ---
     user_sem = USER_SEMAPHORES[chat_id]
     
-    # Jika 2 slot pengguna ini sudah penuh, beri tahu bahwa dia masuk antrean pribadi
+    # Pesan antrean hanya muncul jika limit > 0 DAN slot sedang penuh
     if user_sem.locked():
-        notif_msg = await send_message(user, f"⏳ **Entering Personal Queue...**\nYou are currently performing 1 task. This link will be automatically processed afterward.\n`{link}`")
+        notif_msg = await send_message(user, f"⏳ **Entering Personal Queue...**\nYou are currently limited to {Config.USER_MAX_TASKS} concurrent tasks. This link will be automatically processed afterward.\n`{link}`")
     
     # Menunggu slot pribadi kosong (User lain TIDAK akan terpengaruh)
     async with user_sem:
