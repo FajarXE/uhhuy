@@ -28,6 +28,19 @@ from bot.logger import LOGGER
 COVER_LOCKS = {}
 _COVER_SESSIONS = {}
 
+class SafeTempFile:
+    """Wrapper pelindung untuk mencegah error deepcopy pada objek file OS."""
+    def __init__(self, file_obj):
+        self.file_obj = file_obj
+    
+    def __deepcopy__(self, memo):
+        # Beritahu Python: "Jangan dikloning isinya, kembalikan saja referensi aslinya!"
+        return self
+        
+    @property
+    def name(self):
+        return self.file_obj.name
+
 try:
     from bot.helpers.lyrics.manager import lyrics_manager
 except ImportError:
@@ -53,7 +66,6 @@ def parse_duration_to_ms(raw):
             return int(val)
     except Exception:
         return 0
-# ----------------------------------------
 
 # Struktur Metadata Default
 metadata = {
@@ -925,23 +937,20 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
     if not url: return './project-siesta.png'
     if url.startswith("//"): url = "https:" + url
 
-    # 1. Jika objek temp file sudah ada di memori meta, gunakan kembali tanpa mengunduh ulang
     if 'cover_temp_obj' in meta and os.path.exists(meta['cover_temp_obj'].name):
         return meta['cover_temp_obj'].name
 
-    # --- BAGIAN YANG DIMODIFIKASI ---
     temp_dir = meta.get('tempfolder', '.')
-    os.makedirs(temp_dir, exist_ok=True) # Pastikan foldernya ada
+    os.makedirs(temp_dir, exist_ok=True)
     
-    # Delegasi file ke OS, tapi minta OS menaruhnya di dalam folder bot kita
     temp_file = tempfile.NamedTemporaryFile(dir=temp_dir, suffix='.jpg', delete=True)
     cover_path = temp_file.name
-    # --------------------------------
     
-    # Ikat objek file ke metadata agar umur filenya sama persis dengan umur tugas (task) saat ini
-    meta['cover_temp_obj'] = temp_file
+    # --- PERBAIKAN DI SINI ---
+    # Gunakan wrapper SafeTempFile agar lolos dari jebakan copy.deepcopy() di modul penyedia musik
+    meta['cover_temp_obj'] = SafeTempFile(temp_file)
+    # -------------------------
 
-    # Kunci unduhan berdasarkan URL agar tidak saling bertabrakan jika dipanggil secara paralel
     lock = COVER_LOCKS.get(url)
     if lock is None:
         lock = asyncio.Lock()
@@ -949,7 +958,6 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
 
     try:
         async with lock:
-            # Unduh gambar dan tulis ke path file sementara yang disediakan OS
             await _download_cover_with_headers(url, cover_path, proxy=proxy)
     finally:
         if url in COVER_LOCKS:
