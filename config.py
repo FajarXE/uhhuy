@@ -47,6 +47,11 @@ class Config:
         FREE_WAIT_TIME = int(_free_wait) if _free_wait else None
         # --------------------------------------------------
 
+        # --- [TAMBAHAN: VARIABEL LIMIT ANTREAN] ---
+        _user_tasks = getenv("USER_MAX_TASKS")
+        USER_MAX_TASKS = int(_user_tasks) if _user_tasks and _user_tasks.isdigit() else 0
+        # ------------------------------------------
+
         # --- [TAMBAHAN: VARIABEL KONTAK ADMIN] ---
         ADMIN_BTN_TEXT = getenv("ADMIN_BTN_TEXT", "💬 Contact Admin")
         ADMIN_BTN_URL = getenv("ADMIN_BTN_URL", "https://t.me/monomars")
