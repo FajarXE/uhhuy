@@ -152,23 +152,30 @@ async def start_khinsider(url, user):
             filepath = f"{album_folder_path}/{filename}"
             
             # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
-            headers_dict = {"User-Agent": khinsider_manager.headers["User-Agent"]}
+            # [PERBAIKAN] Khinsider butuh header Referer agar tidak memberikan 403 Forbidden!
+            headers_dict = {
+                "User-Agent": khinsider_manager.headers["User-Agent"],
+                "Referer": track['url'] 
+            }
             
-            # [KUNCI RAHASIA] Gunakan 'msg': None.
-            # Aria2 tetap mendapat Headers penyamaran, tidak akan crash, dan UI tetap rapi!
+            # [PERBAIKAN] Ambil cookie dari sesi penjelajah untuk disuntikkan ke Aria2
+            if khinsider_manager.session and khinsider_manager.session.cookie_jar:
+                cookie_str = "; ".join([f"{c.key}={c.value}" for c in khinsider_manager.session.cookie_jar])
+                if cookie_str:
+                    headers_dict["Cookie"] = cookie_str
+            
             details_aria = {'msg': None, 'headers': headers_dict}
             
-            # Coba unduh dengan Aria2 
             err = await download_file(dl_url, filepath, retries=1, details=details_aria)
             
             if err:
-                LOGGER.warning(f"Khinsider: Aria2 gagal/ditolak. Mengaktifkan AIOHTTP Turbo Fallback untuk {filename}")
-                async with aiohttp.ClientSession(headers=headers_dict) as session:
-                    async with session.get(dl_url) as r:
-                        r.raise_for_status()
-                        async with aiofiles.open(filepath, 'wb') as f:
-                            async for chunk in r.content.iter_chunked(256 * 1024):
-                                if chunk: await f.write(chunk)
+                LOGGER.warning(f"Khinsider: Aria2 gagal. Mengaktifkan AIOHTTP Turbo Fallback untuk {filename}")
+                # [PERBAIKAN] Gunakan khinsider_manager.session agar cookies tetap terbawa!
+                async with khinsider_manager.session.get(dl_url, headers={"Referer": track['url']}) as r:
+                    r.raise_for_status()
+                    async with aiofiles.open(filepath, 'wb') as f:
+                        async for chunk in r.content.iter_chunked(256 * 1024):
+                            if chunk: await f.write(chunk)
             # ----------------------------------------
             
             # 3. Tanam Tags
