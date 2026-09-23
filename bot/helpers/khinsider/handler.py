@@ -152,27 +152,32 @@ async def start_khinsider(url, user):
             filepath = f"{album_folder_path}/{filename}"
             
             # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
-            # [PERBAIKAN] Khinsider butuh header Referer agar tidak memberikan 403 Forbidden!
+            from urllib.parse import quote
+            # [PENTING] Khinsider sering memiliki spasi di URL, aiohttp akan crash jika tidak di-encode
+            safe_dl_url = quote(dl_url, safe="%/:=&?~#+!$,;'@()*[]")
+
             headers_dict = {
                 "User-Agent": khinsider_manager.headers["User-Agent"],
                 "Referer": track['url'] 
             }
             
-            # [PERBAIKAN] Ambil cookie dari sesi penjelajah untuk disuntikkan ke Aria2
             if khinsider_manager.session and khinsider_manager.session.cookie_jar:
                 cookie_str = "; ".join([f"{c.key}={c.value}" for c in khinsider_manager.session.cookie_jar])
-                if cookie_str:
-                    headers_dict["Cookie"] = cookie_str
+                if cookie_str: headers_dict["Cookie"] = cookie_str
             
             details_aria = {'msg': None, 'headers': headers_dict}
             
-            err = await download_file(dl_url, filepath, retries=1, details=details_aria)
+            err = await download_file(safe_dl_url, filepath, retries=1, details=details_aria)
             
             if err:
                 LOGGER.warning(f"Khinsider: Aria2 gagal. Mengaktifkan AIOHTTP Turbo Fallback untuk {filename}")
-                # [PERBAIKAN] Gunakan khinsider_manager.session agar cookies tetap terbawa!
-                async with khinsider_manager.session.get(dl_url, headers={"Referer": track['url']}) as r:
+                async with khinsider_manager.session.get(safe_dl_url, headers={"Referer": track['url']}, allow_redirects=True) as r:
                     r.raise_for_status()
+                    
+                    # Cegah bot mengunduh halaman Captcha/Blocker HTML yang menyamar sebagai file audio!
+                    if 'text/html' in r.headers.get('Content-Type', ''):
+                        raise Exception("AIOHTTP menerima halaman HTML (Terblokir 403/Captcha)")
+                        
                     async with aiofiles.open(filepath, 'wb') as f:
                         async for chunk in r.content.iter_chunked(256 * 1024):
                             if chunk: await f.write(chunk)
@@ -231,8 +236,7 @@ async def start_khinsider(url, user):
     successful_tracks = [r for r in results if r]
 
     if not successful_tracks:
-        await edit_message(msg, "❌ Gagal mengunduh semua lagu Khinsider.")
-        return
+        raise Exception("Gagal mengunduh semua lagu Khinsider. Server menolak permintaan (403 Forbidden) atau link diblokir.")
 
     album_data['tracks'] = successful_tracks
 
