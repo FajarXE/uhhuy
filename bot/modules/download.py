@@ -421,7 +421,6 @@ async def run_download_task(link: str, user: dict):
             # =======================================================================
             # --- [FITUR LIMIT UNDUHAN PENGGUNA GRATIS] ---
             from bot.settings import bot_set
-            from config import Config 
             
             # 1. Pastikan fitur limit diaktifkan lewat variabel server (.env)
             if Config.FREE_ALBUM_LIMIT is not None and Config.FREE_PLAYLIST_LIMIT is not None and Config.FREE_VIDEO_LIMIT is not None and Config.FREE_TRACK_LIMIT is not None and Config.FREE_WAIT_TIME is not None:
