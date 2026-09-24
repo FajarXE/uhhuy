@@ -63,18 +63,21 @@ async def get_status_text(page=1, limit=5):
 
     text = ""
     for i, t in enumerate(tasks_page, start=start_idx + 1):
-        text += f"**{i:02d}. {t['action']} {t['type']}**: `{t['title']}`\n"
-        text += f"**Since**: {t['since']}\n\n"
-        text += f"**Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
-        text += f"**{t['processed_label']}**: {t['processed']}\n"
-        text += f"**Current_Speed**: {t['speed']}\n"
-        text += f"**Machine_type**: {t['machine']}\n"
-        text += f"**Destination_mode**: {t['mode']}\n"
-        text += f"**User_ID**: `{t.get('user_id', 'Unknown')}`\n"
-        text += f"**Cancel**: /cancel_{t['cancel_id']}\n"
+        # Blok Header Task
+        text += f"┎ **{i:02d}. {t['action']} {t['type']}**: `{t['title']}`\n"
+        text += f"┖ **Since**: {t['since']}\n\n"
+        
+        # Blok Detail Progress
+        text += f"┎ **Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
+        text += f"┠ **{t['processed_label']}**: {t['processed']}\n"
+        text += f"┠ **Current_Speed**: {t['speed']}\n"
+        text += f"┠ **Machine_type**: {t['machine']}\n"
+        text += f"┠ **Destination_mode**: {t['mode']}\n"
+        text += f"┠ **User_ID**: `{t.get('user_id', 'Unknown')}`\n"
+        text += f"┖ **Cancel**: `/cancel_{t['cancel_id']}`\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
-            text += "\n\n"
+            text += "\n" # Spasi antar task
 
     total_dl_raw = sum(t.get('speed_dl_raw', 0) for t in tasks)
     total_ul_raw = sum(t.get('speed_ul_raw', 0) for t in tasks)
@@ -95,9 +98,10 @@ async def get_status_text(page=1, limit=5):
     h, rem = divmod(uptime_seconds, 3600)
     m, s = divmod(rem, 60)
 
-    text += f"\nCPU: {cpu_usage:.1f}% | FREE: {free_storage:.2f} GB\n"
-    text += f"RAM: {ram_usage:.1f}% | UPTIME: {h}h {m}m {s}s\n"
-    text += f"🔻 {global_dl} | 🔺 {global_ul}\n"
+    # Blok System Stats dengan border
+    text += f"\n┎ **CPU**: {cpu_usage:.1f}% | **FREE**: {free_storage:.2f} GB\n"
+    text += f"┠ **RAM**: {ram_usage:.1f}% | **UPTIME**: {h}h {m}m {s}s\n"
+    text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
 
     buttons = []
     nav_row = []
