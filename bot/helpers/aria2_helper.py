@@ -8,6 +8,9 @@ from bot.logger import LOGGER
 from bot.helpers.proxy_manager import proxy_manager
 
 ARIA2_RPC_URL = "http://127.0.0.1:6800/jsonrpc"
+# --- [TAMBAHAN: VARIABEL TOKEN RAHASIA] ---
+ARIA2_SECRET = "token:siesta_secret_token"
+# ------------------------------------------
 ACTIVE_DOWNLOADS = {}
 
 _ARIA2_SESSION = None
@@ -38,8 +41,6 @@ async def aria2_download(url, filepath, details=None):
         "min-split-size": "5M",
         "allow-overwrite": "true",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-        
-        # Header default ini akan ditimpa jika modul menyediakan custom header
         "header": [
             "Accept: */*",
             "Accept-Encoding: gzip, deflate, br",
@@ -54,7 +55,6 @@ async def aria2_download(url, filepath, details=None):
         "content-disposition-default-utf8": "true" 
     }
     
-    # --- [PERBAIKAN KUNCI]: KEMBALI KE LOGIKA OVERWRITE HEADER ---
     if details and 'headers' in details and isinstance(details['headers'], dict):
         custom_headers = []
         for k, v in details['headers'].items():
@@ -64,30 +64,30 @@ async def aria2_download(url, filepath, details=None):
                 custom_headers.append(f"{k}: {v}")
                 
         if custom_headers:
-            # TIMPA SEPENUHNYA header bawaan agar lolos dari blokir peladen (WAF)
             options["header"] = custom_headers
-    # -------------------------------------------------------------
 
     used_proxy = None
     if details and 'proxy' in details and details['proxy']:
         used_proxy = await proxy_manager.get_proxy(details['proxy'])
         formatted_proxy = proxy_manager.format_for_aria2(used_proxy)
         if formatted_proxy:
-            # Aria2 RPC akan crash jika diberi SOCKS5. Kita bypass untuk Aria2.
             if not formatted_proxy.startswith('socks'):
                 options["all-proxy"] = formatted_proxy
             else:
                 LOGGER.info("Aria2: Mem-bypass penyuntikan SOCKS5 Proxy agar tidak RPC Error.")
     
+    # --- [PERBAIKAN] Tambahkan ARIA2_SECRET ke params AddUri ---
     payload_add = {
         "jsonrpc": "2.0",
         "id": "bot_add",
         "method": "aria2.addUri",
         "params": [
+            ARIA2_SECRET,
             [url],
             options 
         ]
     }
+    # -----------------------------------------------------------
     
     try:
         session = await get_aria2_session()
@@ -116,12 +116,14 @@ async def aria2_download(url, filepath, details=None):
             details['title'] = file_name
             details['type'] = 'Download'
 
+        # --- [PERBAIKAN] Tambahkan ARIA2_SECRET ke params TellStatus ---
         payload_status = {
             "jsonrpc": "2.0",
             "id": "bot_status",
             "method": "aria2.tellStatus",
-            "params": [gid]
+            "params": [ARIA2_SECRET, gid]
         }
+        # ---------------------------------------------------------------
         
         while True:
             if details and 'task_id' in details:
@@ -185,12 +187,14 @@ async def aria2_download(url, filepath, details=None):
         return False
 
 async def aria2_cancel(gid):
+    # --- [PERBAIKAN] Tambahkan ARIA2_SECRET ke params ForceRemove ---
     payload = {
         "jsonrpc": "2.0",
         "id": "bot_cancel",
         "method": "aria2.forceRemove",
-        "params": [gid]
+        "params": [ARIA2_SECRET, gid]
     }
+    # ----------------------------------------------------------------
     try:
         session = await get_aria2_session()
         async with session.post(ARIA2_RPC_URL, json=payload) as resp:
@@ -203,12 +207,14 @@ async def aria2_cancel(gid):
     return False
 
 async def get_aria2_global_stat():
+    # --- [PERBAIKAN] Tambahkan ARIA2_SECRET ke params GetGlobalStat ---
     payload = {
         "jsonrpc": "2.0",
         "id": "bot_global_stat",
         "method": "aria2.getGlobalStat",
-        "params": []
+        "params": [ARIA2_SECRET]
     }
+    # ------------------------------------------------------------------
     try:
         session = await get_aria2_session()
         async with session.post(ARIA2_RPC_URL, json=payload) as resp:
@@ -220,12 +226,14 @@ async def get_aria2_global_stat():
     return None
 
 async def aria2_purge_all():
+    # --- [PERBAIKAN] Tambahkan ARIA2_SECRET ke params TellActive ---
     payload_active = {
         "jsonrpc": "2.0",
         "id": "bot_purge",
         "method": "aria2.tellActive",
-        "params": []
+        "params": [ARIA2_SECRET]
     }
+    # ---------------------------------------------------------------
     try:
         session = await get_aria2_session()
         async with session.post(ARIA2_RPC_URL, json=payload_active) as resp:
@@ -234,11 +242,12 @@ async def aria2_purge_all():
                 for task in res["result"]:
                     gid = task.get("gid")
                     if gid:
+                        # --- [PERBAIKAN] Tambahkan ARIA2_SECRET ke params pembunuhan paksa ---
                         kill_payload = {
                             "jsonrpc": "2.0",
                             "id": "bot_kill",
                             "method": "aria2.forceRemove",
-                            "params": [gid]
+                            "params": [ARIA2_SECRET, gid]
                         }
                         await session.post(ARIA2_RPC_URL, json=kill_payload)
                         
