@@ -150,23 +150,14 @@ async def start_amazon(url: str, user: dict):
     
     if '/albums/' in parsed.path or '/album/' in parsed.path:
         await start_album(asin, user, url)
-    # --- [PERBAIKAN] Tambahkan deteksi untuk user-playlists ---
-    elif any(keyword in parsed.path for keyword in ['/playlists/', '/playlist/', '/user-playlists/', '/user-playlist/']):
+    # --- TAMBAHKAN RUTE PLAYLIST DI SINI ---
+    elif '/playlists/' in parsed.path or '/playlist/' in parsed.path:
         await start_playlist(asin, user, url)
-    # ----------------------------------------------------------
+    # ---------------------------------------
     else:
         await start_track(asin, user, url)
 
 async def start_playlist(playlist_asin: str, user: dict, url: str):
-    # --- [PERBAIKAN] SANITASI FORMAT ID USER PLAYLIST ---
-    import re
-    if not playlist_asin.startswith('B') and not playlist_asin.startswith('PP'):
-        # Tarik tepat 32 karakter hexadesimal dan tambahkan prefix 'PP'
-        hex_match = re.search(r'([0-9a-fA-F]{32})', playlist_asin)
-        if hex_match:
-            playlist_asin = 'PP' + hex_match.group(1)
-    # ----------------------------------------------------
-    
     playlist_asin = await get_global_asin(url, current_asin=playlist_asin)
     LOGGER.info(f"Amazon: Mengambil info Playlist {playlist_asin}")
     user_id = user.get('user_id')
