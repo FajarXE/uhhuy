@@ -224,9 +224,10 @@ async def get_track_metadata(track_id, track_data, user_id, cover=None, thumbnai
 async def set_metadata(metadata:dict, user_id: int = None):
     audio_path = str(metadata['filepath'])
     
-    # --- 1. INISIALISASI MUTAGEN ---
+    # --- 1. INISIALISASI MUTAGEN DENGAN DETEKSI FFPROBE ---
     def _load_audio_sync(path):
         import os
+        import subprocess
         from mutagen import File
         from mutagen.wave import WAVE
         from mutagen.mp3 import MP3
@@ -235,30 +236,57 @@ async def set_metadata(metadata:dict, user_id: int = None):
         from mutagen.oggopus import OggOpus
         from mutagen.mp4 import MP4
         
-        ext = os.path.splitext(path)[1].lower().strip()
+        # 1. Gunakan FFprobe untuk mengintip struktur asli (codec) di dalam file
+        true_codec = ""
+        try:
+            cmd = [
+                "ffprobe", "-v", "error", 
+                "-select_streams", "a:0", 
+                "-show_entries", "stream=codec_name", 
+                "-of", "default=noprint_wrappers=1:nokey=1", 
+                path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                true_codec = result.stdout.strip().lower()
+        except Exception as e:
+            from bot.logger import LOGGER
+            LOGGER.warning(f"Gagal menjalankan ffprobe pada {path}: {e}")
+
         h = None
         
-        # --- [FIX] STRICT EXTENSION VALIDATION ---
-        # Untuk mencegah korupsi file akibat spoofed extension 
-        # (misal file aslinya M4A tapi dikasih nama .mp3 dari penyedia sumber)
+        # 2. Panggil kelas Mutagen berdasarkan codec asli, BUKAN ekstensi nama file
         try:
-            if ext == '.flac': 
-                h = FLAC(path)
-            elif ext in ['.m4a', '.mp4', '.m4b']: 
+            if true_codec in ['aac', 'alac', 'mp4']:
                 h = MP4(path)
-            elif ext == '.mp3': 
+            elif true_codec == 'flac':
+                h = FLAC(path)
+            elif true_codec == 'mp3':
                 h = MP3(path)
-            elif ext == '.ogg': 
+            elif true_codec == 'vorbis':
                 h = OggVorbis(path)
-            elif ext == '.opus': 
+            elif true_codec == 'opus':
                 h = OggOpus(path)
-            elif ext == '.wav': 
+            elif 'pcm' in true_codec:  # Contoh: pcm_s16le, pcm_s24le (WAV)
                 h = WAVE(path)
             else:
-                h = File(path) # Fallback untuk format lain
+                # 3. Fallback/Cadangan: Jika ffprobe gagal, tebak dari ekstensi seperti biasa
+                ext = os.path.splitext(path)[1].lower().strip()
+                if ext == '.flac': 
+                    h = FLAC(path)
+                elif ext in ['.m4a', '.mp4', '.m4b']: 
+                    h = MP4(path)
+                elif ext == '.mp3': 
+                    h = MP3(path)
+                elif ext == '.ogg': 
+                    h = OggVorbis(path)
+                elif ext == '.opus': 
+                    h = OggOpus(path)
+                elif ext == '.wav': 
+                    h = WAVE(path)
+                else:
+                    h = File(path) 
         except Exception as e:
-            # Jika Mutagen gagal membaca secara spesifik, ini indikasi file corrupt/spoofed.
-            # JANGAN memanggil File(path) secara buta karena bisa memaksakan header yang salah.
             from bot.logger import LOGGER
             LOGGER.error(f"Format Audio Tidak Valid / Spoofed Extension pada {path}: {e}")
             h = None
@@ -273,7 +301,6 @@ async def set_metadata(metadata:dict, user_id: int = None):
             
     except Exception as e:
         from bot.logger import LOGGER
-        # [FIX] Gunakan exception agar traceback terbaca
         LOGGER.exception(f"Gagal membuka file {audio_path}:")
         return
 
