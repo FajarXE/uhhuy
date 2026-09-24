@@ -150,6 +150,14 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = N
         except asyncio.TimeoutError:
             LOGGER.warning("⚠️ 1 Lagu dilewati karena macet (Timeout > 10 Menit). Playlist dilanjutkan.")
             res = False
+            
+        # --- [PERBAIKAN] TANGKAP SINYAL BATAL DAN TUTUP COROUTINE TELANTAR ---
+        except asyncio.CancelledError:
+            if hasattr(task, 'close'): 
+                task.close()
+            raise
+        # ---------------------------------------------------------------------
+        
         except Exception as e:
             LOGGER.error(f"Task Error di Concurrent: {e}")
             res = False
