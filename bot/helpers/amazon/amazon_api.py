@@ -552,11 +552,6 @@ class AmazonApi:
                 'url': best_url, 'kid': best_kid, 'codec': best_codec
             }
 
-        # --- [PERBAIKAN] JARING PENGAMAN (TAMBAHKAN DI SINI) ---
-        # Jika loop 'for attempt in range(2)' selesai tapi tidak ada data yang di-return,
-        # lemparkan error agar tidak menjadi NoneType di handler.
-        raise Exception(f"Gagal mendapatkan data pemutaran (Playback Info) untuk ASIN {asin} setelah melakukan beberapa kali percobaan. Pastikan ketersediaan lagu atau lisensi.")
-
     async def get_license(self, challenge_b64, track_asin):
         for attempt in range(2):
             url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
