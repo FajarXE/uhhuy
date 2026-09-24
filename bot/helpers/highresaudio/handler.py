@@ -245,6 +245,18 @@ async def start_album(album_url: str, user: dict, upload=True):
     album_meta['folderpath'] = album_folder 
 
     if user.get('booklet_only'):
+        # --- [PERBAIKAN] CABUT PESAN DARI RADAR UI ---
+        import bot.helpers.ui_manager as ui_manager
+        ui_manager.GLOBAL_UI_MSG.pop(user['chat_id'], None)
+        ui_manager.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
+        
+        if 'bot_msg' in user:
+            import hashlib
+            task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+            async with ui_manager.GLOBAL_STATE_LOCK:
+                ui_manager.GLOBAL_TASKS.pop(task_id, None)
+        # ---------------------------------------------
+        
         await edit_message(user['bot_msg'], f"🔍 Mencari booklet untuk album: `{album_meta['title']}`...")
         
         if album_meta.get('booklet_url'):
