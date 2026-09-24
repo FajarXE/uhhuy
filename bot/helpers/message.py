@@ -17,7 +17,8 @@ from bot.settings import bot_set
 from bot.logger import LOGGER
 from config import Config
 
-current_user = set()
+current_user = {}
+ANTISPAM_TTL = 300  # Batas waktu maksimal memori Anti-Spam nyangkut (5 menit)
 
 user_details = {
     'user_id': None, 'name': None, 'user_name': None, 'r_id': None, 
@@ -115,20 +116,28 @@ async def sync_single_user_managers(user_id, data):
         LOGGER.debug(f"Gagal sinkronisasi manager JIT: {e}")
 
 async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
+    now = time.time()
+    
+    # Pembersihan Memori Otonom (Garbage Collection)
+    # Mencari dan menghapus ID yang usianya sudah melewati ANTISPAM_TTL
+    stale_keys = [k for k, v in current_user.items() if now - v > ANTISPAM_TTL]
+    for k in stale_keys:
+        current_user.pop(k, None)
+
     if revoke:
-        # Menggunakan .discard() lebih aman daripada .remove() 
-        # untuk mencegah KeyError jika ada race-condition dari event loop.
+        # Menghapus ID secara manual jika tugas sudah selesai normal
         if bot_set.anti_spam == 'CHAT+': 
-            current_user.discard(cid)
+            current_user.pop(cid, None)
         elif bot_set.anti_spam == 'USER': 
-            current_user.discard(uid)
+            current_user.pop(uid, None)
     else:
+        # Menambahkan ID beserta stempel waktu pendaftaran
         if bot_set.anti_spam == 'CHAT+':
             if cid in current_user: return True
-            current_user.add(cid)
+            current_user[cid] = now
         elif bot_set.anti_spam == 'USER':
             if uid in current_user: return True
-            current_user.add(uid)
+            current_user[uid] = now
         return False
 
 # ==========================================================
