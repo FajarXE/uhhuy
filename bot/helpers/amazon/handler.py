@@ -150,10 +150,10 @@ async def start_amazon(url: str, user: dict):
     
     if '/albums/' in parsed.path or '/album/' in parsed.path:
         await start_album(asin, user, url)
-    # --- TAMBAHKAN RUTE PLAYLIST DI SINI ---
-    elif '/playlists/' in parsed.path or '/playlist/' in parsed.path:
+    # --- [PERBAIKAN] Tambahkan deteksi untuk user-playlists ---
+    elif any(keyword in parsed.path for keyword in ['/playlists/', '/playlist/', '/user-playlists/', '/user-playlist/']):
         await start_playlist(asin, user, url)
-    # ---------------------------------------
+    # ----------------------------------------------------------
     else:
         await start_track(asin, user, url)
 
