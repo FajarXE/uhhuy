@@ -320,7 +320,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
                 
             except Exception as e:
-                if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in str(e):
+                err_str = str(e)
+                if cancel_id in GLOBAL_CANCEL_DICT or "DIBATALKAN_PENGGUNA" in err_str:
                     GLOBAL_TASKS.pop(cancel_id, None)
                     if p_state['msg']: 
                         try: await edit_message(p_state['msg'], "🛑 **Proses Upload Dibatalkan oleh Pengguna.**", None, False)
@@ -337,6 +338,14 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
                         return None
                     await asyncio.sleep(wait_time)
                     continue # Mengulang upload jika terkena tilang singkat
+                
+                # --- TAMBAHAN BARU: TANGKAP TIMEOUT/DISCONNECT DARI PYROGRAM ---
+                elif "TimeoutError" in str(e.__class__.__name__) or "is not started" in err_str or "Connection" in err_str:
+                    LOGGER.warning(f"Telegram Media Session RTO/Drop: {err_str}. Retrying ({attempt+1}/3)...")
+                    await asyncio.sleep(3.0) # Beri jeda 3 detik agar koneksi Telegram bernapas
+                    continue
+                # ---------------------------------------------------------------
+
                 else:
                     GLOBAL_TASKS.pop(cancel_id, None)
                     LOGGER.error(f"Gagal mengirim {type}: {e}")
