@@ -17,12 +17,28 @@ from bot.settings import bot_set
 from bot.logger import LOGGER
 from config import Config
 
+from typing import TypedDict, Optional, Any
+
 current_user = {}
 ANTISPAM_TTL = 300  # Batas waktu maksimal memori Anti-Spam nyangkut (5 menit)
 
-user_details = {
-    'user_id': None, 'name': None, 'user_name': None, 'r_id': None, 
-    'chat_id': None, 'provider': None, 'bot_msg': None, 'link': None, 'override' : None 
+# Mendefinisikan struktur kerangka User
+class UserDetails(TypedDict, total=False):
+    user_id: int
+    name: str
+    user_name: str
+    r_id: int
+    chat_id: int
+    provider: str
+    bot_msg: Any  # Objek Message Pyrogram
+    link: str
+    override: Optional[str]
+    booklet_only: Optional[bool]
+    
+# Inisialisasi dictionary kosong yang kini memiliki tipe data bawaan
+user_details: UserDetails = {
+    'user_id': 0, 'name': '', 'user_name': '', 'r_id': 0, 
+    'chat_id': 0, 'provider': '', 'bot_msg': None, 'link': '', 'override' : None 
 }
 
 async def copy_to_channel(client, message: Message):
