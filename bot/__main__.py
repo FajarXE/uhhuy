@@ -323,12 +323,15 @@ async def shutdown_all_services():
         logging.warning(f"Main: Peringatan saat mengatur penutupan Aria2: {e}")
     # ---------------------------------------------
 
-    # --- PENAMBAHAN GRACEFUL SHUTDOWN CLOUD UPLOADER ---
+    # --- PENAMBAHAN GRACEFUL SHUTDOWN CLOUD UPLOADER & METADATA ---
     try:
         from bot.modules.direct_uploader import close_upload_session
         tasks.append(close_upload_session())
+        
+        from bot.helpers.metadata import close_all_cover_sessions
+        tasks.append(close_all_cover_sessions())
     except Exception as e:
-        logging.warning(f"Main: Peringatan penutupan Cloud Uploader: {e}")
+        logging.warning(f"Main: Peringatan penutupan layanan HTTP: {e}")
     # ---------------------------------------------------------
 
     if tasks:
