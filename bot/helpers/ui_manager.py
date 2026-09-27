@@ -30,6 +30,29 @@ GLOBAL_UI_LAST_UPDATE = {}
 GLOBAL_STATE_LOCK = asyncio.Lock()
 # -------------------------------
 
+def _get_system_stats() -> dict:
+    """Helper ringan untuk mengambil statistik sistem (CPU, RAM, Disk, Uptime)"""
+    try:
+        cpu_usage = psutil.cpu_percent(interval=None)
+        ram_usage = psutil.virtual_memory().percent
+    except ImportError:
+        cpu_usage = ram_usage = 0.0
+
+    total, used, free = shutil.disk_usage(Config.DOWNLOAD_BASE_DIR)
+    free_storage = free / (1024 ** 3)
+
+    uptime_seconds = int(time.time() - BOT_START_TIME)
+    h, rem = divmod(uptime_seconds, 3600)
+    m, s = divmod(rem, 60)
+    
+    return {
+        'cpu': cpu_usage,
+        'ram': ram_usage,
+        'free_storage': free_storage,
+        'uptime': f"{h}h {m}m {s}s"
+    }
+    
+
 async def get_status_text(page=1, limit=5):
     current_time = time.time()
     
@@ -99,8 +122,9 @@ async def get_status_text(page=1, limit=5):
     m, s = divmod(rem, 60)
 
     # Blok System Stats dengan border
-    text += f"\n┎ **CPU**: {cpu_usage:.1f}% | **FREE**: {free_storage:.2f} GB\n"
-    text += f"┠ **RAM**: {ram_usage:.1f}% | **UPTIME**: {h}h {m}m {s}s\n"
+    stats = _get_system_stats()
+    text += f"\n┎ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
+    text += f"┠ **RAM**: {stats['ram']:.1f}% | **UPTIME**: {stats['uptime']}\n"
     text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
 
     buttons = []
