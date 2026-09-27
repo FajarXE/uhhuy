@@ -511,6 +511,19 @@ async def run_download_task(link: str, user: dict):
                 
         except asyncio.CancelledError:
             LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan.")
+            
+            # --- [FIX RACE CONDITION UI WORKER] ---
+            # Cabut task dari memori SEBELUM mengedit pesan agar tidak ditimpa Radar
+            import bot.helpers.ui_manager as ui_manager
+            import hashlib
+            task_id_cancel = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+            async with ui_manager.GLOBAL_STATE_LOCK:
+                ui_manager.GLOBAL_TASKS.pop(task_id_cancel, None)
+            if ui_manager.GLOBAL_UI_MSG.get(chat_id) and ui_manager.GLOBAL_UI_MSG[chat_id].id == user['bot_msg'].id:
+                ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
+                ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
+            # --------------------------------------
+            
             try: await edit_message(user['bot_msg'], "🛑 Tugas dibatalkan.")
             except: pass
             await asyncio.sleep(5) 
@@ -538,7 +551,9 @@ async def run_download_task(link: str, user: dict):
                "404" in error_str or \
                "HighResAudioError" in error_str or \
                "DeezerError" in error_str or \
-               "BugsError" in error_str: 
+               "BugsError" in error_str or \
+               "qobuz" in error_str.lower() or \
+               "unavailable" in error_str.lower(): 
                 is_handled_error = True
             
             error_message = f"Tugas Gagal: {e}" if is_handled_error else f"Tugas Gagal: Terjadi error.\n`{e}`"
@@ -555,6 +570,17 @@ async def run_download_task(link: str, user: dict):
                 admin_markup = InlineKeyboardMarkup([
                     [InlineKeyboardButton(Config.ADMIN_BTN_TEXT, url=Config.ADMIN_BTN_URL, style=ButtonStyle.PRIMARY)]
                 ])
+
+            # --- [FIX RACE CONDITION UI WORKER] ---
+            import bot.helpers.ui_manager as ui_manager
+            import hashlib
+            task_id_err = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+            async with ui_manager.GLOBAL_STATE_LOCK:
+                ui_manager.GLOBAL_TASKS.pop(task_id_err, None)
+            if ui_manager.GLOBAL_UI_MSG.get(chat_id) and ui_manager.GLOBAL_UI_MSG[chat_id].id == user['bot_msg'].id:
+                ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
+                ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
+            # --------------------------------------
 
             try: 
                 if admin_markup:
