@@ -68,46 +68,46 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
     return "Failed"
 
 
-async def format_string(text:str, data:dict, user=None):
+async def format_string(text: str, data: dict, user=None):
     def safe_get(key):
         val = data.get(key)
-        if val is None: return ''
-        return str(val)
+        return str(val) if val is not None else ''
 
-    title = safe_get('title')
-    album = safe_get('album')
-    artist = safe_get('artist')
-    albumartist = safe_get('albumartist')
-    tracknumber = safe_get('tracknumber')
-    date = safe_get('date') 
-    release_date = safe_get('release_date') 
-    release_date_fallback = release_date if release_date else date
-    upc = safe_get('upc')
-    isrc = safe_get('isrc')
-    totaltracks = safe_get('totaltracks')
-    volume = safe_get('volume')
-    totalvolume = safe_get('totalvolumes') or safe_get('totalvolume')
-    extension = safe_get('extension')
-    duration = safe_get('duration')
-    copyright = safe_get('copyright')
-    genre = safe_get('genre')
-    provider = (data.get('provider') or '').title()
-    quality = safe_get('quality')
-    explicit = safe_get('explicit') 
-    
-    text = text.replace(R'{title}', title).replace(R'{album}', album).replace(R'{artist}', artist)
-    text = text.replace(R'{albumartist}', albumartist).replace(R'{tracknumber}', tracknumber)
-    text = text.replace(R'{date}', date).replace(R'{release_date}', release_date_fallback)
-    text = text.replace(R'{upc}', upc).replace(R'{isrc}', isrc).replace(R'{totaltracks}', totaltracks)
-    text = text.replace(R'{volume}', volume).replace(R'{totalvolume}', totalvolume)
-    text = text.replace(R'{extension}', extension).replace(R'{duration}', duration)
-    text = text.replace(R'{copyright}', copyright).replace(R'{genre}', genre)
-    text = text.replace(R'{provider}', provider).replace(R'{quality}', quality)
-    text = text.replace(R'{explicit}', explicit)
+    release_date = safe_get('release_date')
+    date = safe_get('date')
+
+    # Buat dictionary pemetaan (mapping)
+    mapping = {
+        '{title}': safe_get('title'),
+        '{album}': safe_get('album'),
+        '{artist}': safe_get('artist'),
+        '{albumartist}': safe_get('albumartist'),
+        '{tracknumber}': safe_get('tracknumber'),
+        '{date}': date,
+        '{release_date}': release_date if release_date else date,
+        '{upc}': safe_get('upc'),
+        '{isrc}': safe_get('isrc'),
+        '{totaltracks}': safe_get('totaltracks'),
+        '{volume}': safe_get('volume'),
+        '{totalvolume}': safe_get('totalvolumes') or safe_get('totalvolume'),
+        '{extension}': safe_get('extension'),
+        '{duration}': safe_get('duration'),
+        '{copyright}': safe_get('copyright'),
+        '{genre}': safe_get('genre'),
+        '{provider}': (data.get('provider') or '').title(),
+        '{quality}': safe_get('quality'),
+        '{explicit}': safe_get('explicit')
+    }
 
     if user:
-        text = text.replace(R'{user}', user.get('name') or '').replace(R'{username}', user.get('user_name') or '')
-    return text
+        mapping['{user}'] = user.get('name') or ''
+        mapping['{username}'] = user.get('user_name') or ''
+
+    # Compile regex untuk mencocokkan semua key di dalam dictionary
+    pattern = re.compile('|'.join(re.escape(k) for k in mapping.keys()))
+    
+    # Ganti seluruh kemunculan dalam satu sapuan O(N)
+    return pattern.sub(lambda m: mapping[m.group(0)], text)
 
 
 async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = None):
