@@ -520,7 +520,7 @@ async def run_download_task(link: str, user: dict):
                 ui_manager.GLOBAL_TASKS.pop(task_id_cancel, None)
             
             try:
-                from bot.helpers.message import send_message
+                # [FIX] Hapus import lokal di sini, gunakan import global yang sudah ada di atas file
                 await send_message(user, "🛑 **Tugas dibatalkan oleh pengguna.**", 'text')
             except: pass
             await asyncio.sleep(5) 
@@ -530,7 +530,6 @@ async def run_download_task(link: str, user: dict):
             error_str = str(e).lower()
             is_handled_error = False
             
-            # Filter error agar tidak membombardir terminal dengan teks merah (Traceback)
             if "not available in any" in error_str or \
                "vip access required" in error_str or \
                "limit reached" in error_str or \
@@ -573,13 +572,11 @@ async def run_download_task(link: str, user: dict):
             import hashlib
             task_id_err = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
             
-            # Hapus dari memori Papan agar tidak Stuck
             async with ui_manager.GLOBAL_STATE_LOCK:
                 ui_manager.GLOBAL_TASKS.pop(task_id_err, None)
 
-            # Kirim pesan error sebagai pesan baru, JANGAN TIMPA Papan Radar
             try:
-                from bot.helpers.message import send_message
+                # [FIX] Hapus import lokal di sini
                 await send_message(user, error_message, type='text', markup=admin_markup)
             except: pass 
                 
@@ -605,11 +602,9 @@ async def run_download_task(link: str, user: dict):
                         await database.client.cancelled_tasks.delete_one({'_id': final_task_id})
                     except: pass
                     
-                    # --- [PEMBERSIHAN RADAR PINTAR] ---
                     current_radar = ui_manager.GLOBAL_UI_MSG.get(chat_id)
                     if current_radar and current_radar.id == user['bot_msg'].id:
                         
-                        # Cek apakah masih ada tugas lagu lain yang berjalan di chat ini
                         has_active_tasks = False
                         async with ui_manager.GLOBAL_STATE_LOCK:
                             for t in ui_manager.GLOBAL_TASKS.values():
@@ -617,7 +612,6 @@ async def run_download_task(link: str, user: dict):
                                     has_active_tasks = True
                                     break
                         
-                        # Jika antrean sudah benar-benar kosong, baru kita hancurkan Radarnya
                         if not has_active_tasks:
                             try: await user['bot_msg'].delete()
                             except: pass
