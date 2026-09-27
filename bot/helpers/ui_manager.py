@@ -33,7 +33,7 @@ GLOBAL_STATE_LOCK = asyncio.Lock()
 def _get_system_stats() -> dict:
     """Helper ringan untuk mengambil statistik sistem (CPU, RAM, Disk, Uptime)"""
     try:
-        cpu_usage = psutil.cpu_percent(interval=None)
+        cpu_usage = psutil.cpu_percent(interval=0.1) # <-- UBAH DI SINI
         ram_usage = psutil.virtual_memory().percent
     except ImportError:
         cpu_usage = ram_usage = 0.0
@@ -107,19 +107,6 @@ async def get_status_text(page=1, limit=5):
         
     global_dl = f"{get_readable_file_size(total_dl_raw)}/s" if total_dl_raw > 0 else "0B/s"
     global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
-        
-    try:
-        cpu_usage = psutil.cpu_percent(interval=None)
-        ram_usage = psutil.virtual_memory().percent
-    except ImportError:
-        cpu_usage = ram_usage = 0.0
-
-    total, used, free = shutil.disk_usage(Config.DOWNLOAD_BASE_DIR)
-    free_storage = free / (1024 ** 3)
-
-    uptime_seconds = int(time.time() - BOT_START_TIME)
-    h, rem = divmod(uptime_seconds, 3600)
-    m, s = divmod(rem, 60)
 
     # Blok System Stats dengan border
     stats = _get_system_stats()
