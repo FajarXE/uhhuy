@@ -223,12 +223,34 @@ async def get_track_metadata(track_id, track_data, user_id, cover=None, thumbnai
 
 async def set_metadata(metadata:dict, user_id: int = None):
     audio_path = str(metadata['filepath'])
+    true_codec = ""
     
-    # --- 1. INISIALISASI MUTAGEN DENGAN DETEKSI FFPROBE ---
-    def _load_audio_sync(path):
+    # --- 1. INISIALISASI FFPROBE NATIVE ASYNC (MENCEGAH THREAD POOL BLOCKING) ---
+    try:
+        cmd = [
+            "ffprobe", "-v", "error", 
+            "-select_streams", "a:0", 
+            "-show_entries", "stream=codec_name", 
+            "-of", "default=noprint_wrappers=1:nokey=1", 
+            audio_path
+        ]
+        import asyncio
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5.0)
+        if process.returncode == 0:
+            true_codec = stdout.decode().strip().lower()
+    except Exception as e:
+        from bot.logger import LOGGER
+        LOGGER.warning(f"Gagal menjalankan ffprobe asinkron pada {audio_path}: {e}")
+
+    # --- 2. PEMROSESAN MUTAGEN DI THREAD POOL TERPISAH ---
+    def _load_audio_sync(path, codec):
         import os
-        import subprocess
-        from mutagen import File
+        from mutagen import File, MutagenError
         from mutagen.wave import WAVE
         from mutagen.mp3 import MP3
         from mutagen.flac import FLAC
@@ -236,70 +258,36 @@ async def set_metadata(metadata:dict, user_id: int = None):
         from mutagen.oggopus import OggOpus
         from mutagen.mp4 import MP4
         
-        # 1. Gunakan FFprobe untuk mengintip struktur asli (codec) di dalam file
-        true_codec = ""
-        try:
-            cmd = [
-                "ffprobe", "-v", "error", 
-                "-select_streams", "a:0", 
-                "-show_entries", "stream=codec_name", 
-                "-of", "default=noprint_wrappers=1:nokey=1", 
-                path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                true_codec = result.stdout.strip().lower()
-        except Exception as e:
-            from bot.logger import LOGGER
-            LOGGER.warning(f"Gagal menjalankan ffprobe pada {path}: {e}")
-
         h = None
-        
-        # 2. Panggil kelas Mutagen berdasarkan codec asli, BUKAN ekstensi nama file
         try:
-            if true_codec in ['aac', 'alac', 'mp4']:
-                h = MP4(path)
-            elif true_codec == 'flac':
-                h = FLAC(path)
-            elif true_codec == 'mp3':
-                h = MP3(path)
-            elif true_codec == 'vorbis':
-                h = OggVorbis(path)
-            elif true_codec == 'opus':
-                h = OggOpus(path)
-            elif 'pcm' in true_codec:  # Contoh: pcm_s16le, pcm_s24le (WAV)
-                h = WAVE(path)
+            if codec in ['aac', 'alac', 'mp4']: h = MP4(path)
+            elif codec == 'flac': h = FLAC(path)
+            elif codec == 'mp3': h = MP3(path)
+            elif codec == 'vorbis': h = OggVorbis(path)
+            elif codec == 'opus': h = OggOpus(path)
+            elif 'pcm' in codec: h = WAVE(path)
             else:
-                # 3. Fallback/Cadangan: Jika ffprobe gagal, tebak dari ekstensi seperti biasa
                 ext = os.path.splitext(path)[1].lower().strip()
-                if ext == '.flac': 
-                    h = FLAC(path)
-                elif ext in ['.m4a', '.mp4', '.m4b']: 
-                    h = MP4(path)
-                elif ext == '.mp3': 
-                    h = MP3(path)
-                elif ext == '.ogg': 
-                    h = OggVorbis(path)
-                elif ext == '.opus': 
-                    h = OggOpus(path)
-                elif ext == '.wav': 
-                    h = WAVE(path)
-                else:
-                    h = File(path) 
-        except Exception as e:
+                if ext == '.flac': h = FLAC(path)
+                elif ext in ['.m4a', '.mp4', '.m4b']: h = MP4(path)
+                elif ext == '.mp3': h = MP3(path)
+                elif ext == '.ogg': h = OggVorbis(path)
+                elif ext == '.opus': h = OggOpus(path)
+                elif ext == '.wav': h = WAVE(path)
+                else: h = File(path) 
+        except MutagenError:
             from bot.logger import LOGGER
-            LOGGER.error(f"Format Audio Tidak Valid / Spoofed Extension pada {path}: {e}")
-            h = None
-                
+            LOGGER.exception(f"MutagenError: File rusak, korup, atau header invalid pada {path}")
+        except Exception:
+            from bot.logger import LOGGER
+            LOGGER.exception(f"Format Audio Tidak Valid pada {path}")
         return h
 
     handle = None
     try:
         import asyncio
-        # Membaca header file audio secara asinkron di thread terpisah
-        handle = await asyncio.to_thread(_load_audio_sync, audio_path)
-            
-    except Exception as e:
+        handle = await asyncio.to_thread(_load_audio_sync, audio_path, true_codec)
+    except Exception:
         from bot.logger import LOGGER
         LOGGER.exception(f"Gagal membuka file {audio_path}:")
         return
@@ -309,13 +297,14 @@ async def set_metadata(metadata:dict, user_id: int = None):
          LOGGER.error(f"File tidak dikenali formatnya: {audio_path}")
          return
     
-    # --- 2. PERBAIKAN DATA DURASI ---
+    # --- 3. PERBAIKAN DATA DURASI ---
     current_dur = metadata.get('duration', 0)
     if not current_dur:
         try:
             if hasattr(handle, 'info') and hasattr(handle.info, 'length'):
                 current_dur = handle.info.length 
-        except: pass
+        except Exception: 
+            pass
 
     dur_ms = parse_duration_to_ms(current_dur)
     metadata['duration'] = int(dur_ms / 1000)
@@ -681,12 +670,20 @@ async def set_mp3(data: Dict, handle: Union[MP3, EasyMP3], dur_ms: int = 0):
 # ==========================================
 async def set_wav(data: Dict, handle: WAVE, dur_ms: int = 0):
     if not isinstance(handle, WAVE):
-        try: handle = WAVE(data['filepath'])
-        except Exception: pass
+        try: 
+            handle = WAVE(data['filepath'])
+        except Exception: 
+            from bot.logger import LOGGER
+            LOGGER.exception("Mutagen gagal membaca objek WAVE:")
+            return
 
     if handle.tags is None:
-        try: handle.add_tags()
-        except Exception: return
+        try: 
+            handle.add_tags()
+        except Exception: 
+            from bot.logger import LOGGER
+            LOGGER.exception("Mutagen gagal menambahkan TAGS ke file WAVE:")
+            return
     
     tags = handle.tags
     
@@ -878,10 +875,10 @@ async def savePic(handle, metadata):
         try:
             handle.tags.delall("APIC")
             handle.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc=u'Cover', data=data))
-        except Exception as e:
+        except Exception:
             from bot.logger import LOGGER
-            LOGGER.debug(f"Gagal memasang cover art ID3 ke file: {e}")
-
+            LOGGER.exception("Gagal memasang cover art ID3 ke file (Kemungkinan korupsi struktur ID3):")
+            
 async def get_audio_extension(path):
     try:
         handle = File(path)
