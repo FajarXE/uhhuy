@@ -329,11 +329,16 @@ async def split_zip_system(folderpath):
                 process.wait()
             )
         except asyncio.CancelledError:
-            # --- BUNUH ZOMBIE PROCESS ZIP ---
+            # --- BUNUH ZOMBIE PROCESS ZIP (PROTEKSI GANDA) ---
             try:
-                process.terminate()
-            except Exception:
-                pass
+                if process.returncode is None:
+                    process.terminate()          # Percobaan penghentian halus (SIGTERM)
+                    await asyncio.sleep(0.5)     # Beri jeda OS merespons
+                    if process.returncode is None:
+                        process.kill()           # Penghentian paksa absolut (SIGKILL)
+                        LOGGER.warning("Proses ZIP dipaksa mati dengan SIGKILL (Zombie terdeteksi).")
+            except Exception as kill_err:
+                LOGGER.error(f"Gagal menghentikan paksa proses zip: {kill_err}")
             raise
         
         if process.returncode == 0:
@@ -379,11 +384,16 @@ async def create_zip_system(folderpath):
                 process.wait()
             )
         except asyncio.CancelledError:
-            # --- BUNUH ZOMBIE PROCESS ZIP ---
+            # --- BUNUH ZOMBIE PROCESS ZIP (PROTEKSI GANDA) ---
             try:
-                process.terminate()
-            except Exception:
-                pass
+                if process.returncode is None:
+                    process.terminate()          # Percobaan penghentian halus (SIGTERM)
+                    await asyncio.sleep(0.5)     # Beri jeda OS merespons
+                    if process.returncode is None:
+                        process.kill()           # Penghentian paksa absolut (SIGKILL)
+                        LOGGER.warning("Proses ZIP dipaksa mati dengan SIGKILL (Zombie terdeteksi).")
+            except Exception as kill_err:
+                LOGGER.error(f"Gagal menghentikan paksa proses zip: {kill_err}")
             raise
         
         if process.returncode == 0: return zip_path
