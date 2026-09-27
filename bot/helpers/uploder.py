@@ -4,7 +4,7 @@ import os
 import asyncio
 import shutil
 import hashlib 
-import aiohttp # <-- Tambahan import untuk exception handling
+import aiohttp 
 from config import Config 
 from pyrogram.errors import MessageNotModified
 
@@ -18,6 +18,8 @@ import bot.helpers.translations as lang
 
 from bot.tgclient import aio 
 from ..modules.direct_uploader import DirectUpload
+
+from bot.helpers.message import UserDetails
 
 class FakeListener:
     def __init__(self, user_dict):
@@ -109,8 +111,8 @@ class VikingfilesStrategy(CloudStrategy):
         return "\n".join(uploaded_links) if uploaded_links else None
 # ==========================================
 
-async def upload_to_cloud_handler(filepath, user, metadata, mode):
-    user_id = user['user_id']
+async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, mode: str):
+    user_id = user['user_id']  # Editor sekarang tahu bahwa 'user_id' memang valid ada di dalam 'user'
     user_data = bot_set.user_data.get(user_id, {})
     mode = mode.title() if mode else 'Telegram'
     
@@ -245,7 +247,7 @@ def handle_lyrics_files(folderpath, user_id):
                     try: os.remove(os.path.join(root, file))
                     except Exception as e: LOGGER.error(f"Gagal menghapus lirik {file}: {e}")
 
-async def album_upload(metadata, user):
+async def album_upload(metadata: dict, user: UserDetails):
     user_dict = user.copy()
     user_id = user['user_id']
     user_settings = bot_set.user_data.get(user_id, {})
@@ -318,7 +320,7 @@ async def album_upload(metadata, user):
             
     await cleanup(None, metadata, user_dict)
 
-async def artist_upload(metadata, user):
+async def artist_upload(metadata: dict, user: UserDetails):
     user_dict = user.copy()
     user_id = user['user_id']
     user_settings = bot_set.user_data.get(user_id, {})
@@ -380,7 +382,7 @@ async def artist_upload(metadata, user):
             
     await cleanup(None, metadata, user_dict)
 
-async def playlist_upload(metadata, user):
+async def playlist_upload(metadata: dict, user: UserDetails):
     user_id = user['user_id']
     user_settings = bot_set.user_data.get(user_id, {})
     user_mode = user_settings.get('upload_mode', 'Telegram')
@@ -454,7 +456,7 @@ async def playlist_upload(metadata, user):
                 
     await cleanup(None, metadata, user)
 
-async def track_upload(metadata, user, disable_link=False):
+async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = False):
     user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', bot_set.upload_mode)
     upload_success = False
     
@@ -500,7 +502,7 @@ async def track_upload(metadata, user, disable_link=False):
             break
     # ---------------------------------------------------
 
-async def rclone_upload(user, realpath):
+async def rclone_upload(user: UserDetails, realpath):
     path_to_upload = realpath
     base_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
     if isinstance(realpath, list): path_to_upload = base_path
@@ -536,7 +538,7 @@ async def rclone_upload(user, realpath):
     r_link, i_link = await create_link(realpath, base_path)
     return r_link, i_link
 
-async def local_upload(metadata, user):
+async def local_upload(metadata: dict, user: UserDetails):
     to_move = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{metadata['provider']}"
     destination = os.path.join(Config.LOCAL_STORAGE, os.path.basename(to_move))
     if os.path.exists(destination):
@@ -549,7 +551,7 @@ async def local_upload(metadata, user):
     else: shutil.copytree(to_move, destination)
     shutil.rmtree(to_move)
 
-async def telegram_upload(track, user, batch_mode=False): 
+async def telegram_upload(track: dict, user: UserDetails, batch_mode: bool = False): 
     meta = track.copy()
     meta['batch_mode'] = batch_mode
     if 'cover' in meta and (not meta['cover'] or not os.path.exists(meta['cover'])): meta['cover'] = None 
@@ -592,7 +594,7 @@ async def telegram_upload(track, user, batch_mode=False):
         LOGGER.exception(f"[UPLOAD ERROR] send_message failed for {filepath}:")
         raise e
 
-async def batch_telegram_upload(metadata, user):
+async def batch_telegram_upload(metadata: dict, user: UserDetails):
     tracks_to_upload = []
     
     if metadata['type'] in ['album', 'playlist']:
