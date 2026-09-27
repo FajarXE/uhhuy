@@ -991,3 +991,18 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
         return cover_path
         
     return './project-siesta.png'
+
+async def close_all_cover_sessions():
+    """Membersihkan semua aiohttp session yang menggantung saat bot shutdown."""
+    global _COVER_SESSIONS
+    from bot.logger import LOGGER
+    
+    closed_count = 0
+    for proxy, session in list(_COVER_SESSIONS.items()):
+        if session and not session.closed:
+            await session.close()
+            closed_count += 1
+            
+    _COVER_SESSIONS.clear()
+    if closed_count > 0:
+        LOGGER.info(f"Metadata: Berhasil menutup {closed_count} sesi HTTP Cover Art.")
