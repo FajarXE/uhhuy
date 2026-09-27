@@ -57,13 +57,29 @@ class ProxyPoolManager:
                 self.proxies[proxy_url]["active"] = True
 
     def format_for_aria2(self, proxy_url):
-        """Sanitasi skema proksi khusus untuk kompatibilitas daemon Aria2c."""
+        """Sanitasi skema proksi khusus untuk kompatibilitas daemon Aria2c (Aman dari parsing error)."""
+        from urllib.parse import urlparse, urlunparse
+        
         if not proxy_url: return None
-        if proxy_url.startswith("socks5h://"):
-            return proxy_url.replace("socks5h://", "socks5://", 1)
-        elif proxy_url.startswith("socks4a://"):
-            return proxy_url.replace("socks4a://", "socks4://", 1)
-        return proxy_url
+        
+        try:
+            parsed = urlparse(proxy_url)
+            scheme = parsed.scheme.lower()
+            
+            # Ubah scheme socks5h -> socks5, socks4a -> socks4 tanpa menyentuh kredensial (user:pass)
+            if scheme == "socks5h":
+                scheme = "socks5"
+            elif scheme == "socks4a":
+                scheme = "socks4"
+            else:
+                return proxy_url # Jika tidak ada yang perlu dirubah, kembalikan apa adanya
+                
+            # Susun ulang URL dengan skema baru
+            return urlunparse((scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+            
+        except Exception as e:
+            LOGGER.warning(f"Proxy Pool: Gagal mem-parsing URL proksi {proxy_url} dengan urllib: {e}")
+            return proxy_url # Fallback aman
 
     def get_aiohttp_connector(self, proxy_url):
         """Membangun objek ProxyConnector siap pakai untuk aiohttp."""
