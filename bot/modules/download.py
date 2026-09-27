@@ -512,88 +512,80 @@ async def run_download_task(link: str, user: dict):
         except asyncio.CancelledError:
             LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan.")
             
-            # --- [FIX RACE CONDITION UI WORKER] ---
-            # Cabut task dari memori SEBELUM mengedit pesan agar tidak ditimpa Radar
             import bot.helpers.ui_manager as ui_manager
             import hashlib
             task_id_cancel = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+            
             async with ui_manager.GLOBAL_STATE_LOCK:
                 ui_manager.GLOBAL_TASKS.pop(task_id_cancel, None)
-            if ui_manager.GLOBAL_UI_MSG.get(chat_id) and ui_manager.GLOBAL_UI_MSG[chat_id].id == user['bot_msg'].id:
-                ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
-                ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
-            # --------------------------------------
             
-            try: await edit_message(user['bot_msg'], "🛑 Tugas dibatalkan.")
+            try:
+                from bot.helpers.message import send_message
+                await send_message(user, "🛑 **Tugas dibatalkan oleh pengguna.**", 'text')
             except: pass
             await asyncio.sleep(5) 
                 
         except Exception as e:
             import traceback
-            error_str = str(e)
+            error_str = str(e).lower()
             is_handled_error = False
             
+            # Filter error agar tidak membombardir terminal dengan teks merah (Traceback)
             if "not available in any" in error_str or \
                "vip access required" in error_str or \
                "limit reached" in error_str or \
-               "Maaf, tidak ada akun" in error_str or \
-               "NotImplementedError" in error_str or \
-               "URL Deezer tidak valid" in error_str or \
-               "Item tidak tersedia di semua" in error_str or \
-               "Track not available" in error_str or \
-               "Stream key kosong" in error_str or \
-               "Region Locked" in error_str or \
-               "Link Bandcamp tidak valid" in error_str or \
-               "Link tidak valid" in error_str or \
-               "Link tidak dikenali" in error_str or \
+               "maaf, tidak ada akun" in error_str or \
+               "notimplementederror" in error_str or \
+               "deezer tidak valid" in error_str or \
+               "tidak tersedia di semua" in error_str or \
+               "track not available" in error_str or \
+               "stream key kosong" in error_str or \
+               "region locked" in error_str or \
+               "link bandcamp tidak valid" in error_str or \
+               "link tidak valid" in error_str or \
+               "link tidak dikenali" in error_str or \
                "halaman sistem" in error_str or \
-               "Gagal mengambil profil artis" in error_str or \
+               "gagal mengambil profil artis" in error_str or \
                "404" in error_str or \
-               "HighResAudioError" in error_str or \
-               "DeezerError" in error_str or \
-               "BugsError" in error_str or \
-               "qobuz" in error_str.lower() or \
-               "unavailable" in error_str.lower(): 
+               "highresaudioerror" in error_str or \
+               "deezererror" in error_str or \
+               "bugserror" in error_str or \
+               "qobuz" in error_str or \
+               "unavailable" in error_str: 
                 is_handled_error = True
             
             error_message = f"Tugas Gagal: {e}" if is_handled_error else f"Tugas Gagal: Terjadi error.\n`{e}`"
 
             if is_handled_error:
-                 LOGGER.warning(f"Download Task Ditolak (Handled): {e}")
+                 LOGGER.warning(f"Download Task Ditolak (Region Lock / Handled): {e}")
             else:
                  LOGGER.error(f"Error fatal di run_download_task: {e}\n{traceback.format_exc()}")
 
             admin_markup = None
-            if "vip access required" in error_str.lower() or "limit reached" in error_str.lower():
+            if "vip access required" in error_str or "limit reached" in error_str:
                 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
                 from pyrogram.enums import ButtonStyle
                 admin_markup = InlineKeyboardMarkup([
                     [InlineKeyboardButton(Config.ADMIN_BTN_TEXT, url=Config.ADMIN_BTN_URL, style=ButtonStyle.PRIMARY)]
                 ])
 
-            # --- [FIX RACE CONDITION UI WORKER] ---
             import bot.helpers.ui_manager as ui_manager
             import hashlib
             task_id_err = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+            
+            # Hapus dari memori Papan agar tidak Stuck
             async with ui_manager.GLOBAL_STATE_LOCK:
                 ui_manager.GLOBAL_TASKS.pop(task_id_err, None)
-            if ui_manager.GLOBAL_UI_MSG.get(chat_id) and ui_manager.GLOBAL_UI_MSG[chat_id].id == user['bot_msg'].id:
-                ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
-                ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
-            # --------------------------------------
 
-            try: 
-                if admin_markup:
-                    await edit_message(user['bot_msg'], error_message, markup=admin_markup)
-                else:
-                    await edit_message(user['bot_msg'], error_message)
+            # Kirim pesan error sebagai pesan baru, JANGAN TIMPA Papan Radar
+            try:
+                from bot.helpers.message import send_message
+                await send_message(user, error_message, type='text', markup=admin_markup)
             except: pass 
                 
         finally:
-            # Catatan: Pastikan fungsi cleanup ada di file/import Anda
             await cleanup(user)
 
-            # --- TAMBAHKAN PEMBERSIHAN SEMAPHORE DI SINI ---
             current_sem = USER_SEMAPHORES.get(chat_id)
             if current_sem and not current_sem.locked():
                 USER_SEMAPHORES.pop(chat_id, None)
@@ -601,52 +593,38 @@ async def run_download_task(link: str, user: dict):
             try:
                 if 'bot_msg' in user:
                     import hashlib
-                    import bot.helpers.ui_manager as ui_manager # <-- FIX IMPORT
+                    import bot.helpers.ui_manager as ui_manager
                     final_task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
                     
-                    # 1. HAPUS DARI PAPAN GLOBAL UTAMA
                     async with ui_manager.GLOBAL_STATE_LOCK:
                         ui_manager.GLOBAL_TASKS.pop(final_task_id, None)
-
-                    # --- [FIX MEMORY LEAK] HAPUS DARI DAFTAR CANCEL ---
-                    if final_task_id in ui_manager.GLOBAL_CANCEL_DICT:
                         ui_manager.GLOBAL_CANCEL_DICT.discard(final_task_id)
-                        try:
-                            # Hapus juga dari Database agar tidak menumpuk saat restart
-                            from bot.helpers.database.mongo_async import database
-                            await database.client.cancelled_tasks.delete_one({'_id': final_task_id})
-                        except Exception as db_err:
-                            LOGGER.debug(f"Gagal menghapus cancel ID dari DB: {db_err}")
-                    # --------------------------------------------------
 
-                    current_radar = ui_manager.GLOBAL_UI_MSG.get(user['chat_id'])
-                    if current_radar and current_radar.id == user['bot_msg'].id:
-                        if not task_successful:
-                            ui_manager.GLOBAL_UI_MSG.pop(user['chat_id'], None)
-                            ui_manager.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
+                    try:
+                        from bot.helpers.database.mongo_async import database
+                        await database.client.cancelled_tasks.delete_one({'_id': final_task_id})
+                    except: pass
                     
-                    # Update radar terakhir kali untuk semua orang (Pesan error tidak ikut ter-update)
-                    for cid, m in list(ui_manager.GLOBAL_UI_MSG.items()):
-                        c_page = ui_manager.GLOBAL_UI_PAGES.get(cid, 1)
-                        g_text, g_markup = await ui_manager.get_status_text(page=c_page)
-                        try: await edit_message(m, g_text, g_markup, False)
-                        except: pass
-
-                    # --- [FIX GHOST PANEL] PASTIKAN PESAN TELEGRAM DIHAPUS ---
-                    try: 
-                        if task_successful:
-                            await user['bot_msg'].delete()
-                    except: 
-                        pass
-                    
-                    # Bersihkan sisa memori radar jika tugas sukses
+                    # --- [PEMBERSIHAN RADAR PINTAR] ---
+                    current_radar = ui_manager.GLOBAL_UI_MSG.get(chat_id)
                     if current_radar and current_radar.id == user['bot_msg'].id:
-                        if task_successful:
-                            ui_manager.GLOBAL_UI_MSG.pop(user['chat_id'], None)
-                            ui_manager.GLOBAL_UI_PAGES.pop(user['chat_id'], None)
-                            
-                            from bot.helpers.database.mongo_async import database
-                            await database.remove_ui_state(user['chat_id'])
+                        
+                        # Cek apakah masih ada tugas lagu lain yang berjalan di chat ini
+                        has_active_tasks = False
+                        async with ui_manager.GLOBAL_STATE_LOCK:
+                            for t in ui_manager.GLOBAL_TASKS.values():
+                                if t.get('user_id') == chat_id:
+                                    has_active_tasks = True
+                                    break
+                        
+                        # Jika antrean sudah benar-benar kosong, baru kita hancurkan Radarnya
+                        if not has_active_tasks:
+                            try: await user['bot_msg'].delete()
+                            except: pass
+                            ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
+                            ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
+                            try: await database.remove_ui_state(chat_id)
+                            except: pass
             except Exception as e:
                 LOGGER.debug(f"Pembersihan akhir gagal (Non-Fatal): {e}")
 
