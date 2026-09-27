@@ -170,20 +170,47 @@ async def upload_to_cloud_handler(filepath, user, metadata, mode):
     try:
         folder_name = metadata.get('title', 'Unknown Album')
         
-        # 3. Persiapan Folder (Didelegasikan ke Strategy masing-masing)
-        await strategy.prepare_folder(uploader, token, folder_name)
+        # 3. Persiapan Folder (Dengan Exponential Backoff: Max 3x Retry)
+        for attempt in range(3):
+            try:
+                await strategy.prepare_folder(uploader, token, folder_name)
+                break # Sukses, keluar dari loop
+            except Exception as e:
+                if attempt == 2:
+                    LOGGER.warning(f"{mode} Folder API gagal setelah 3x percobaan: {e}")
+                else:
+                    delay = 2 * (2 ** attempt) # 2s, 4s
+                    LOGGER.warning(f"{mode} Folder API Error. Retry {attempt+1} dalam {delay}s...")
+                    await asyncio.sleep(delay)
         
         uploaded_links = []
         upload_kwargs = strategy.get_upload_kwargs()
         total_files = len(files_to_upload)
         
-        # 4. Iterasi Eksekusi Upload Seragam (Bebas Duplikasi)
+        # 4. Iterasi Eksekusi Upload (Dengan Exponential Backoff: Max 3x Retry)
         for index, file_part in enumerate(files_to_upload, 1):
             filename = os.path.basename(file_part)
             if details:
                 details['title'] = f"[{index}/{total_files}] {filename}" if total_files > 1 else filename
+            
+            res = None
+            for attempt in range(3):
+                try:
+                    res = await uploader.upload(filename, 0, details=details, **upload_kwargs)
+                    break # Sukses
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    if "DIBATALKAN_PENGGUNA" in str(e):
+                        raise
                     
-            res = await uploader.upload(filename, 0, details=details, **upload_kwargs)
+                    if attempt == 2:
+                        raise e # Lempar ke blok Exception utama di bawah jika sudah 3x gagal
+                        
+                    delay = 2 * (2 ** attempt) # 2s, 4s
+                    LOGGER.warning(f"Upload {filename} gagal ({e}). Retry {attempt+1} dalam {delay}s...")
+                    await asyncio.sleep(delay)
+
             if res: 
                 uploaded_links.append(list(res.values())[0])
 
