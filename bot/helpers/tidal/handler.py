@@ -308,7 +308,7 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                 'title': track_meta.get('title', 'Unknown'),
                 'type': 'Track',
                 'action': 'Download',
-                'machine': 'Tidal DASH',
+                'machine': 'Aria2c 1.37.0',
                 'task_id': task_id
             }
         # ----------------------------------------
