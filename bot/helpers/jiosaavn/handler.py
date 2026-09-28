@@ -87,12 +87,28 @@ async def _process_track_worker(track_data, i, total, dl_dir, user, session, api
 
     # 3. Mesin Aria2 + Penyamaran Headers
     headers_dict = {'User-Agent': api.headers['User-Agent']}
-    details_aria = {'msg': None, 'headers': headers_dict} if is_batch else {
-        'msg': user['bot_msg'], 'title': title, 'type': 'Track', 'headers': headers_dict
-    }
+    
+    # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 & AIOHTTP ---
+    import hashlib
+    import time
+    from bot.helpers.ui_manager import progress_message
+    
+    details_aria = None
+    if not is_batch and 'bot_msg' in user:
+        task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+        details_aria = {
+            'msg': user['bot_msg'],
+            'title': title,
+            'type': 'Track',
+            'action': 'Download', # <-- Mengaktifkan Papan Radar Download Track
+            'task_id': task_id,
+            'headers': headers_dict
+        }
+    # --------------------------------------------------
 
     downloaded = False
     for url in urls_to_try:
+        # Menyerahkan proses ke Aria2 (Aria2 akan otomatis melapor ke Radar)
         err = await download_file(url, file_path, retries=1, details=details_aria)
         if not err:
             downloaded = True
@@ -102,13 +118,27 @@ async def _process_track_worker(track_data, i, total, dl_dir, user, session, api
             try:
                 async with session.get(url, headers=headers_dict) as resp:
                     if resp.status == 200:
+                        total_bytes = int(resp.headers.get('Content-Length', 0))
+                        downloaded_bytes = 0
+                        last_ui_update = time.time()
+                        
                         async with aiofiles.open(file_path, mode='wb') as f:
                             async for chunk in resp.content.iter_chunked(256 * 1024):
-                                if chunk: await f.write(chunk)
+                                if chunk: 
+                                    await f.write(chunk)
+                                    downloaded_bytes += len(chunk)
+                                    
+                                    # Manual Radar Report jika AIOHTTP yang bekerja
+                                    now = time.time()
+                                    if details_aria and (now - last_ui_update > 1.5 or downloaded_bytes == total_bytes):
+                                        last_ui_update = now
+                                        asyncio.create_task(progress_message(downloaded_bytes, total_bytes, details_aria))
+                                        
                         if os.path.getsize(file_path) > 10000:
                             downloaded = True
                             break
-            except: pass
+            except Exception as e: 
+                LOGGER.debug(f"AIOHTTP fallback error: {e}")
 
     # 4. Fallback Terakhir (YT-DLP)
     if not downloaded:
