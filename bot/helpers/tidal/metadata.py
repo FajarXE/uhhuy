@@ -311,8 +311,12 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
     if not metadata.get('composer') and t_meta.get('composers'):
         metadata['composer'] = ', '.join([c.get('name', '') for c in t_meta['composers']])
 
-    return metadata
+    # --- [FIX] SUNTIKAN PROVIDER DAN TYPE UNTUK CLOUD UPLOAD ---
+    metadata['provider'] = 'Tidal'
+    metadata['type'] = 'Track'
+    # -----------------------------------------------------------
 
+    return metadata
 
 async def get_album_metadata(album_id, a_meta, t_meta, r_id, user_id=0):
     """
