@@ -3,7 +3,7 @@
 import json
 import base64
 import os
-import shutil 
+import shutil  # <-- TAMBAHAN: Untuk menyalin cover
 import asyncio 
 from datetime import datetime 
 
@@ -52,7 +52,7 @@ async def start_tidal(url:str, user:dict):
     elif type_ == 'playlist':
         await start_playlist(item_id, user) 
     elif type_ == 'video':
-        await start_video(item_id, user)
+        await start_video(item_id, user) # <- TAMBAHAN RUTE VIDEO
 
 
 async def start_video(video_id: str, user: dict, upload=True):
@@ -295,63 +295,33 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         track_meta['filepath'] = filepath  
 
         # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
-        import hashlib
         details = None
         if upload and 'bot_msg' in user:
-            task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
             details = {
                 'msg': user['bot_msg'],
                 'title': track_meta.get('title', 'Unknown'),
-                'type': track_meta.get('type', 'Track').capitalize(),
-                'action': 'Download',
-                'task_id': task_id
+                'type': track_meta.get('type', 'Track').capitalize()
             }
         # ----------------------------------------
 
         if type(urls) == list:
-            import time
-            from bot.helpers.ui_manager import progress_message
-            
-            total_segments = len(urls[0])
-            completed_segments = 0
-            last_ui_update = time.time()
-            
-            # Unduh 10 kepingan sekaligus agar sangat cepat
-            sem = asyncio.Semaphore(10) 
-            
-            async def fetch_audio_chunk(index, url):
-                nonlocal completed_segments, last_ui_update
-                t_path = f"{filepath}.{index}"
-                async with sem:
-                    # Download tiap pecahan tanpa melempar 'details' ke Aria2 
-                    # agar Aria2 tidak mereset progress bar ke 0% terus-menerus
-                    err = await download_file(url, t_path) 
-                    if err:
-                        raise Exception(f"Gagal mengunduh kepingan audio {index}: {err}")
-                    
-                    completed_segments += 1
-                    
-                    # Manual Update UI Progress Bar ke Papan Radar
-                    now = time.time()
-                    if details and (now - last_ui_update > 1.5 or completed_segments == total_segments):
-                        last_ui_update = now
-                        # Mengirim progres berbasis "Jumlah Kepingan"
-                        asyncio.create_task(progress_message(completed_segments, total_segments, details))
-                        
-                return t_path
-
-            # Jalankan unduhan kepingan secara paralel
-            tasks = [fetch_audio_chunk(i, url) for i, url in enumerate(urls[0])]
-            try:
-                temp_files = await asyncio.gather(*tasks)
-            except Exception as e:
-                LOGGER.error(f"Gagal mendownload segmen audio: {e}")
-                return None
+            i = 0
+            temp_files = []
+            for url in urls[0]:
+                temp_path = f"{filepath}.{i}"
+                
+                err = await download_file(url, temp_path) 
+                
+                if err:
+                    LOGGER.error(f"Download_file gagal (list): {err}")
+                    return None
+                i+=1
+                temp_files.append(temp_path)
                 
             await merge_tracks(temp_files, filepath)
         else:
             # Untuk file tunggal (bukan kepingan), TETAP GUNAKAN details 
-            # agar progress bar berjalan normal di layar via Aria2
+            # agar progress bar berjalan normal di layar
             err = await download_file(urls, filepath, details=details) 
             if err:
                 LOGGER.error(f"Download_file gagal (single): {err}")
