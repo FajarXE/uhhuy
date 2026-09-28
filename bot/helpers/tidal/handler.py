@@ -3,7 +3,7 @@
 import json
 import base64
 import os
-import shutil  # <-- TAMBAHAN: Untuk menyalin cover
+import shutil 
 import asyncio 
 from datetime import datetime 
 
@@ -52,7 +52,7 @@ async def start_tidal(url:str, user:dict):
     elif type_ == 'playlist':
         await start_playlist(item_id, user) 
     elif type_ == 'video':
-        await start_video(item_id, user) # <- TAMBAHAN RUTE VIDEO
+        await start_video(item_id, user) 
 
 
 async def start_video(video_id: str, user: dict, upload=True):
@@ -83,7 +83,7 @@ async def start_video(video_id: str, user: dict, upload=True):
     # --- PERSIAPAN TASK PROGRESS ---
     import hashlib
     import time 
-    from bot.helpers.utils import progress_message
+    from bot.helpers.ui_manager import progress_message
     
     details = None
     if upload and 'bot_msg' in user:
