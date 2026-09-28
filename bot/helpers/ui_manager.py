@@ -61,7 +61,7 @@ async def get_status_text(page=1, limit=5):
         stale = []
         for k, v in list(GLOBAL_TASKS.items()):
             action = str(v.get('action', '')).lower()
-            time_limit = 900 if 'zipping' in action else 120 
+            time_limit = 1800 if 'zipping' in action else 600 
                 
             if current_time - v.get('timestamp', current_time) > time_limit:
                 stale.append(k)
@@ -229,7 +229,7 @@ async def dedicated_ui_worker():
                 stale_tasks = []
                 for k, v in list(GLOBAL_TASKS.items()):
                     action = str(v.get('action', '')).lower()
-                    time_limit = 900 if 'zipping' in action else 120 
+                    time_limit = 1800 if 'zipping' in action else 600 
                     
                     if now - v.get('timestamp', now) > time_limit:
                         stale_tasks.append(k)
