@@ -881,7 +881,10 @@ async def savePic(handle, metadata):
             
 async def get_audio_extension(path):
     try:
-        handle = File(path)
+        import asyncio
+        # Memindahkan operasi disk I/O sinkron ke thread terpisah
+        handle = await asyncio.to_thread(File, path)
+        
         if handle is None:
              ext = os.path.splitext(path)[1].lower()
              return ext.replace('.', '')
