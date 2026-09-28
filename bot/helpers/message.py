@@ -21,6 +21,7 @@ from typing import TypedDict, Optional, Any
 
 current_user = {}
 ANTISPAM_TTL = 300  # Batas waktu maksimal memori Anti-Spam nyangkut (5 menit)
+LAST_SPAM_CLEANUP = 0
 
 # Mendefinisikan struktur kerangka User
 class UserDetails(TypedDict, total=False):
@@ -132,13 +133,17 @@ async def sync_single_user_managers(user_id, data):
         LOGGER.debug(f"Gagal sinkronisasi manager JIT: {e}")
 
 async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
+    global LAST_SPAM_CLEANUP # <-- Deklarasikan pemanggilan global
     now = time.time()
     
     # Pembersihan Memori Otonom (Garbage Collection)
-    # Mencari dan menghapus ID yang usianya sudah melewati ANTISPAM_TTL
-    stale_keys = [k for k, v in current_user.items() if now - v > ANTISPAM_TTL]
-    for k in stale_keys:
-        current_user.pop(k, None)
+    # [FIX] Dibatasi hanya berjalan maksimal 1x setiap 60 detik
+    if now - LAST_SPAM_CLEANUP > 60:
+        # Gunakan list() agar iterasi dictionary aman
+        stale_keys = [k for k, v in list(current_user.items()) if now - v > ANTISPAM_TTL]
+        for k in stale_keys:
+            current_user.pop(k, None)
+        LAST_SPAM_CLEANUP = now
 
     if revoke:
         # Menghapus ID secara manual jika tugas sudah selesai normal
