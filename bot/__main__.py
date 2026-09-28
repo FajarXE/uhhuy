@@ -6,6 +6,7 @@ import asyncio
 import sys
 import logging
 import traceback
+import inspect
 
 # --- [FIX] SETUP EVENT LOOP HARUS DI ATAS SEBELUM IMPORT MODUL BOT ---
 # Ini memastikan Motor, Pyrogram, dan uvloop berjalan di loop yang sama.
