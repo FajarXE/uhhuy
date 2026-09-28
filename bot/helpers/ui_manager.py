@@ -33,7 +33,7 @@ GLOBAL_STATE_LOCK = asyncio.Lock()
 def _get_system_stats() -> dict:
     """Helper ringan untuk mengambil statistik sistem (CPU, RAM, Disk, Uptime)"""
     try:
-        cpu_usage = psutil.cpu_percent(interval=0.1) # <-- UBAH DI SINI
+        cpu_usage = psutil.cpu_percent(interval=None)
         ram_usage = psutil.virtual_memory().percent
     except ImportError:
         cpu_usage = ram_usage = 0.0
