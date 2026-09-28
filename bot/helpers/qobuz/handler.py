@@ -306,13 +306,15 @@ async def start_track(item_id:int, user:dict, track_meta:dict | None, upload=Tru
         track_meta['filepath'] = full_path
 
         # --- [FIX UTAMA] SUNTIKAN RADAR ARIA2 ---
+        import hashlib
         details = None
         if upload and 'bot_msg' in user:
             task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
             details = {
                 'msg': user['bot_msg'],
                 'title': track_meta.get('title', 'Unknown'),
-                'type': track_meta.get('type', 'Track').capitalize(),
+                'type': 'Track',
+                'action': 'Download',  # <-- WAJIB DITAMBAHKAN AGAR RADAR MEMBACA STATUS DOWNLOAD
                 'task_id': task_id
             }
 
