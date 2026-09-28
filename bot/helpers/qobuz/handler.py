@@ -43,21 +43,26 @@ async def force_custom_tags(filepath, metadata):
     tags_to_write = {k: str(metadata[k]) for k in target_keys if metadata.get(k)}
     if not tags_to_write: return
 
-    try:
-        if ext == 'flac' and FLAC:
-            try:
-                audio = FLAC(filepath)
-                for k, v in tags_to_write.items(): audio[k] = v
-                audio.save()
-            except: pass
-        elif ext == 'mp3' and ID3:
-            try:
-                try: audio = ID3(filepath)
-                except: audio = ID3(); audio.save(filepath)
-                for k, v in tags_to_write.items(): audio.add(TXXX(encoding=3, desc=k, text=v))
-                audio.save()
-            except: pass
-    except: pass
+    def _save_tags():
+        try:
+            if ext == 'flac' and FLAC:
+                try:
+                    audio = FLAC(filepath)
+                    for k, v in tags_to_write.items(): audio[k] = v
+                    audio.save()
+                except: pass
+            elif ext == 'mp3' and ID3:
+                try:
+                    try: audio = ID3(filepath)
+                    except: audio = ID3(); audio.save(filepath)
+                    for k, v in tags_to_write.items(): audio.add(TXXX(encoding=3, desc=k, text=v))
+                    audio.save()
+                except: pass
+        except: pass
+
+    import asyncio
+    # Eksekusi penulisan file di thread terpisah agar bot tidak freeze
+    await asyncio.to_thread(_save_tags)
 
 async def start_qobuz(url:str, user:dict):
     # 1. Ambil daftar klien global (dari config)
@@ -111,8 +116,6 @@ async def start_qobuz(url:str, user:dict):
                 elif type_dict.get("album") is False: await start_track(item_id, user, None)
                 else: raise Exception(f"Tipe konten tidak diketahui.")
             
-            # [PENTING] Jika sampai sini, berarti sukses. Return agar tidak loop ke akun lain.
-            await edit_message(user['bot_msg'], f"Selesai memproses dengan Akun {c_label}.")
             return 
 
         except QobuzContentUnavailableError as e:
