@@ -93,7 +93,7 @@ async def start_video(video_id: str, user: dict, upload=True):
             'title': video_meta.get('title', 'Unknown Video'),
             'type': 'Video',
             'action': 'Download',
-            'machine': 'Tidal HLS',
+            'machine': 'Aria2c 1.37.0',
             'task_id': task_id
         }
         
