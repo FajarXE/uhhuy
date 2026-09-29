@@ -10,6 +10,7 @@ import urllib.parse
 import logging
 import os
 from difflib import SequenceMatcher
+import aiolimiter
 
 from config import Config 
 
@@ -21,6 +22,9 @@ from bot.logger import LOGGER
 from .manager import deezer_manager, DeezerError
 
 FALLBACK_IMAGE_PATH = os.path.join(Config.WORK_DIR, "project-siesta.png")
+
+# Limit 1 request setiap 1.5 detik
+MBZ_LIMITER = aiolimiter.AsyncLimiter(1, 1.5)
 
 # --- GLOBAL SESSION UNTUK METADATA EXTERNAL ---
 _META_SESSION = None
@@ -171,19 +175,21 @@ async def get_musicbrainz_info(metadata: dict, session: aiohttp.ClientSession) -
     query = f'artist:"{artist}" AND release:"{album}"'
     try:
         url = f"https://musicbrainz.org/ws/2/release?query={urllib.parse.quote(query)}&fmt=json&limit=1&inc=tags"
-        async with session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                if data.get('releases'):
-                    rel = data['releases'][0]
-                    if rel.get('date'): mb_data['date'] = rel['date']
-                    if rel.get('label-info'):
-                        l = rel['label-info'][0].get('label', {})
-                        if l.get('name'): mb_data['label'] = l['name']
-                    if rel.get('tags'):
-                        sorted_tags = sorted(rel['tags'], key=lambda x: x.get('count', 0), reverse=True)
-                        if sorted_tags:
-                            mb_data['genre'] = sorted_tags[0].get('name', '').title()
+        # --- BUNGKUS DENGAN LIMITER DI SINI ---
+        async with MBZ_LIMITER:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get('releases'):
+                        rel = data['releases'][0]
+                        if rel.get('date'): mb_data['date'] = rel['date']
+                        if rel.get('label-info'):
+                            l = rel['label-info'][0].get('label', {})
+                            if l.get('name'): mb_data['label'] = l['name']
+                        if rel.get('tags'):
+                            sorted_tags = sorted(rel['tags'], key=lambda x: x.get('count', 0), reverse=True)
+                            if sorted_tags:
+                                mb_data['genre'] = sorted_tags[0].get('name', '').title()
     except: pass
     return mb_data
 
@@ -192,19 +198,21 @@ async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSessi
         if metadata.get('upc') and metadata['upc'] not in ["0", ""]:
             mb_url = f"https://musicbrainz.org/ws/2/release?query=barcode:{metadata['upc']}&fmt=json"
             # Hapus header custom di sini karena sudah ada di Global Session
-            async with session.get(mb_url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('releases') and len(data['releases']) > 0:
-                        release_id = data['releases'][0]['id']
-                        caa_api = f"https://coverartarchive.org/release/{release_id}"
-                        async with session.get(caa_api) as caa_resp:
-                            if caa_resp.status == 200:
-                                caa_data = await caa_resp.json()
-                                if caa_data.get('images') and len(caa_data['images']) > 0:
-                                    for img in caa_data['images']:
-                                        if img.get('front'): return img['image']
-                                    return caa_data['images'][0]['image']
+            # --- BUNGKUS DENGAN LIMITER DI SINI ---
+            async with MBZ_LIMITER:
+                async with session.get(mb_url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('releases') and len(data['releases']) > 0:
+                            release_id = data['releases'][0]['id']
+                            caa_api = f"https://coverartarchive.org/release/{release_id}"
+                            async with session.get(caa_api) as caa_resp:
+                                if caa_resp.status == 200:
+                                    caa_data = await caa_resp.json()
+                                    if caa_data.get('images') and len(caa_data['images']) > 0:
+                                        for img in caa_data['images']:
+                                            if img.get('front'): return img['image']
+                                        return caa_data['images'][0]['image']
     except Exception as e:
         pass
     return None
