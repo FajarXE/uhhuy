@@ -1,12 +1,18 @@
-# [GANTI FILE: bot/helpers/livephish/livephish_api.py]
+# [GANTI SELURUH FILE: bot/helpers/livephish/livephish_api.py]
 
 import aiohttp
 import hashlib
 import time
 import logging
+import aiolimiter
 from urllib.parse import urlencode
 
 LOGGER = logging.getLogger(__name__)
+
+# --- KONTROL RATE LIMIT (ANTI-BAN LIVEPHISH) ---
+# Membatasi maksimal 15 request dalam 5 detik
+LP_LIMITER = aiolimiter.AsyncLimiter(15, 5)
+# -----------------------------------------------
 
 class LivePhishApi:
     def __init__(self):
@@ -34,15 +40,18 @@ class LivePhishApi:
         return sig, timestamp
 
     async def _request(self, method, url, **kwargs):
-        async with self.session.request(method, url, **kwargs) as resp:
-            try:
-                return await resp.json(content_type=None)
-            except Exception:
-                text = await resp.text()
-                # Hanya log error jika status code bukan 200 atau body aneh
-                if resp.status != 200:
-                    LOGGER.error(f"LivePhish API Error ({resp.status}): {text[:200]}")
-                return {"error": True, "raw": text}
+        # --- BUNGKUS REQUEST DENGAN LIMITER DAN TIMEOUT ---
+        kwargs.setdefault('timeout', aiohttp.ClientTimeout(total=30))
+        async with LP_LIMITER:
+            async with self.session.request(method, url, **kwargs) as resp:
+                try:
+                    return await resp.json(content_type=None)
+                except Exception:
+                    text = await resp.text()
+                    # Hanya log error jika status code bukan 200 atau body aneh
+                    if resp.status != 200:
+                        LOGGER.error(f"LivePhish API Error ({resp.status}): {text[:200]}")
+                    return {"error": True, "raw": text}
 
     async def login(self, email, password):
         headers = {
@@ -57,11 +66,13 @@ class LivePhishApi:
             "password": password
         }
         
-        async with self.session.post(self.api_base_id + "token", data=data, headers=headers) as resp:
-            if resp.status != 200:
-                raise Exception(f"Login Step 1 Failed: {resp.status}")
-            js = await resp.json()
-            self.access_token = js.get("access_token")
+        # --- BUNGKUS LOGIN DENGAN LIMITER ---
+        async with LP_LIMITER:
+            async with self.session.post(self.api_base_id + "token", data=data, headers=headers, timeout=30) as resp:
+                if resp.status != 200:
+                    raise Exception(f"Login Step 1 Failed: {resp.status}")
+                js = await resp.json()
+                self.access_token = js.get("access_token")
 
         params = {
             "method": "session.getUserToken",
