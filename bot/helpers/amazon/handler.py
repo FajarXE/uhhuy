@@ -795,51 +795,54 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
     await set_metadata(track_meta, user_id)
 
     # --- FIX: SUNTIKAN MANUAL TANGGAL RILIS UNTUK POWERAMP & MEDIAINFO ---
-    try:
-        raw_date = str(track_meta.get('date') or track_meta.get('release_date') or '').strip()
-        if raw_date and raw_date != 'None':
-            year_only = raw_date[:4] 
-            
-            if ext == 'flac':
-                from mutagen.flac import FLAC
-                audio = FLAC(final_path)
-                audio['DATE'] = raw_date 
-                audio['YEAR'] = year_only
-                audio['ORIGINALDATE'] = raw_date
-                audio.save()
+    def _inject_manual_tags():
+        try:
+            raw_date = str(track_meta.get('date') or track_meta.get('release_date') or '').strip()
+            if raw_date and raw_date != 'None':
+                year_only = raw_date[:4] 
                 
-            elif ext == 'm4a':
-                from mutagen.mp4 import MP4
-                audio = MP4(final_path)
-                audio['\xa9day'] = raw_date 
-                audio.save()
-                
-            elif ext == 'mp3':
-                from mutagen.mp3 import MP3
-                from mutagen.id3 import ID3, TDRC, TYER
-                audio = MP3(final_path, ID3=ID3)
-                if audio.tags is None:
-                    audio.add_tags()
-                audio.tags.add(TDRC(encoding=3, text=raw_date))
-                audio.tags.add(TYER(encoding=3, text=year_only))
-                audio.save()
-
-            elif ext in ['opus', 'ogg']:
-                # Standar Vorbis Comment untuk Opus/Ogg
-                try:
-                    from mutagen.oggopus import OggOpus
-                    audio = OggOpus(final_path)
-                except Exception:
-                    from mutagen.oggvorbis import OggVorbis
-                    audio = OggVorbis(final_path)
+                if ext == 'flac':
+                    from mutagen.flac import FLAC
+                    audio = FLAC(final_path)
+                    audio['DATE'] = raw_date 
+                    audio['YEAR'] = year_only
+                    audio['ORIGINALDATE'] = raw_date
+                    audio.save()
                     
-                audio['DATE'] = raw_date 
-                audio['YEAR'] = year_only
-                audio['ORIGINALDATE'] = raw_date
-                audio.save()
-                
-    except Exception as e:
-        LOGGER.debug(f"Gagal injeksi tanggal manual Amazon: {e}")
+                elif ext == 'm4a':
+                    from mutagen.mp4 import MP4
+                    audio = MP4(final_path)
+                    audio['\xa9day'] = raw_date 
+                    audio.save()
+                    
+                elif ext == 'mp3':
+                    from mutagen.mp3 import MP3
+                    from mutagen.id3 import ID3, TDRC, TYER
+                    audio = MP3(final_path, ID3=ID3)
+                    if audio.tags is None:
+                        audio.add_tags()
+                    audio.tags.add(TDRC(encoding=3, text=raw_date))
+                    audio.tags.add(TYER(encoding=3, text=year_only))
+                    audio.save()
+
+                elif ext in ['opus', 'ogg']:
+                    try:
+                        from mutagen.oggopus import OggOpus
+                        audio = OggOpus(final_path)
+                    except Exception:
+                        from mutagen.oggvorbis import OggVorbis
+                        audio = OggVorbis(final_path)
+                        
+                    audio['DATE'] = raw_date 
+                    audio['YEAR'] = year_only
+                    audio['ORIGINALDATE'] = raw_date
+                    audio.save()
+                    
+        except Exception as e:
+            LOGGER.debug(f"Gagal injeksi tanggal manual Amazon: {e}")
+            
+    # Eksekusi secara asinkron di latar belakang
+    await asyncio.to_thread(_inject_manual_tags)
     # ---------------------------------------------------------------------
 
     # 3. Panggil uploader utama (Mendukung Cloud / Local / Telegram)
