@@ -244,44 +244,43 @@ async def sort_album_from_artist(album_data: dict, user: dict):
 async def ffmpeg_convert_and_tag(input_file: str, track_meta: dict):
     """
     Mengonversi dan menulis tag metadata lengkap menggunakan FFmpeg.
+    (Versi Eksekusi List: Aman dari Command Injection)
     """
+    output_file = f"{input_file}.flac"
     
-    def escape_str(value):
-        if value is None:
-            value = ''
-        if not isinstance(value, str):
-            value = str(value)
-        # Escape untuk shell command
-        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$").replace("`", "\\`")
-
-    input_file_escaped = escape_str(input_file)
-    output_file_escaped = f"{input_file_escaped}.flac"
+    cmd = [
+        'ffmpeg', '-y', 
+        '-i', input_file
+    ]
     
-    # 1. Setup Cover Art
-    cover_cmd = ""
-    map_cmd = "-map 0:a" 
-    
+    # 1. Setup Cover Art & Stream Mapping
     cover_path = track_meta.get('cover')
     if cover_path and os.path.exists(cover_path):
-        cover_cmd = f'-i "{escape_str(cover_path)}"' 
-        # Attach cover sebagai stream video (standar FFmpeg)
-        map_cmd += " -map 1 -c:v copy -disposition:v attached_pic -metadata:s:v title=\"Album cover\" -metadata:s:v comment=\"Cover (front)\""
+        cmd.extend([
+            '-i', cover_path, 
+            '-map', '0:a', 
+            '-map', '1', 
+            '-c:v', 'copy', 
+            '-disposition:v', 'attached_pic', 
+            '-metadata:s:v', 'title=Album cover', 
+            '-metadata:s:v', 'comment=Cover (front)'
+        ])
+    else:
+        cmd.extend(['-map', '0:a'])
+
+    # Setel format flac dan kompresi
+    cmd.extend(['-c:a', 'flac', '-compression_level', '8'])
 
     # 2. Persiapan Data Metadata
-    # Format "1/10" untuk Track/Total
     t_num = str(track_meta.get('tracknumber') or '1')
     t_tot = str(track_meta.get('totaltracks') or '1')
     track_str = f"{t_num}/{t_tot}" 
     
-    # Format "1/2" untuk Part/Total (Disc)
     d_num = str(track_meta.get('volume') or '1')
     d_tot = str(track_meta.get('totalvolume') or '1')
     disc_str = f"{d_num}/{d_tot}" 
 
-    # --- PERBAIKAN: PUBLISHER MENGGUNAKAN DATA YANG SUDAH DIBERSIHKAN ---
     publisher = track_meta.get('publisher') or ''
-    # --------------------------------------------------------------------
-    
     copyright_val = track_meta.get('copyright') or ''
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -292,22 +291,17 @@ async def ffmpeg_convert_and_tag(input_file: str, track_meta: dict):
         'album_artist': track_meta.get('albumartist'),
         'artist': track_meta.get('artist'),
         
-        # Copyright
         'copyright': copyright_val,
-        
-        # --- PERBAIKAN: MENYAMAKAN TAG SESUAI PERMINTAAN USER ---
-        # Publisher, Label, Organization, dan Producer menggunakan string Copyright yang dibersihkan
         'publisher': publisher,
         'organization': publisher, 
         'label': publisher,
-        'producer': publisher, # User meminta "Producer" juga diisi dengan ini
-        # ----------------------------------------------------------
+        'producer': publisher, 
         
         'track': track_str,
         'disc': disc_str,
         
         'genre': track_meta.get('genre'),
-        'date': track_meta.get('date'), # Year
+        'date': track_meta.get('date'), 
         
         'creation_time': now_str, 
         
@@ -318,30 +312,27 @@ async def ffmpeg_convert_and_tag(input_file: str, track_meta: dict):
         'lyrics': track_meta.get('lyrics'),
         'composer': track_meta.get('composer'),
         
-        'rating': '1' if track_meta.get('explicit') is True else '0'
+        'rating': '1' if track_meta.get('explicit') is True else '0',
+        
+        # Custom Metadata Tambahan
+        'pub': publisher,
+        'cpr': copyright_val,
+        'encoded_date': now_str,
+        'tagging_time': now_str
     }
 
-    # 4. Custom Metadata (Force Write)
-    # Menambahkan field spesifik 'pub' sesuai permintaan user
-    tags_to_write['pub'] = publisher
-    tags_to_write['cpr'] = copyright_val
-    tags_to_write['encoded_date'] = now_str
-    tags_to_write['tagging_time'] = now_str
-
-    # 5. Build Command
-    metadata_cmd = ""
+    # 4. Build Command Metadata (Aman tanpa Shell Escaping)
     for key, value in tags_to_write.items():
-        if value is not None and value != '':
-            metadata_cmd += f' -metadata {key}="{escape_str(value)}"'
+        if value is not None and str(value).strip() != '':
+            cmd.extend(['-metadata', f'{key}={value}'])
 
-    # Jalankan FFmpeg
-    cmd = (
-        f'ffmpeg -i "{input_file_escaped}" {cover_cmd} '
-        f'{map_cmd} '
-        f'-c:a flac -compression_level 8 ' 
-        f'{metadata_cmd} ' 
-        f'-loglevel error -y "{output_file_escaped}"' 
-    )
+    # Output file dan loglevel
+    cmd.extend(['-loglevel', 'error', output_file])
     
-    task = await asyncio.create_subprocess_shell(cmd)
+    # 5. Eksekusi menggunakan list (Sangat Aman)
+    task = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL
+    )
     await task.wait()
