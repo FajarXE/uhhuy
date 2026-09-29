@@ -207,7 +207,8 @@ async def start_album_or_playlist(item_id: str, user: dict, pre_data: dict, medi
             dest_cover = os.path.join(item_folder, f"cover{ext}")
             
             LOGGER.debug(f"Soundcloud: Menyalin cover ke {dest_cover}")
-            shutil.copy2(multi_meta['cover'], dest_cover)
+            # --- PERBAIKAN: Gunakan asyncio.to_thread agar tidak blocking ---
+            await asyncio.to_thread(shutil.copy2, multi_meta['cover'], dest_cover)
         except Exception as e:
             LOGGER.warning(f"Soundcloud: Gagal menyalin file cover ke folder album: {e}")
     # --- AKHIR TAMBAHAN ---
@@ -232,7 +233,8 @@ async def start_album_or_playlist(item_id: str, user: dict, pre_data: dict, medi
         'type': multi_meta['type']
     }
     
-    task_results = await run_concurrent_tasks(tasks, update_details)
+    # --- PERBAIKAN: Tambahkan batas maksimal antrean pekerja (limit) ---
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
     successful_tracks = [multi_meta['tracks'][i] for i, result in enumerate(task_results) if result]
     multi_meta['tracks'] = successful_tracks
