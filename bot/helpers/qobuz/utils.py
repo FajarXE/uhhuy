@@ -7,6 +7,7 @@ import logging
 import aiohttp
 import urllib.parse
 import os
+import aiolimiter
 from datetime import datetime
 from config import Config
 
@@ -22,6 +23,9 @@ try:
 except ImportError:
     class QobuzContentUnavailableError(Exception):
         pass
+
+# Limit 1 request setiap 1.5 detik untuk MusicBrainz
+MBZ_LIMITER = aiolimiter.AsyncLimiter(1, 1.5)
 
 FALLBACK_IMAGE_PATH = os.path.join(Config.WORK_DIR, "project-siesta.png")
 
@@ -65,24 +69,26 @@ async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSessi
         # Cari berdasarkan UPC/Barcode terlebih dahulu
         if metadata.get('upc') and metadata['upc'] != "0":
             mb_url = f"https://musicbrainz.org/ws/2/release?query=barcode:{metadata['upc']}&fmt=json"
-            async with session.get(mb_url, headers={'User-Agent': 'MusicBot/1.0 ( mybot@example.com )'}) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('releases') and len(data['releases']) > 0:
-                        release_id = data['releases'][0]['id']
-                        
-                        # Ambil gambar dari CoverArtArchive
-                        caa_api = f"https://coverartarchive.org/release/{release_id}"
-                        async with session.get(caa_api) as caa_resp:
-                            if caa_resp.status == 200:
-                                caa_data = await caa_resp.json()
-                                if caa_data.get('images') and len(caa_data['images']) > 0:
-                                    # Cari gambar 'Front' (Bagian depan)
-                                    for img in caa_data['images']:
-                                        if img.get('front'):
-                                            return img['image']
-                                    # Jika tidak ada label 'front', ambil yang pertama
-                                    return caa_data['images'][0]['image']
+            # --- BUNGKUS DENGAN LIMITER DI SINI ---
+            async with MBZ_LIMITER:
+                async with session.get(mb_url, headers={'User-Agent': 'MusicBot/1.0 ( mybot@example.com )'}) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('releases') and len(data['releases']) > 0:
+                            release_id = data['releases'][0]['id']
+                            
+                            # Ambil gambar dari CoverArtArchive
+                            caa_api = f"https://coverartarchive.org/release/{release_id}"
+                            async with session.get(caa_api) as caa_resp:
+                                if caa_resp.status == 200:
+                                    caa_data = await caa_resp.json()
+                                    if caa_data.get('images') and len(caa_data['images']) > 0:
+                                        # Cari gambar 'Front' (Bagian depan)
+                                        for img in caa_data['images']:
+                                            if img.get('front'):
+                                                return img['image']
+                                        # Jika tidak ada label 'front', ambil yang pertama
+                                        return caa_data['images'][0]['image']
     except Exception as e:
         logging.warning(f"Pencarian sampul MusicBrainz gagal untuk UPC {metadata.get('upc')}: {e}")
         return None
