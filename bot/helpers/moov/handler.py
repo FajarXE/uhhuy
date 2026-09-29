@@ -284,98 +284,102 @@ async def start_playlist(pid, user):
     await playlist_upload(pl_meta, user)
 
 async def apply_mutagen_tags(filepath, meta, cover_path, lyrics=None):
-    try:
-        audio = FLAC(filepath)
-        audio.delete() 
-        
-        # --- BASIC ---
-        if meta.get('title'): audio['TITLE'] = meta.get('title')
-        if meta.get('artist'): 
-            audio['ARTIST'] = meta.get('artist')
-            audio['PERFORMER'] = meta.get('artist')
-        if meta.get('albumartist'): audio['ALBUMARTIST'] = meta.get('albumartist')
-        if meta.get('album'): audio['ALBUM'] = meta.get('album')
-        if meta.get('genre'): audio['GENRE'] = meta.get('genre')
-        if meta.get('composer'): audio['COMPOSER'] = meta.get('composer')
-        if meta.get('producer'): audio['PRODUCER'] = meta.get('producer')
-        
-        # --- COPYRIGHT ---
-        final_cpr = meta.get('copyright')
-        if not final_cpr: final_cpr = meta.get('label')
-             
-        if final_cpr:
-            audio['COPYRIGHT'] = str(final_cpr)
-            audio['RIGHTS'] = str(final_cpr) 
-
-        if meta.get('label'):
-            audio['ORGANIZATION'] = meta.get('label')
-            audio['LABEL'] = meta.get('label')
-            audio['PUBLISHER'] = meta.get('label') 
-
-        # --- TRACK/DISC ---
-        if meta.get('tracknumber'): audio['TRACKNUMBER'] = str(meta.get('tracknumber'))
-        if meta.get('disk'): audio['DISCNUMBER'] = str(meta.get('disk'))
-        
-        t_tracks = meta.get('totaltracks')
-        if t_tracks and str(t_tracks) != 'None':
-            audio['TRACKTOTAL'] = str(t_tracks)
-            audio['TOTALTRACKS'] = str(t_tracks)
-        
-        t_vols = meta.get('totalvolumes')
-        if t_vols and str(t_vols) != 'None':
-            audio['DISCTOTAL'] = str(t_vols)
-            audio['TOTALDISCS'] = str(t_vols)
-
-        # --- DATES ---
-        if meta.get('date'):
-            d = str(meta.get('date'))
-            audio['DATE'] = d
-            audio['YEAR'] = d[:4]
-            audio['ORIGINALDATE'] = d
-            audio['RELEASEDATE'] = d
-
-        # --- ISRC ---
-        if meta.get('isrc'):
-            audio['ISRC'] = str(meta.get('isrc'))
-
-        # --- BARCODE ---
-        upc_val = meta.get('upc') or meta.get('ean') or meta.get('barcode')
-        if upc_val:
-            val = str(upc_val)
-            audio['BARCODE'] = val
-            audio['UPC'] = val
-            audio['EAN'] = val
-
-        # --- EXPLICIT ---
-        if meta.get('explicit') == "True":
-            audio['ITUNESADVISORY'] = '1'
-            audio['RATING'] = 'Explicit'
-        else:
-            audio['ITUNESADVISORY'] = '0'
-
-        # --- LYRICS ---
-        if lyrics and isinstance(lyrics, str) and len(lyrics) > 10:
-            audio['LYRICS'] = lyrics
-            audio['UNSYNCEDLYRICS'] = lyrics 
-        
-        # --- COVER ---
-        if cover_path and os.path.exists(cover_path):
-            try:
-                p = Picture()
-                with open(cover_path, 'rb') as f:
-                    p.data = f.read()
-                p.type = 3 
-                p.mime = 'image/jpeg'
-                p.desc = 'Front Cover'
-                audio.add_picture(p)
-            except: pass
+    def _write_tags():
+        try:
+            audio = FLAC(filepath)
+            audio.delete() 
             
-        audio.save()
-        return int(audio.info.length)
-        
-    except Exception as e:
-        LOGGER.error(f"Mutagen Error: {e}")
-        return 0
+            # --- BASIC ---
+            if meta.get('title'): audio['TITLE'] = meta.get('title')
+            if meta.get('artist'): 
+                audio['ARTIST'] = meta.get('artist')
+                audio['PERFORMER'] = meta.get('artist')
+            if meta.get('albumartist'): audio['ALBUMARTIST'] = meta.get('albumartist')
+            if meta.get('album'): audio['ALBUM'] = meta.get('album')
+            if meta.get('genre'): audio['GENRE'] = meta.get('genre')
+            if meta.get('composer'): audio['COMPOSER'] = meta.get('composer')
+            if meta.get('producer'): audio['PRODUCER'] = meta.get('producer')
+            
+            # --- COPYRIGHT ---
+            final_cpr = meta.get('copyright')
+            if not final_cpr: final_cpr = meta.get('label')
+                 
+            if final_cpr:
+                audio['COPYRIGHT'] = str(final_cpr)
+                audio['RIGHTS'] = str(final_cpr) 
+
+            if meta.get('label'):
+                audio['ORGANIZATION'] = meta.get('label')
+                audio['LABEL'] = meta.get('label')
+                audio['PUBLISHER'] = meta.get('label') 
+
+            # --- TRACK/DISC ---
+            if meta.get('tracknumber'): audio['TRACKNUMBER'] = str(meta.get('tracknumber'))
+            if meta.get('disk'): audio['DISCNUMBER'] = str(meta.get('disk'))
+            
+            t_tracks = meta.get('totaltracks')
+            if t_tracks and str(t_tracks) != 'None':
+                audio['TRACKTOTAL'] = str(t_tracks)
+                audio['TOTALTRACKS'] = str(t_tracks)
+            
+            t_vols = meta.get('totalvolumes')
+            if t_vols and str(t_vols) != 'None':
+                audio['DISCTOTAL'] = str(t_vols)
+                audio['TOTALDISCS'] = str(t_vols)
+
+            # --- DATES ---
+            if meta.get('date'):
+                d = str(meta.get('date'))
+                audio['DATE'] = d
+                audio['YEAR'] = d[:4]
+                audio['ORIGINALDATE'] = d
+                audio['RELEASEDATE'] = d
+
+            # --- ISRC ---
+            if meta.get('isrc'):
+                audio['ISRC'] = str(meta.get('isrc'))
+
+            # --- BARCODE ---
+            upc_val = meta.get('upc') or meta.get('ean') or meta.get('barcode')
+            if upc_val:
+                val = str(upc_val)
+                audio['BARCODE'] = val
+                audio['UPC'] = val
+                audio['EAN'] = val
+
+            # --- EXPLICIT ---
+            if meta.get('explicit') == "True":
+                audio['ITUNESADVISORY'] = '1'
+                audio['RATING'] = 'Explicit'
+            else:
+                audio['ITUNESADVISORY'] = '0'
+
+            # --- LYRICS ---
+            if lyrics and isinstance(lyrics, str) and len(lyrics) > 10:
+                audio['LYRICS'] = lyrics
+                audio['UNSYNCEDLYRICS'] = lyrics 
+            
+            # --- COVER ---
+            if cover_path and os.path.exists(cover_path):
+                try:
+                    p = Picture()
+                    with open(cover_path, 'rb') as f:
+                        p.data = f.read()
+                    p.type = 3 
+                    p.mime = 'image/jpeg'
+                    p.desc = 'Front Cover'
+                    audio.add_picture(p)
+                except: pass
+                
+            audio.save()
+            return int(audio.info.length)
+            
+        except Exception as e:
+            LOGGER.error(f"Mutagen Error: {e}")
+            return 0
+
+    # Lemparkan tugas berat disk I/O ini ke background thread!
+    return await asyncio.to_thread(_write_tags)
 
 # --- HYBRID DOWNLOADER ---
 async def download_track(track_meta, user, folderpath):
