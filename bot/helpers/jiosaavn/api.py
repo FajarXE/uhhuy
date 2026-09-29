@@ -1,5 +1,13 @@
+# [GANTI SELURUH FILE: bot/helpers/jiosaavn/api.py]
+
 import aiohttp
 import json
+import aiolimiter
+
+# --- KONTROL RATE LIMIT (ANTI-BAN JIOSAAVN) ---
+# Membatasi maksimal 15 request dalam 5 detik
+JIOSAAVN_LIMITER = aiolimiter.AsyncLimiter(15, 5)
+# ----------------------------------------------
 
 class JioSaavnAPI:
     def __init__(self):
@@ -9,13 +17,15 @@ class JioSaavnAPI:
         }
 
     async def _get(self, session, params):
-        async with session.get(self.base_url, params=params, headers=self.headers) as resp:
-            try:
-                text = await resp.text()
-                # API kadang mengembalikan komentar JSON, kita bersihkan
-                return json.loads(text.split('-->')[-1] if '-->' in text else text)
-            except:
-                return None
+        # --- BUNGKUS DENGAN LIMITER ---
+        async with JIOSAAVN_LIMITER:
+            async with session.get(self.base_url, params=params, headers=self.headers) as resp:
+                try:
+                    text = await resp.text()
+                    # API kadang mengembalikan komentar JSON, kita bersihkan
+                    return json.loads(text.split('-->')[-1] if '-->' in text else text)
+                except:
+                    return None
 
     async def get_song_details(self, session: aiohttp.ClientSession, token: str):
         data = await self._get(session, {
