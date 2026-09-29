@@ -209,4 +209,33 @@ class BeatportLoginManager:
     def get_user_quality(self, user_id: int) -> str:
         return self.user_data.get(user_id, {}).get('beatport_qual', self.quality)
 
+    async def shutdown(self):
+        """Menutup semua sesi klien Beatport (Global & User) dengan aman saat bot dimatikan."""
+        from bot.logger import LOGGER
+        LOGGER.info(f"Beatport Manager: Shutdown... Menutup {len(self.global_clients)} Global Clients.")
+        tasks = []
+        
+        # Kumpulkan tugas penutupan sesi Global
+        for client in self.global_clients:
+            if client: 
+                tasks.append(client.close_session())
+            
+        # Kumpulkan tugas penutupan sesi Private User
+        for client in self.user_clients.values():
+            if client: 
+                tasks.append(client.close_session())
+            
+        # Eksekusi secara paralel
+        if tasks:
+            try:
+                import asyncio
+                await asyncio.gather(*tasks)
+            except Exception as e:
+                LOGGER.error(f"Beatport Manager: Error saat shutdown: {e}")
+                
+        self.global_clients = []
+        self.user_clients = {}
+        self._global_cycler = None
+        LOGGER.info("Beatport Manager: Semua sesi berhasil ditutup.")
+
 beatport_manager = BeatportLoginManager(Config.BEATPORT_ACCOUNTS)
