@@ -1,7 +1,15 @@
+# [GANTI SELURUH FILE: bot/helpers/gaana/api.py]
+
 import aiohttp
 import base64
+import aiolimiter
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
+
+# --- KONTROL RATE LIMIT (ANTI-BAN GAANA) ---
+# Membatasi maksimal 15 request dalam 5 detik
+GAANA_LIMITER = aiolimiter.AsyncLimiter(15, 5)
+# -------------------------------------------
 
 class GaanaAPI:
     def __init__(self):
@@ -31,5 +39,7 @@ class GaanaAPI:
             'seokey': identifier,
             'type': meta_type,
         }
-        async with session.post(self.api_url, params=params, headers=self.headers) as resp:
-            return await resp.json()
+        # --- BUNGKUS DENGAN LIMITER ---
+        async with GAANA_LIMITER:
+            async with session.post(self.api_url, params=params, headers=self.headers) as resp:
+                return await resp.json()
