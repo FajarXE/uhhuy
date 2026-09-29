@@ -134,14 +134,19 @@ async def download_track_idagio(client, track_id, quality_tier, temp_location, d
     stream_data = stream_data_list[0]
     download_url = stream_data.get('url')
 
-    # 2. Intip Header untuk Curi Kunci Enkripsi
+    # --- PERBAIKAN: Proteksi URL Kosong dan Timeout Jaringan ---
+    if not download_url:
+        raise IdagioError(f"URL stream kosong untuk track {track_id}")
+
+    # 2. Intip Header untuk Curi Kunci Enkripsi (dengan timeout)
     def check_encryption():
-        r = client.s.get(download_url, stream=True)
+        r = client.s.get(download_url, stream=True, timeout=15)
         headers = r.headers
         r.close()
         return headers
 
     headers = await asyncio.to_thread(check_encryption)
+    # -----------------------------------------------------------
     
     is_encrypted = False
     cipher_key = None
@@ -200,6 +205,19 @@ async def start_album(album_id: str, user: dict, upload=True):
     album_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{album_meta['artist']}/{album_meta['title']}"
     album_folder = sanitize_filepath(album_folder)
     album_meta['folderpath'] = album_folder 
+    
+    # --- PERBAIKAN: Buat folder dan salin cover asinkron ---
+    os.makedirs(album_folder, exist_ok=True)
+    
+    # Salin cover ke folder album agar ikut terkompresi ke file ZIP
+    if album_meta.get('cover') and os.path.exists(album_meta['cover']):
+        try:
+            cover_dest = os.path.join(album_folder, "cover.jpg")
+            if not os.path.exists(cover_dest):
+                await asyncio.to_thread(shutil.copy2, album_meta['cover'], cover_dest)
+        except Exception as e:
+            LOGGER.warning(f"Idagio: Gagal menyalin cover ke folder album: {e}")
+    # --------------------------------------------------------
 
     if upload:
         album_meta['poster_msg'] = await post_art_poster(user, album_meta)
