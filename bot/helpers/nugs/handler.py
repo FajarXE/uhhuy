@@ -264,7 +264,9 @@ async def start_track(track_meta: dict, user: dict, upload=True):
     if upload:
         await track_upload(track_meta, user)
 
-    return True
+    # --- PERBAIKAN: Kembalikan dictionary track_meta (bukan True) agar ditangkap oleh album ---
+    return track_meta
+
 
 async def start_album(album_id: str, user: dict, upload=True):
     """Handler untuk unduhan album Nugs."""
@@ -317,6 +319,7 @@ async def start_album(album_id: str, user: dict, upload=True):
         'quality': track_one_meta.get('quality', 'Unknown'), 
         'explicit': track_one_meta.get('explicit', False), 
         'lyrics': None, 
+        'tracks': [] # --- PERBAIKAN: Definisikan key tracks yang sebelumnya hilang ---
     }
     
     album_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{album_meta['artist']}/{album_meta['title']}"
@@ -329,17 +332,22 @@ async def start_album(album_id: str, user: dict, upload=True):
         album_meta['thumbnail'] = await create_cover_file(cover_url, album_meta, True)
         album_meta['poster_msg'] = await post_art_poster(user, album_meta)
 
+    # --- PERBAIKAN: Gabungkan ekstraksi metadata & unduhan di satu worker agar PARALEL PENUH ---
+    async def _process_and_download(t_data):
+        try:
+            t_meta = await process_track_metadata(t_data, album_data, user)
+            return await start_track(t_meta, user, False)
+        except Exception as e:
+            LOGGER.error(f"Gagal memproses lagu {t_data.get('songTitle')}: {e}")
+            return None
+
     tasks = []
     
     if track_one_meta: 
         tasks.append(start_track(track_one_meta, user, False))
 
     for track_data in tracks_list[1:]: 
-        try:
-            track_meta = await process_track_metadata(track_data, album_data, user)
-            tasks.append(start_track(track_meta, user, False)) 
-        except Exception as e:
-            continue
+        tasks.append(_process_and_download(track_data))
 
     if not tasks:
         raise Exception(f"Tidak ada lagu yang valid ditemukan untuk album Nugs {album_meta['title']}")
@@ -351,29 +359,29 @@ async def start_album(album_id: str, user: dict, upload=True):
         'type': album_meta['type']
     }
     
-    # --- [FIX] PARALEL MAX_WORKERS ---
     task_results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
-    successful_tracks_count = sum(1 for result in task_results if result)
+    # --- PERBAIKAN: Kumpulkan data track_meta yang berhasil masuk ke dictionary album ---
+    successful_tracks = [res for res in task_results if isinstance(res, dict)]
+    album_meta['tracks'] = successful_tracks
+    album_meta['totaltracks'] = len(successful_tracks)
 
-    if successful_tracks_count == 0:
+    if len(successful_tracks) == 0:
         raise Exception(f"Tidak ada lagu Nugs yang berhasil diunduh untuk album {album_meta['title']}.")
 
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
 
-    # --- [FIX COVER DI DALAM ZIP] ---
-    # Salin file cover dari folder sementara ke folder album sebelum di-zip
+    # --- PERBAIKAN: Asinkronisasi shutil.copy ---
     if album_meta.get('cover') and os.path.exists(album_meta['cover']):
         try:
             cover_target = os.path.join(album_meta['folderpath'], "cover.jpg")
-            shutil.copy(album_meta['cover'], cover_target)
+            if not os.path.exists(cover_target):
+                await asyncio.to_thread(shutil.copy2, album_meta['cover'], cover_target)
         except Exception as e:
             from bot.logger import LOGGER
             LOGGER.warning(f"Gagal menyalin cover ke folder ZIP: {e}")
     # ---------------------------------
 
-    # Zipping dan upload diurus secara otomatis oleh uploader.py
-    # agar Papan Global menampilkan transisi yang mulus tanpa kedipan!
     if upload:
         await album_upload(album_meta, user)
 
