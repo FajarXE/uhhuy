@@ -338,7 +338,11 @@ async def start_livephish(link: str, user: dict):
                     if not os.path.exists(base_folder_path):
                         os.makedirs(base_folder_path, exist_ok=True)
                     new_cover_path = os.path.join(base_folder_path, "cover.jpg")
-                    shutil.move(temp_path, new_cover_path)
+                    
+                    # --- PERBAIKAN: Pemindahan file secara asinkron ---
+                    await asyncio.to_thread(shutil.move, temp_path, new_cover_path)
+                    # --------------------------------------------------
+                    
                     final_cover_path = new_cover_path
         except Exception as e:
             LOGGER.error(f"Gagal download cover: {e}")
