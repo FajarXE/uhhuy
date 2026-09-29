@@ -14,7 +14,6 @@ from datetime import datetime
 LOGGER = logging.getLogger(__name__)
 
 # --- KONTROL RATE LIMIT (ANTI-BAN LYRICS API) ---
-# Membatasi maksimal 10 request dalam 5 detik untuk tiap provider
 MX_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 LRC_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5) 
@@ -26,7 +25,6 @@ class MusixmatchAPI:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Musixmatch/0.19.4 Chrome/58.0.3029.110 Electron/1.7.6 Safari/537.36'
         }
-        # Trik Cookie dari musixmatch_api.py agar terhindar dari error Captcha
         self.cookies = {'AWSELB': '0', 'AWSELBCORS': '0'}
         self.token = None
 
@@ -73,7 +71,6 @@ class MusixmatchAPI:
             if not self.token:
                 await self.get_token(session)
 
-            # 1. Search Track
             method = 'track.search'
             params = {
                 'format': 'json',
@@ -98,7 +95,6 @@ class MusixmatchAPI:
             if not track_id:
                 return None, None
 
-            # 2. Get Lyrics (Plain & Subtitles/LRC)
             plain = None
             synced = None
             
@@ -109,7 +105,6 @@ class MusixmatchAPI:
                 'q_artist': artist,
                 'usertoken': self.token,
                 'app_id': 'web-desktop-app-v1.0',
-                # Kita ubah request ke subtitles agar mendapat format LRC yang bersih
                 'optional_calls': 'track.subtitles.get,track.lyrics.get'
             }
             
@@ -119,11 +114,9 @@ class MusixmatchAPI:
                         data = await r.json(content_type=None)
                         body = data['message']['body']['macro_calls']
                         
-                        # Ambil Plain Lyrics
                         if body.get('track.lyrics.get', {}).get('message', {}).get('header', {}).get('status_code') == 200:
                             plain = body['track.lyrics.get']['message']['body']['lyrics']['lyrics_body']
 
-                        # Ambil LRC Synced Lyrics dari subtitles.get (Sangat kompatibel dengan player)
                         if body.get('track.subtitles.get', {}).get('message', {}).get('header', {}).get('status_code') == 200:
                             try:
                                 sub_list = body['track.subtitles.get']['message']['body']['subtitle_list']
@@ -141,6 +134,29 @@ class LRCLibAPI:
         self.base_url = 'https://lrclib.net/api'
         self.headers = {'User-Agent': 'BotMusic/1.0'}
 
+    async def _fetch_with_retry(self, session, url, params):
+        """Fungsi helper untuk menangani Retry-After (429/503) secara asinkron."""
+        for attempt in range(3): # Maksimal 3 percobaan
+            try:
+                async with LRC_LIMITER:
+                    async with session.get(url, params=params, headers=self.headers, timeout=15) as r:
+                        if r.status == 200:
+                            return await r.json(content_type=None)
+                        elif r.status in (429, 503):
+                            # Ambil header Retry-After, default ke 5 detik jika tidak ada
+                            retry_after = int(r.headers.get('Retry-After', 5))
+                            LOGGER.warning(f"LRCLib Rate Limit {r.status}. Retrying in {retry_after}s...")
+                            await asyncio.sleep(retry_after)
+                            continue
+                        elif r.status == 404:
+                            return None # Tidak ditemukan
+                        else:
+                            return None
+            except Exception as e:
+                LOGGER.debug(f"LRCLib Fetch Error: {e}")
+                return None
+        return None
+
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
             params = {
@@ -150,27 +166,16 @@ class LRCLibAPI:
                 'duration': duration
             }
             
-            # --- Try Cached ---
-            try:
-                async with LRC_LIMITER:
-                    async with session.get(f'{self.base_url}/get', params=params, headers=self.headers, timeout=15) as r:
-                        if r.status == 200:
-                            data = await r.json(content_type=None)
-                            return data.get('plainLyrics'), data.get('syncedLyrics')
-            except Exception:
-                pass 
+            # --- Try Cached (/get) ---
+            data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
+            if data:
+                return data.get('plainLyrics'), data.get('syncedLyrics')
             
-            # --- Try Search ---
+            # --- Try Search (/search) ---
             params_search = {'q': f"{title} {artist}"}
-            try:
-                async with LRC_LIMITER:
-                    async with session.get(f'{self.base_url}/search', params=params_search, headers=self.headers, timeout=15) as r:
-                        if r.status == 200:
-                            data = await r.json(content_type=None)
-                            if data and isinstance(data, list) and len(data) > 0:
-                                return data[0].get('plainLyrics'), data[0].get('syncedLyrics')
-            except Exception:
-                pass
+            data = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
+            if data and isinstance(data, list) and len(data) > 0:
+                return data[0].get('plainLyrics'), data[0].get('syncedLyrics')
             
             return None, None
 
@@ -206,7 +211,6 @@ class GeniusAPI:
                                 res_title_feat = result.get('title_with_featured', '').lower()
                                 res_artist = result.get('artist_names', '').lower()
                                 
-                                # Cek kecocokan
                                 if (title.lower() in res_title or title.lower() in res_title_feat) and \
                                    (artist.lower() in res_artist):
                                     track_id = result.get('id')
@@ -224,8 +228,6 @@ class GeniusAPI:
                         if r.status == 200:
                             data = await r.json(content_type=None)
                             song_data = data.get('response', {}).get('song', {})
-                            
-                            # Genius hanya menyediakan lirik teks biasa (plain), tidak menyediakan synced (LRC)
                             plain_lyrics = song_data.get('lyrics', {}).get('plain')
                             return plain_lyrics, None 
             except Exception as e:
