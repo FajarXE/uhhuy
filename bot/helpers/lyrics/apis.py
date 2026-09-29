@@ -1,4 +1,4 @@
-# [GANTI FILE: bot/helpers/lyrics/apis.py]
+# [GANTI SELURUH FILE: bot/helpers/lyrics/apis.py]
 
 import aiohttp
 import asyncio
@@ -7,10 +7,17 @@ import uuid
 import hmac
 import base64
 import logging
+import aiolimiter
 from urllib.parse import quote, urlencode
 from datetime import datetime
 
 LOGGER = logging.getLogger(__name__)
+
+# --- KONTROL RATE LIMIT (ANTI-BAN LYRICS API) ---
+# Membatasi maksimal 10 request dalam 5 detik untuk tiap provider
+MX_LIMITER = aiolimiter.AsyncLimiter(10, 5)
+LRC_LIMITER = aiolimiter.AsyncLimiter(10, 5)
+# ------------------------------------------------
 
 class MusixmatchAPI:
     def __init__(self):
@@ -44,15 +51,16 @@ class MusixmatchAPI:
         params['signature_protocol'] = 'sha1'
 
         try:
-            async with session.get(self.API_URL + method, params=params, headers=self.headers) as r:
-                # Tambahkan try-except untuk JSON decode
-                try:
-                    data = await r.json(content_type=None)
-                    if data['message']['header']['status_code'] == 200:
-                        self.token = data['message']['body']['user_token']
-                        return self.token
-                except:
-                    LOGGER.warning("Musixmatch: Gagal decode JSON saat get_token")
+            # --- PROTEKSI LIMITER DAN TIMEOUT ---
+            async with MX_LIMITER:
+                async with session.get(self.API_URL + method, params=params, headers=self.headers, timeout=15) as r:
+                    try:
+                        data = await r.json(content_type=None)
+                        if data['message']['header']['status_code'] == 200:
+                            self.token = data['message']['body']['user_token']
+                            return self.token
+                    except:
+                        LOGGER.warning("Musixmatch: Gagal decode JSON saat get_token")
         except Exception as e:
             LOGGER.error(f"Musixmatch Token Error: {e}")
         return None
@@ -75,11 +83,13 @@ class MusixmatchAPI:
             
             track_id = None
             try:
-                async with session.get(self.API_URL + method, params=params, headers=self.headers) as r:
-                    data = await r.json(content_type=None)
-                    track_list = data['message']['body']['track_list']
-                    if track_list:
-                        track_id = track_list[0]['track']['track_id']
+                # --- PROTEKSI LIMITER DAN TIMEOUT ---
+                async with MX_LIMITER:
+                    async with session.get(self.API_URL + method, params=params, headers=self.headers, timeout=15) as r:
+                        data = await r.json(content_type=None)
+                        track_list = data['message']['body']['track_list']
+                        if track_list:
+                            track_id = track_list[0]['track']['track_id']
             except:
                 pass
 
@@ -102,16 +112,18 @@ class MusixmatchAPI:
             }
             
             try:
-                async with session.get(self.API_URL + method, params=params, headers=self.headers) as r:
-                    data = await r.json(content_type=None)
-                    body = data['message']['body']['macro_calls']
-                    
-                    if body.get('track.lyrics.get', {}).get('message', {}).get('header', {}).get('status_code') == 200:
-                        plain = body['track.lyrics.get']['message']['body']['lyrics']['lyrics_body']
+                # --- PROTEKSI LIMITER DAN TIMEOUT ---
+                async with MX_LIMITER:
+                    async with session.get(self.API_URL + method, params=params, headers=self.headers, timeout=15) as r:
+                        data = await r.json(content_type=None)
+                        body = data['message']['body']['macro_calls']
+                        
+                        if body.get('track.lyrics.get', {}).get('message', {}).get('header', {}).get('status_code') == 200:
+                            plain = body['track.lyrics.get']['message']['body']['lyrics']['lyrics_body']
 
-                    if body.get('track.richsync.get', {}).get('message', {}).get('header', {}).get('status_code') == 200:
-                        richsync = body['track.richsync.get']['message']['body']['richsync']
-                        #Synced logic placeholder
+                        if body.get('track.richsync.get', {}).get('message', {}).get('header', {}).get('status_code') == 200:
+                            richsync = body['track.richsync.get']['message']['body']['richsync']
+                            #Synced logic placeholder
             except:
                 pass
             
@@ -136,10 +148,12 @@ class LRCLibAPI:
             
             # --- Try Cached ---
             try:
-                async with session.get(f'{self.base_url}/get', params=params, headers=self.headers) as r:
-                    if r.status == 200:
-                        data = await r.json(content_type=None)
-                        return data.get('plainLyrics'), data.get('syncedLyrics')
+                # --- PROTEKSI LIMITER DAN TIMEOUT ---
+                async with LRC_LIMITER:
+                    async with session.get(f'{self.base_url}/get', params=params, headers=self.headers, timeout=15) as r:
+                        if r.status == 200:
+                            data = await r.json(content_type=None)
+                            return data.get('plainLyrics'), data.get('syncedLyrics')
             except Exception:
                 pass # Lanjut ke Search jika cached gagal/error
             
@@ -147,11 +161,13 @@ class LRCLibAPI:
             # Hapus parameter duration saat search umum agar hasil lebih fleksibel
             params_search = {'q': f"{title} {artist}"}
             try:
-                async with session.get(f'{self.base_url}/search', params=params_search, headers=self.headers) as r:
-                    if r.status == 200:
-                        data = await r.json(content_type=None)
-                        if data and isinstance(data, list) and len(data) > 0:
-                            return data[0].get('plainLyrics'), data[0].get('syncedLyrics')
+                # --- PROTEKSI LIMITER DAN TIMEOUT ---
+                async with LRC_LIMITER:
+                    async with session.get(f'{self.base_url}/search', params=params_search, headers=self.headers, timeout=15) as r:
+                        if r.status == 200:
+                            data = await r.json(content_type=None)
+                            if data and isinstance(data, list) and len(data) > 0:
+                                return data[0].get('plainLyrics'), data[0].get('syncedLyrics')
             except Exception:
                 pass
             
