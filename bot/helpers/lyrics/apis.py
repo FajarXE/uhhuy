@@ -87,8 +87,18 @@ class MusixmatchAPI:
                     async with session.get(self.API_URL + method, params=params, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
                         track_list = data['message']['body']['track_list']
+                        
                         if track_list:
-                            track_id = track_list[0]['track']['track_id']
+                            # --- PERBAIKAN MUSIXMATCH: Validasi Nama Lagu ---
+                            for t_data in track_list:
+                                t = t_data['track']
+                                res_title = t.get('track_name', '').lower()
+                                
+                                # Pastikan judul yang dikembalikan memuat kata dari judul asli (atau sebaliknya)
+                                if title.lower() in res_title or res_title in title.lower():
+                                    track_id = t.get('track_id')
+                                    break
+                            # ------------------------------------------------
             except:
                 pass
 
@@ -135,21 +145,19 @@ class LRCLibAPI:
         self.headers = {'User-Agent': 'BotMusic/1.0'}
 
     async def _fetch_with_retry(self, session, url, params):
-        """Fungsi helper untuk menangani Retry-After (429/503) secara asinkron."""
-        for attempt in range(3): # Maksimal 3 percobaan
+        for attempt in range(3): 
             try:
                 async with LRC_LIMITER:
                     async with session.get(url, params=params, headers=self.headers, timeout=15) as r:
                         if r.status == 200:
                             return await r.json(content_type=None)
                         elif r.status in (429, 503):
-                            # Ambil header Retry-After, default ke 5 detik jika tidak ada
                             retry_after = int(r.headers.get('Retry-After', 5))
                             LOGGER.warning(f"LRCLib Rate Limit {r.status}. Retrying in {retry_after}s...")
                             await asyncio.sleep(retry_after)
                             continue
                         elif r.status == 404:
-                            return None # Tidak ditemukan
+                            return None 
                         else:
                             return None
             except Exception as e:
@@ -159,14 +167,8 @@ class LRCLibAPI:
 
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
-            params = {
-                'track_name': title,
-                'artist_name': artist,
-                'album_name': album,
-                'duration': duration
-            }
-            
             # --- Try Cached (/get) ---
+            params = {'track_name': title, 'artist_name': artist, 'album_name': album, 'duration': duration}
             data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
             if data:
                 return data.get('plainLyrics'), data.get('syncedLyrics')
@@ -175,7 +177,12 @@ class LRCLibAPI:
             params_search = {'q': f"{title} {artist}"}
             data = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
             if data and isinstance(data, list) and len(data) > 0:
-                return data[0].get('plainLyrics'), data[0].get('syncedLyrics')
+                # --- PERBAIKAN LRCLIB: Validasi Nama Lagu ---
+                for item in data:
+                    res_title = item.get('trackName', '').lower()
+                    if title.lower() in res_title or res_title in title.lower():
+                        return item.get('plainLyrics'), item.get('syncedLyrics')
+                # --------------------------------------------
             
             return None, None
 
@@ -205,16 +212,20 @@ class GeniusAPI:
                             data = await r.json(content_type=None)
                             hits = data.get('response', {}).get('hits', [])
                             
-                            for hit in hits:
-                                result = hit.get('result', {})
-                                res_title = result.get('title', '').lower()
-                                res_title_feat = result.get('title_with_featured', '').lower()
-                                res_artist = result.get('artist_names', '').lower()
-                                
-                                if (title.lower() in res_title or title.lower() in res_title_feat) and \
-                                   (artist.lower() in res_artist):
-                                    track_id = result.get('id')
-                                    break
+                            if hits:
+                                # --- PERBAIKAN GENIUS: Validasi Nama Lagu ---
+                                for hit in hits:
+                                    result = hit.get('result', {})
+                                    res_title = result.get('title', '').lower()
+                                    res_title_feat = result.get('title_with_featured', '').lower()
+                                    res_artist = result.get('artist_names', '').lower()
+                                    
+                                    # Pengecekan ketat (Strict Match)
+                                    if (title.lower() in res_title or title.lower() in res_title_feat) and \
+                                       (artist.lower() in res_artist or res_artist in artist.lower()):
+                                        track_id = result.get('id')
+                                        break
+                                # --------------------------------------------
             except Exception as e:
                 LOGGER.warning(f"Genius Search Error: {e}")
             
