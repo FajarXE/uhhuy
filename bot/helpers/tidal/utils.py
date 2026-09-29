@@ -187,16 +187,18 @@ def parse_mpd(xml: bytes):
 
 
 async def merge_tracks(temp_tracks: list, output_path: str):
-    async with aiofiles.open(output_path, 'wb') as dest_file:
-        for temp_location in temp_tracks:
-            async with aiofiles.open(temp_location, 'rb') as segment_file:
-                while True:
-                    chunk = await segment_file.read(1024 * 64)
-                    if not chunk:
-                        break
-                    await dest_file.write(chunk)
-    delete_tasks = [asyncio.to_thread(os.remove, temp_location) for temp_location in temp_tracks]
-    await asyncio.gather(*delete_tasks)
+    """Menggabungkan segmen HLS/DASH menggunakan shutil dengan buffer 1MB di background thread."""
+    def _sync_merge():
+        import shutil
+        import os
+        with open(output_path, 'wb') as dest_file:
+            for temp_location in temp_tracks:
+                with open(temp_location, 'rb') as segment_file:
+                    # Menggunakan buffer 1MB (1024 * 1024), jauh lebih cepat dari 64KB
+                    shutil.copyfileobj(segment_file, dest_file, 1024 * 1024)
+                os.remove(temp_location)  # Langsung hapus file setelah selesai digabung
+                
+    await asyncio.to_thread(_sync_merge)
 
 
 async def get_quality(stream_data: dict):
