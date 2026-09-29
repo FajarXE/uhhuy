@@ -7,12 +7,16 @@ import asyncio
 import urllib.parse
 from datetime import datetime
 from bot.settings import bot_set
+import aiolimiter
 
 # --- Impor LOGGER ---
 from bot.logger import LOGGER
 
 from ..metadata import metadata as base_meta
 from ..metadata import create_cover_file
+
+# Limit 1 request setiap 1.5 detik
+MBZ_LIMITER = aiolimiter.AsyncLimiter(1, 1.5)
 
 # --- FUNGSI BANTUAN API PIHAK KETIGA ---
 
@@ -97,28 +101,30 @@ async def get_musicbrainz_info(isrc):
     
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url, headers=headers, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    if data.get('recordings'):
-                        recording = data['recordings'][0]
-                        info = {}
-                        
-                        if recording.get('releases'):
-                            dates = []
-                            for rel in recording['releases']:
-                                if rel.get('date'): dates.append(rel['date'])
-                            if dates:
-                                dates.sort()
-                                info['date'] = dates[0]
-                        
-                        tags = recording.get('tags', [])
-                        if tags:
-                            sorted_tags = sorted(tags, key=lambda x: x.get('count', 0), reverse=True)
-                            genre_list = [t['name'].title() for t in sorted_tags[:2]]
-                            info['genre'] = ', '.join(genre_list)
+            # Menggunakan limiter agar tidak di-banned oleh MusicBrainz (Limit 1 Req / 1.5 Detik)
+            async with MBZ_LIMITER:
+                async with session.get(url, headers=headers, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        if data.get('recordings'):
+                            recording = data['recordings'][0]
+                            info = {}
                             
-                        return info
+                            if recording.get('releases'):
+                                dates = []
+                                for rel in recording['releases']:
+                                    if rel.get('date'): dates.append(rel['date'])
+                                if dates:
+                                    dates.sort()
+                                    info['date'] = dates[0]
+                            
+                            tags = recording.get('tags', [])
+                            if tags:
+                                sorted_tags = sorted(tags, key=lambda x: x.get('count', 0), reverse=True)
+                                genre_list = [t['name'].title() for t in sorted_tags[:2]]
+                                info['genre'] = ', '.join(genre_list)
+                                
+                            return info
         except Exception as e:
             LOGGER.warning(f"MusicBrainz lookup failed: {e}")
     return None
