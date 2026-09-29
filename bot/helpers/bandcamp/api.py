@@ -1,8 +1,15 @@
+# [GANTI SELURUH FILE: bot/helpers/bandcamp/api.py]
+
 import json
 import re
 import aiohttp
+import aiolimiter
 from datetime import datetime
 from bs4 import BeautifulSoup
+
+# --- KONTROL RATE LIMIT (ANTI-BAN BANDCAMP) ---
+BC_LIMITER = aiolimiter.AsyncLimiter(15, 5)
+# ----------------------------------------------
 
 class BandcampAPI:
     def __init__(self):
@@ -12,14 +19,15 @@ class BandcampAPI:
 
     async def get_track_or_album(self, session: aiohttp.ClientSession, url: str):
         try:
-            async with session.get(url, headers=self.headers) as resp:
-                if resp.status != 200:
-                    return None
-                html = await resp.text()
+            # --- BUNGKUS REQUEST DENGAN LIMITER ---
+            async with BC_LIMITER:
+                async with session.get(url, headers=self.headers) as resp:
+                    if resp.status != 200:
+                        return None
+                    html = await resp.text()
 
             soup = BeautifulSoup(html, 'html.parser')
             
-            # Cari script data-tralbum
             scripts = soup.find_all('script', {'data-tralbum': True})
             json_data = None
 
@@ -42,29 +50,21 @@ class BandcampAPI:
             if embed_script and embed_script.has_attr('data-blob'):
                  embed_data = json.loads(embed_script['data-blob'])
 
-            # --- 1. TANGGAL RILIS LENGKAP ---
             raw_date = json_data.get('album_release_date') or json_data.get('current', {}).get('release_date')
             release_date = "Unknown"
             
             if raw_date:
                 try:
-                    # Format Bandcamp: "01 Jan 2020 00:00:00 GMT"
                     dt = datetime.strptime(raw_date, "%d %b %Y %H:%M:%S GMT")
-                    release_date = dt.strftime("%Y-%m-%d") # Hasil: 2020-01-01
+                    release_date = dt.strftime("%Y-%m-%d") 
                 except:
                     release_date = str(raw_date)
 
-            # --- 2. LOGIKA GENRE (DIPERBAIKI) ---
-            # Mengambil tags, jika tidak ada biarkan None (jangan fallback ke "Alternative")
             keywords = json_data.get('keywords')
             genre = None
             
             if keywords and isinstance(keywords, list):
-                # Gabungkan semua tag dengan koma, dan Title Case setiap kata
                 genre = ", ".join([k.strip().title() for k in keywords])
-            # Jika kosong, genre tetap None
-            
-            # ------------------------------------
 
             label = None
             if 'item_sellers' in json_data and json_data['item_sellers']:
@@ -91,7 +91,7 @@ class BandcampAPI:
                 'art_id': json_data.get('art_id'),
                 'tracks': tracks,
                 'release_date': release_date,
-                'genre': genre, # Bisa berisi String atau None
+                'genre': genre, 
                 'label': label,
                 'explicit': explicit_str
             }
