@@ -106,33 +106,37 @@ async def fix_extension(filepath):
     return filepath
 
 # --- MANUAL METADATA PATCHER (AGRESSIVE CLEANER) ---
-def patch_metadata_manual(filepath, album_artist):
+async def patch_metadata_manual(filepath, album_artist):
     if not ID3: return
-    try:
-        audio = ID3(filepath)
-    except Exception:
-        return
-    try:
-        keys_to_delete = []
-        for key in audio.keys():
-            if key.startswith("COMM") or key.startswith("TENC") or key.startswith("TSSE") or key.startswith("TXXX"):
-                keys_to_delete.append(key)
-                continue
-            frame = audio[key]
-            if hasattr(frame, 'text'): 
-                for text_val in frame.text:
-                    text_str = str(text_val).lower()
-                    if "processed by" in text_str or "sox" in text_str:
-                        keys_to_delete.append(key)
-                        break
-        for key in list(set(keys_to_delete)): 
-            if key in audio: del audio[key]
-        if album_artist:
-            audio.add(TPE2(encoding=3, text=str(album_artist)))
-        audio.save(v2_version=3, v1=2)
-    except Exception as e:
-        LOGGER.error(f"Gagal patching metadata manual: {e}")
 
+    def _patch():
+        try:
+            audio = ID3(filepath)
+        except Exception:
+            return
+        try:
+            keys_to_delete = []
+            for key in audio.keys():
+                if key.startswith("COMM") or key.startswith("TENC") or key.startswith("TSSE") or key.startswith("TXXX"):
+                    keys_to_delete.append(key)
+                    continue
+                frame = audio[key]
+                if hasattr(frame, 'text'): 
+                    for text_val in frame.text:
+                        text_str = str(text_val).lower()
+                        if "processed by" in text_str or "sox" in text_str:
+                            keys_to_delete.append(key)
+                            break
+            for key in list(set(keys_to_delete)): 
+                if key in audio: del audio[key]
+            if album_artist:
+                audio.add(TPE2(encoding=3, text=str(album_artist)))
+            audio.save(v2_version=3, v1=2)
+        except Exception as e:
+            LOGGER.error(f"Gagal patching metadata manual: {e}")
+
+    # Lemparkan proses disk I/O ini ke background thread
+    await asyncio.to_thread(_patch)
 
 # --- LOCAL COVER DOWNLOADER ---
 async def download_local_cover(session, url, folderpath):
@@ -144,7 +148,13 @@ async def download_local_cover(session, url, folderpath):
             if resp.status == 200:
                 content = await resp.read()
                 if not content: return PLACEHOLDER_COVER
-                with open(filepath, 'wb') as f: f.write(content)
+                
+                # --- PERBAIKAN: Gunakan aiofiles untuk I/O Asinkron ---
+                import aiofiles
+                async with aiofiles.open(filepath, 'wb') as f: 
+                    await f.write(content)
+                # ------------------------------------------------------
+                
                 return filepath
             else:
                 return PLACEHOLDER_COVER
@@ -252,7 +262,7 @@ async def process_single_track(user, track_id):
     }
 
     await set_metadata(meta, user['user_id'])
-    patch_metadata_manual(filepath, artist_name)
+    await patch_metadata_manual(filepath, artist_name)
     await track_upload(meta, user)
 
 
@@ -365,7 +375,7 @@ async def process_artist(user, permalink):
             t['cover'] = local_cov
 
             await set_metadata(t, user['user_id'])
-            patch_metadata_manual(filepath, t['albumartist'])
+            await patch_metadata_manual(filepath, t['albumartist'])
             return t
         except Exception as e:
             LOGGER.error(f"Error track {t['title']}: {e}")
