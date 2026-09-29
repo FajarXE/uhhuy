@@ -362,6 +362,17 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
 
         track_meta['extension'] = await get_audio_extension(filepath)
         
+        # ========================================================
+        # [PENEMPATAN MQA IDENTIFIER]
+        if track_meta['extension'] == 'flac':
+            mqa_info = await asyncio.to_thread(MqaIdentifier, filepath)
+            
+            if mqa_info.is_mqa:
+                LOGGER.info(f"Tidal: MQA Terdeteksi! Sample Rate Asli: {mqa_info.get_original_sample_rate()}kHz")
+                track_meta['mqa_details'] = mqa_info
+                track_meta['is_mqa_studio'] = mqa_info.is_mqa_studio
+        # ========================================================
+        
         try:
             _, __, ___, user_convert_m4a = tidal_manager.get_user_quality_settings(user['user_id']) 
         except Exception:
