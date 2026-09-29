@@ -281,8 +281,10 @@ async def start_album(session, code, user, quality_pref, download_dir, upload=Tr
             async with session.get(cover_url, headers=HEADERS) as resp:
                 if resp.status == 200:
                     content = await resp.read()
-                    with open(cover_path, 'wb') as f:
-                        f.write(content)
+                    # --- PERBAIKAN: Gunakan aiofiles untuk I/O Asinkron ---
+                    async with aiofiles.open(cover_path, 'wb') as f:
+                        await f.write(content)
+                    # ------------------------------------------------------
         except Exception as e:
             LOGGER.warning(f"Gagal mengunduh cover Genie: {e}")
 
