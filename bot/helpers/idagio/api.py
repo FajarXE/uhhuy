@@ -1,26 +1,43 @@
-# [GANTI FILE: bot/helpers/idagio/api.py]
+# [GANTI SELURUH FILE: bot/helpers/idagio/api.py]
 
-import requests # Modifikasi
+import requests
 import asyncio
 from datetime import timedelta, datetime
 from os import urandom
-from bot.logger import LOGGER # Modifikasi
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from bot.logger import LOGGER
 
 class IdagioError(Exception):
-    """Pengecualian kustom untuk Idagio"""
     pass
 
 class IdagioApi:
-    def __init__(self, exception):
+    def __init__(self, exception, proxy: str = None):
         self.API_URL = 'https://api.idagio.com/'
-        self.exception = exception # Modifikasi
+        self.exception = exception
         self.device_id = None
         self.access_token = None
         self.expires = None
-        self.premium = False # Modifikasi
+        self.premium = False
+        self.proxy = proxy
 
-        # Modifikasi: Ganti create_requests_session dengan requests.Session()
         self.s = requests.Session()
+        
+        if self.proxy:
+            self.s.proxies = {
+                'http': self.proxy,
+                'https': self.proxy
+            }
+
+        retries = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        self.s.mount("https://", adapter)
+        self.s.mount("http://", adapter)
 
     def headers(self, use_access_token: bool = False):
         return {
@@ -33,37 +50,34 @@ class IdagioApi:
         }
 
     def auth(self, username: str, password: str) -> dict:
-        # generate a device id
         self.device_id = urandom(8).hex()
 
-        r = self.s.post(f'{self.API_URL}v2.1/oauth', data={
-            'client_id': 'com.idagio.app.android',
-            'client_secret': 'adbisIGrocsUckWyodUj2knedpyepubGurlyeawosShyufJishleseanreBlogIbCefHodCigNafweegyeebraft'
-                             'EdnooshDeavolirdoppEcIassyet9CirIrnofmaj',
-            'username': username,
-            'password': password,
-            'grant_type': 'password',
-        })
+        try:
+            r = self.s.post(f'{self.API_URL}v2.1/oauth', data={
+                'client_id': 'com.idagio.app.android',
+                'client_secret': 'adbisIGrocsUckWyodUj2knedpyepubGurlyeawosShyufJishleseanreBlogIbCefHodCigNafweegyeebraft'
+                                 'EdnooshDeavolirdoppEcIassyet9CirIrnofmaj',
+                'username': username,
+                'password': password,
+                'grant_type': 'password',
+            }, timeout=30)
+        except requests.exceptions.RequestException as e:
+            raise self.exception(f"Koneksi login Idagio gagal: {e}")
 
         if r.status_code != 200:
             raise self.exception(r.json().get('error_description', 'Login gagal'))
 
-        # convert to JSON
         r = r.json()
-
-        # save all tokens with access_token expiry date
         self.access_token = r['access_token']
         self.expires = datetime.now() + timedelta(seconds=r['expires_in'])
         
-        # Modifikasi: Panggil validasi akun di sini
         self.valid_account()
         if not self.premium:
-            raise self.exception('Login berhasil, tetapi akun ini tidak memiliki langganan Premium/Premium+.')
+            raise self.exception('Akun tidak memiliki langganan Premium/Premium+ aktif.')
 
         LOGGER.info(f"Idagio: Login berhasil untuk {username}")
         return r
     
-    # Modifikasi: Pisahkan validasi akun (dari interface.py)
     def valid_account(self):
         try:
             account_data = self.get_account()
@@ -86,15 +100,16 @@ class IdagioApi:
         }
 
     def _get(self, endpoint: str, params: dict = None):
-        # function for API requests
         if not params:
             params = {}
 
-        r = self.s.get(f'{self.API_URL}{endpoint}', params=params, headers=self.headers(use_access_token=True))
+        try:
+            r = self.s.get(f'{self.API_URL}{endpoint}', params=params, headers=self.headers(use_access_token=True), timeout=30)
+        except requests.exceptions.RequestException as e:
+            raise self.exception(f"Permintaan Idagio gagal ({endpoint}): {e}")
 
-        # access_token expired
         if r.status_code == 401:
-            raise self.exception(f"Token akses Idagio kedaluwarsa atau tidak valid. ({r.text})")
+            raise self.exception(f"Token akses Idagio kedaluwarsa. ({r.text})")
 
         if r.status_code not in {200, 201, 202}:
             raise self.exception(f"Error API Idagio {r.status_code}: {r.text}")
@@ -105,10 +120,7 @@ class IdagioApi:
         return self._get('v2.1/user')
 
     def get_search(self, query: str):
-        return self._get('v1.8/lucene/search', params={
-            'term': query,
-            'full': True
-        })
+        return self._get('v1.8/lucene/search', params={'term': query, 'full': True})
 
     def get_recording(self, recording_id: str):
         return self._get(f'v2.0/metadata/recordings/{recording_id}').get('result')
@@ -123,37 +135,21 @@ class IdagioApi:
         return self._get(f'artists.v3/{artist_id}').get('result')
 
     def get_artist_albums(self, artist_id: str, cursor: str = None, limit: int = 100):
-        return self._get(f'v2.0/metadata/albums/filter', params={
-            'artist': artist_id,
-            'sort': 'copyrightYear',
-            'limit': limit,
-            'cursor': cursor
-        })
+        return self._get('v2.0/metadata/albums/filter', params={'artist': artist_id, 'sort': 'copyrightYear', 'limit': limit, 'cursor': cursor})
 
     def get_artist_recordings(self, artist_id: str, cursor: str = None, limit: int = 100):
-        return self._get(f'v2.0/metadata/recordings/filter', params={
-            'artist': artist_id,
-            'sort': 'chronological',
-            'limit': limit,
-            'cursor': cursor
-        })
+        return self._get('v2.0/metadata/recordings/filter', params={'artist': artist_id, 'sort': 'chronological', 'limit': limit, 'cursor': cursor})
 
     def get_artist_works(self, artist_id: str, cursor: str = None, limit: int = 100):
-        return self._get(f'v2.0/metadata/works/filter', params={
-            'artist': artist_id,
-            'limit': limit,
-            'cursor': cursor
-        })
+        return self._get('v2.0/metadata/works/filter', params={'artist': artist_id, 'limit': limit, 'cursor': cursor})
 
     def get_track_stream_2(self, track_id: str, quality: int = 90):
-        # unencrypted sonos endpoint only for quality = 90 (FLAC).
-        r = self.s.get(f'{self.API_URL}v1.8/content/track/{track_id}', params={
-            'quality': quality,
-            'format': 2,
-            'client_type': 'sonos-2',
-            'client_version': '17.2.4',
-            'device_id': 'web'
-        }, headers=self.headers(use_access_token=True))
+        try:
+            r = self.s.get(f'{self.API_URL}v1.8/content/track/{track_id}', params={
+                'quality': quality, 'format': 2, 'client_type': 'sonos-2', 'client_version': '17.2.4', 'device_id': 'web'
+            }, headers=self.headers(use_access_token=True), timeout=30)
+        except requests.exceptions.RequestException as e:
+            raise self.exception(f"Sonos stream error: {e}")
 
         if r.status_code != 200:
             raise self.exception(r.text)
@@ -161,22 +157,18 @@ class IdagioApi:
         return [r.json()]
 
     def get_track_stream(self, track_id: str, quality: int = 90):
-        # quality is either 50 (160 kbit/s AAC), 70 (320 kbit/s AAC) or 90 (FLAC).
-        r = self.s.post(f'{self.API_URL}v2.0/streams/bulk', params={
-            'quality': quality,
-            'client_type': 'android-3',
-            'client_version': '3.3.0',
-            'device_id': self.device_id
-        }, json={"ids": [track_id]}, headers=self.headers(use_access_token=True))
+        try:
+            r = self.s.post(f'{self.API_URL}v2.0/streams/bulk', params={
+                'quality': quality, 'client_type': 'android-3', 'client_version': '3.3.0', 'device_id': self.device_id
+            }, json={"ids": [track_id]}, headers=self.headers(use_access_token=True), timeout=30)
+        except requests.exceptions.RequestException as e:
+            raise self.exception(f"Bulk stream error: {e}")
 
         if r.status_code != 200:
             raise self.exception(r.text)
 
         return r.json().get('results')
 
-    # --- TAMBAHAN BARU: Metode Close (Sinkron) ---
     def close_session(self):
-        """Menutup sesi 'requests' internal."""
         if self.s:
             self.s.close()
-    # --- AKHIR TAMBAHAN ---
