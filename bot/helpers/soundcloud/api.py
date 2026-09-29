@@ -1,8 +1,14 @@
-# [FILE BARU: bot/helpers/soundcloud/api.py]
+# [GANTI SELURUH FILE: bot/helpers/soundcloud/api.py]
 
 import aiohttp
 import asyncio
+import aiolimiter
 from bot.logger import LOGGER
+
+# --- KONTROL RATE LIMIT (ANTI-BAN SOUNDCLOUD) ---
+# Membatasi maksimal 15 request dalam 5 detik
+SC_LIMITER = aiolimiter.AsyncLimiter(15, 5)
+# ------------------------------------------------
 
 # Ini adalah kelas Error kustom kita, mirip BeatportError
 class SoundcloudError(Exception):
@@ -50,13 +56,15 @@ class SoundcloudAPI:
             # Menggunakan api_base untuk endpoint internal
             url = f'{self.api_base}{endpoint}'
             
-            async with self.session.get(url, params=params) as r:
-                if r.status != 200:
-                    error_text = await r.text()
-                    raise SoundcloudError(f"Soundcloud API Error {r.status} di {endpoint}: {error_text}")
-                
-                # content_type=None untuk menangani mimetype yang terkadang salah
-                return await r.json(content_type=None)
+            # --- BUNGKUS REQUEST DENGAN LIMITER DI SINI ---
+            async with SC_LIMITER:
+                async with self.session.get(url, params=params) as r:
+                    if r.status != 200:
+                        error_text = await r.text()
+                        raise SoundcloudError(f"Soundcloud API Error {r.status} di {endpoint}: {error_text}")
+                    
+                    # content_type=None untuk menangani mimetype yang terkadang salah
+                    return await r.json(content_type=None)
                 
         except aiohttp.ClientError as e:
             LOGGER.error(f"Soundcloud request gagal: {e}")
