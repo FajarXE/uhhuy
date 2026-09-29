@@ -583,29 +583,31 @@ class AmazonApi:
                 "x-amzn-hardware-device-type-id": device_type_id
             }
             
-            async with self.session.post(url, json=payload, headers=headers) as resp:
-                resp_text = await resp.text()
-                if (resp.status == 403 or (resp.status == 400 and "INVALID_TOKEN" in resp_text)) and attempt == 0:
-                    try:
-                        if await self.refresh_access_token(): continue
-                    except: pass
-                    raise Exception("Gagal meminta lisensi DRM (Token Expired).")
+            # --- BUNGKUS DENGAN LIMITER DI SINI ---
+            async with AMZN_LIMITER:
+                async with self.session.post(url, json=payload, headers=headers) as resp:
+                    resp_text = await resp.text()
+                    if (resp.status == 403 or (resp.status == 400 and "INVALID_TOKEN" in resp_text)) and attempt == 0:
+                        try:
+                            if await self.refresh_access_token(): continue
+                        except: pass
+                        raise Exception("Gagal meminta lisensi DRM (Token Expired).")
+                        
+                    if resp.status != 200: 
+                        # --- [FIX ERROR UNMASKING] BONGKAR ALASAN ASLI DARI AMAZON ---
+                        raise Exception(f"License API failed ({resp.status}): {resp_text}")
+                        
+                    data = json.loads(resp_text)
                     
-                if resp.status != 200: 
-                    # --- [FIX ERROR UNMASKING] BONGKAR ALASAN ASLI DARI AMAZON ---
-                    raise Exception(f"License API failed ({resp.status}): {resp_text}")
-                    
-                data = json.loads(resp_text)
-                
-                # Cek apakah Amazon memblokir perangkat (Blocklisted)
-                if data.get("__type", "").endswith("DrmLicenseDeniedException"):
-                    denial_reason = data.get("denialReason", "UNKNOWN_REASON")
-                    raise Exception(f"Lisensi Ditolak Amazon. Alasan: {denial_reason}")
-                    
-                if "license" not in data: 
-                    raise Exception("Lisensi tidak ditemukan dalam respons.")
-                    
-                return data["license"]
+                    # Cek apakah Amazon memblokir perangkat (Blocklisted)
+                    if data.get("__type", "").endswith("DrmLicenseDeniedException"):
+                        denial_reason = data.get("denialReason", "UNKNOWN_REASON")
+                        raise Exception(f"Lisensi Ditolak Amazon. Alasan: {denial_reason}")
+                        
+                    if "license" not in data: 
+                        raise Exception("Lisensi tidak ditemukan dalam respons.")
+                        
+                    return data["license"]
 
     async def close(self):
         if not self.session.closed: await self.session.close()
