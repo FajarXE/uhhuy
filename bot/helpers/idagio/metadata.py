@@ -158,9 +158,13 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
     if genres:
         metadata['genre'] = ", ".join(genres)
     
-    # Sampul
-    metadata['cover'] = await _process_cover(metadata, album_data.get("imageUrl"))
-    metadata['thumbnail'] = metadata['cover']
+    # Sampul (Gunakan cache cover dari album jika tersedia)
+    if alb_info_pre and alb_info_pre.get('cover'):
+        metadata['cover'] = alb_info_pre['cover']
+        metadata['thumbnail'] = alb_info_pre.get('thumbnail', metadata['cover'])
+    else:
+        metadata['cover'] = await _process_cover(metadata, album_data.get("imageUrl"))
+        metadata['thumbnail'] = metadata['cover']
 
     # --- Logika Kualitas ---
     user_id = user.get('user_id')
@@ -224,6 +228,10 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
     # Sampul
     metadata['cover'] = await _process_cover(metadata, album_data.get("imageUrl"))
     metadata['thumbnail'] = metadata['cover']
+    
+    # Simpan ke album_data agar dipakai oleh seluruh track tanpa download ulang
+    album_data['cover'] = metadata['cover']
+    album_data['thumbnail'] = metadata['thumbnail']
 
     metadata['tracks'] = []
     
