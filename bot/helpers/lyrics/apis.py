@@ -1,5 +1,6 @@
 # [GANTI SELURUH FILE: bot/helpers/lyrics/apis.py]
 
+import re
 import aiohttp
 import asyncio
 import time
@@ -18,6 +19,48 @@ MX_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 LRC_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5) 
 # ------------------------------------------------
+
+# =======================================================
+# FUNGSI VALIDASI CERDAS (MENCEGAH SALAH LIRIK / LIRIK KOSONG)
+# =======================================================
+def clean_string(text):
+    if not text: return ""
+    text = str(text)
+    # Hapus bagian dalam kurung ( ) atau [ ]
+    text = re.sub(r'\([^)]*\)|\[[^\]]*\]', '', text)
+    # Hapus atribut berlebihan di akhir judul
+    text = re.sub(r'(?i)\b(feat\.?|ft\.?|with|remastered|remaster|version|explicit|live|bonus|instrumental)\b.*', '', text)
+    # Hapus semua karakter non-alfanumerik (termasuk spasi dan tanda kutip)
+    text = re.sub(r'[^a-zA-Z0-9]', '', text)
+    return text.lower()
+
+def is_valid_match(t1, t2, a1=None, a2=None):
+    ct1 = clean_string(t1)
+    ct2 = clean_string(t2)
+    
+    if not ct1 or not ct2: 
+        return False
+        
+    # Jika salah satu judul sangat pendek (< 3 karakter), harus sama persis (mencegah false positive)
+    if len(ct1) < 3 or len(ct2) < 3:
+        title_match = (ct1 == ct2)
+    else:
+        # Cek apakah judul 1 memuat judul 2 atau sebaliknya
+        title_match = (ct1 in ct2 or ct2 in ct1)
+        
+    if not title_match: 
+        return False
+        
+    if a1 and a2:
+        ca1 = clean_string(a1)
+        ca2 = clean_string(a2)
+        if ca1 and ca2:
+            # Cek kecocokan artis (cukup salah satu memuat yang lain untuk mengatasi multi-artist)
+            return (ca1 in ca2 or ca2 in ca1)
+            
+    return True
+# =======================================================
+
 
 class MusixmatchAPI:
     def __init__(self):
@@ -53,17 +96,14 @@ class MusixmatchAPI:
         try:
             async with MX_LIMITER:
                 async with session.get(self.API_URL + method, params=params, headers=self.headers, cookies=self.cookies, timeout=15) as r:
-                    try:
-                        data = await r.json(content_type=None)
-                        if data['message']['header']['status_code'] == 200:
-                            token = data['message']['body']['user_token']
-                            if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
-                                self.token = token
-                                return self.token
-                    except:
-                        LOGGER.warning("Musixmatch: Gagal decode JSON saat get_token")
-        except Exception as e:
-            LOGGER.error(f"Musixmatch Token Error: {e}")
+                    data = await r.json(content_type=None)
+                    if data.get('message', {}).get('header', {}).get('status_code') == 200:
+                        token = data['message']['body']['user_token']
+                        if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
+                            self.token = token
+                            return self.token
+        except Exception:
+            pass
         return None
 
     async def get_lyrics(self, title, artist, album, duration=None):
@@ -71,70 +111,101 @@ class MusixmatchAPI:
             if not self.token:
                 await self.get_token(session)
 
-            method = 'track.search'
-            params = {
-                'format': 'json',
-                'q_track': title,
-                'q_artist': artist,
-                'quorum_factor': 1,
-                'usertoken': self.token,
-                'app_id': 'web-desktop-app-v1.0'
-            }
-            
             track_id = None
+            commontrack_id = None
+
+            # 1. Gunakan 'matcher.track.get' (Jauh lebih akurat dari track.search)
             try:
+                method = 'matcher.track.get'
+                params = {
+                    'format': 'json',
+                    'q_track': title,
+                    'q_artist': artist,
+                    'usertoken': self.token,
+                    'app_id': 'web-desktop-app-v1.0'
+                }
+                if album: params['q_album'] = album
+                
                 async with MX_LIMITER:
                     async with session.get(self.API_URL + method, params=params, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
-                        track_list = data['message']['body']['track_list']
-                        
-                        if track_list:
-                            # --- PERBAIKAN MUSIXMATCH: Validasi Nama Lagu ---
-                            for t_data in track_list:
-                                t = t_data['track']
-                                res_title = t.get('track_name', '').lower()
-                                
-                                # Pastikan judul yang dikembalikan memuat kata dari judul asli (atau sebaliknya)
-                                if title.lower() in res_title or res_title in title.lower():
-                                    track_id = t.get('track_id')
-                                    break
-                            # ------------------------------------------------
-            except:
-                pass
+                        if data.get('message', {}).get('header', {}).get('status_code') == 200:
+                            t = data['message']['body'].get('track', {})
+                            res_title = t.get('track_name', '')
+                            res_artist = t.get('artist_name', '')
+                            
+                            if is_valid_match(title, res_title, artist, res_artist):
+                                track_id = t.get('track_id')
+                                commontrack_id = t.get('commontrack_id')
+            except Exception: pass
 
+            # 2. Fallback ke 'track.search' jika matcher.track.get gagal
+            if not track_id:
+                try:
+                    method = 'track.search'
+                    params = {
+                        'format': 'json',
+                        'q_track': title,
+                        'q_artist': artist,
+                        's_track_rating': 'desc',
+                        'usertoken': self.token,
+                        'app_id': 'web-desktop-app-v1.0'
+                    }
+                    async with MX_LIMITER:
+                        async with session.get(self.API_URL + method, params=params, headers=self.headers, timeout=15) as r:
+                            data = await r.json(content_type=None)
+                            track_list = data.get('message', {}).get('body', {}).get('track_list', [])
+                            
+                            for t_data in track_list:
+                                t = t_data.get('track', {})
+                                res_title = t.get('track_name', '')
+                                res_artist = t.get('artist_name', '')
+                                
+                                if is_valid_match(title, res_title, artist, res_artist):
+                                    track_id = t.get('track_id')
+                                    commontrack_id = t.get('commontrack_id')
+                                    break
+                except Exception: pass
+
+            # Berhenti jika lagu benar-benar tidak ditemukan (Instrumental/Intro)
             if not track_id:
                 return None, None
 
             plain = None
             synced = None
             
-            method = 'macro.subtitles.get'
-            params = {
-                'format': 'json',
-                'q_track': title,
-                'q_artist': artist,
-                'usertoken': self.token,
-                'app_id': 'web-desktop-app-v1.0',
-                'optional_calls': 'track.subtitles.get,track.lyrics.get'
-            }
-            
+            # 3. Ambil Plain Lyrics menggunakan Exact ID
             try:
+                params_plain = {
+                    'format': 'json',
+                    'track_id': track_id,
+                    'usertoken': self.token,
+                    'app_id': 'web-desktop-app-v1.0'
+                }
                 async with MX_LIMITER:
-                    async with session.get(self.API_URL + method, params=params, headers=self.headers, timeout=15) as r:
+                    async with session.get(self.API_URL + 'track.lyrics.get', params=params_plain, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
-                        body = data['message']['body']['macro_calls']
-                        
-                        if body.get('track.lyrics.get', {}).get('message', {}).get('header', {}).get('status_code') == 200:
-                            plain = body['track.lyrics.get']['message']['body']['lyrics']['lyrics_body']
+                        if data.get('message', {}).get('header', {}).get('status_code') == 200:
+                            plain = data['message']['body']['lyrics']['lyrics_body']
+            except Exception: pass
 
-                        if body.get('track.subtitles.get', {}).get('message', {}).get('header', {}).get('status_code') == 200:
-                            try:
-                                sub_list = body['track.subtitles.get']['message']['body']['subtitle_list']
+            # 4. Ambil Synced Lyrics (LRC) menggunakan Exact ID
+            if commontrack_id:
+                try:
+                    params_sync = {
+                        'format': 'json',
+                        'commontrack_id': commontrack_id,
+                        'usertoken': self.token,
+                        'app_id': 'web-desktop-app-v1.0'
+                    }
+                    async with MX_LIMITER:
+                        async with session.get(self.API_URL + 'track.subtitle.get', params=params_sync, headers=self.headers, timeout=15) as r:
+                            data = await r.json(content_type=None)
+                            if data.get('message', {}).get('header', {}).get('status_code') == 200:
+                                sub_list = data['message']['body'].get('subtitle_list', [])
                                 if sub_list:
                                     synced = sub_list[0]['subtitle']['subtitle_body']
-                            except: pass
-            except:
-                pass
+                except Exception: pass
             
             return plain, synced
 
@@ -177,12 +248,12 @@ class LRCLibAPI:
             params_search = {'q': f"{title} {artist}"}
             data = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
             if data and isinstance(data, list) and len(data) > 0:
-                # --- PERBAIKAN LRCLIB: Validasi Nama Lagu ---
                 for item in data:
-                    res_title = item.get('trackName', '').lower()
-                    if title.lower() in res_title or res_title in title.lower():
+                    res_title = item.get('trackName', '')
+                    res_artist = item.get('artistName', '')
+                    
+                    if is_valid_match(title, res_title, artist, res_artist):
                         return item.get('plainLyrics'), item.get('syncedLyrics')
-                # --------------------------------------------
             
             return None, None
 
@@ -213,19 +284,17 @@ class GeniusAPI:
                             hits = data.get('response', {}).get('hits', [])
                             
                             if hits:
-                                # --- PERBAIKAN GENIUS: Validasi Nama Lagu ---
                                 for hit in hits:
                                     result = hit.get('result', {})
-                                    res_title = result.get('title', '').lower()
-                                    res_title_feat = result.get('title_with_featured', '').lower()
-                                    res_artist = result.get('artist_names', '').lower()
+                                    res_title = result.get('title', '')
+                                    res_title_feat = result.get('title_with_featured', '')
+                                    res_artist = result.get('artist_names', '')
                                     
-                                    # Pengecekan ketat (Strict Match)
-                                    if (title.lower() in res_title or title.lower() in res_title_feat) and \
-                                       (artist.lower() in res_artist or res_artist in artist.lower()):
+                                    # Pengecekan cerdas
+                                    if is_valid_match(title, res_title, artist, res_artist) or \
+                                       is_valid_match(title, res_title_feat, artist, res_artist):
                                         track_id = result.get('id')
                                         break
-                                # --------------------------------------------
             except Exception as e:
                 LOGGER.warning(f"Genius Search Error: {e}")
             
