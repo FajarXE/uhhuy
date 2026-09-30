@@ -12,8 +12,8 @@ LOGGER = logging.getLogger(__name__)
 # --- KONTROL RATE LIMIT (ANTI-BAN LYRICS API) ---
 MX_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 LRC_LIMITER = aiolimiter.AsyncLimiter(10, 5)
-# Batasi Genius lebih ketat (Max 2 request / 3 detik) agar aman saat download Album
-GENIUS_LIMITER = aiolimiter.AsyncLimiter(2, 3) 
+# Genius dibatasi menjadi 1 request per 1.5 detik agar aman saat download Album masif
+GENIUS_LIMITER = aiolimiter.AsyncLimiter(1, 1.5) 
 # ------------------------------------------------
 
 # =======================================================
@@ -59,81 +59,112 @@ class MusixmatchAPI:
             "Accept": "application/json"
         }
         self.token = None
+        self._token_lock = asyncio.Lock()
 
-    async def get_token(self, session):
-        try:
-            params = {"app_id": "mac-ios-v2.0"}
-            async with MX_LIMITER:
+    async def get_token(self, session, force_refresh=False):
+        # [PERBAIKAN] Kunci sesi agar jika 23 lagu meminta token secara bersamaan,
+        # hanya 1 lagu yang menghubungi server, sisanya akan memakai token yang sama.
+        async with self._token_lock:
+            if self.token and not force_refresh:
+                return self.token
+                
+            try:
+                params = {"app_id": "mac-ios-v2.0"}
                 async with session.get(self.API_URL + "token.get", params=params, headers=self.headers, timeout=15) as r:
                     data = await r.json(content_type=None)
                     if data.get('message', {}).get('header', {}).get('status_code') == 200:
-                        token = data['message']['body']['user_token']
-                        if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
-                            self.token = token
+                        tkn = data['message']['body']['user_token']
+                        if tkn and tkn != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
+                            self.token = tkn
+                            LOGGER.info("Musixmatch: Token berhasil diperbarui.")
                             return self.token
-        except Exception as e:
-            LOGGER.error(f"Musixmatch Token Error: {e}")
-        return None
+            except Exception as e:
+                LOGGER.error(f"Musixmatch Token Error: {e}")
+            return None
 
     async def get_lyrics(self, title, artist, album, duration=None):
         async with aiohttp.ClientSession() as session:
             if not self.token:
                 await self.get_token(session)
 
+            if not self.token:
+                return None, None
+
             plain = None
             synced = None
 
-            # [FIX] Mencegah parameter NoneType
-            params = {
-                "format": "json",
-                "namespace": "lyrics_richsynched",
-                "subtitle_format": "lrc",
-                "app_id": "mac-ios-v2.0",
-                "q_artist": artist or "",
-                "q_track": title or ""
-            }
-            if self.token:
-                params["usertoken"] = self.token
-            if album:
-                params["q_album"] = album
+            # [PERBAIKAN] Auto-Retry jika terkena limit atau token invalid (Status 401)
+            for attempt in range(2):
+                # Validasi or "" untuk mencegah Error NoneType bawaan aiohttp
+                params = {
+                    "format": "json",
+                    "namespace": "lyrics_richsynched",
+                    "subtitle_format": "lrc",
+                    "app_id": "mac-ios-v2.0",
+                    "q_artist": artist or "",
+                    "q_track": title or "",
+                    "usertoken": self.token
+                }
+                if album:
+                    params["q_album"] = album
 
-            try:
-                async with MX_LIMITER:
-                    async with session.get(self.API_URL + "macro.subtitles.get", params=params, headers=self.headers, timeout=15) as r:
-                        data = await r.json(content_type=None)
-                        
-                        body = data.get("message", {}).get("body", {})
-                        if not isinstance(body, dict): body = {}
-                        
-                        macro_calls = body.get("macro_calls", {})
-                        
-                        # [FIX] Mengamankan parsing list vs dict
-                        if isinstance(macro_calls, dict):
-                            # 1. Parsing Plain Lyrics
+                try:
+                    async with MX_LIMITER:
+                        async with session.get(self.API_URL + "macro.subtitles.get", params=params, headers=self.headers, timeout=15) as r:
+                            data = await r.json(content_type=None)
+                            
+                            # Ekstraksi aman untuk mencegah Error 'list' object has no attribute 'get'
+                            msg = data.get("message", {})
+                            if not isinstance(msg, dict): msg = {}
+                            
+                            body = msg.get("body", {})
+                            if not isinstance(body, dict): body = {}
+                            
+                            macro_calls = body.get("macro_calls", {})
+                            if not isinstance(macro_calls, dict): macro_calls = {}
+
                             lyrics_get = macro_calls.get("track.lyrics.get", {})
                             if isinstance(lyrics_get, dict):
-                                lyrics_msg = lyrics_get.get("message", {})
-                                if lyrics_msg.get("header", {}).get("status_code") == 200:
-                                    lyrics_body = lyrics_msg.get("body", {}).get("lyrics", {})
+                                l_header = lyrics_get.get("message", {}).get("header", {})
+                                status_code = l_header.get("status_code")
+                                
+                                # [PERBAIKAN] Regenerasi Token jika Kadaluarsa (401) seperti di main.py
+                                if status_code == 401:
+                                    LOGGER.warning(f"Musixmatch: Token Invalid (401) pada lagu '{title}'. Meregenerasi token...")
+                                    await self.get_token(session, force_refresh=True)
+                                    continue # Ulangi pencarian dengan token baru!
+
+                                if status_code == 200:
+                                    # 1. Parsing Plain Lyrics
+                                    lyrics_body = lyrics_get.get("message", {}).get("body", {}).get("lyrics", {})
                                     if lyrics_body.get("restricted"):
-                                        LOGGER.debug(f"Musixmatch: Lirik restricted untuk {title}")
+                                        pass
                                     elif lyrics_body.get("instrumental"):
                                         plain = "This song is instrumental.\nLet the music play..."
                                     else:
                                         plain = lyrics_body.get("lyrics_body")
 
-                            # 2. Parsing Synced LRC
-                            subs_get = macro_calls.get("track.subtitles.get", {})
-                            if isinstance(subs_get, dict):
-                                subs_msg = subs_get.get("message", {})
-                                if subs_msg.get("header", {}).get("status_code") == 200:
-                                    sub_list = subs_msg.get("body", {}).get("subtitle_list", [])
-                                    if sub_list and isinstance(sub_list, list):
-                                        synced = sub_list[0].get("subtitle", {}).get("subtitle_body")
-            except Exception as e:
-                LOGGER.warning(f"Musixmatch Lyrics Error: {e}")
+                                    # 2. Parsing Synced LRC
+                                    subs_get = macro_calls.get("track.subtitles.get", {})
+                                    if isinstance(subs_get, dict):
+                                        subs_msg = subs_get.get("message", {})
+                                        subs_header = subs_msg.get("header", {})
+                                        
+                                        # Syarat "available" sesuai referensi main.py
+                                        if subs_header.get("status_code") == 200 and subs_header.get("available") == 1:
+                                            sub_list = subs_msg.get("body", {}).get("subtitle_list", [])
+                                            if sub_list and isinstance(sub_list, list):
+                                                synced = sub_list[0].get("subtitle", {}).get("subtitle_body")
+                                                
+                                    return plain, synced
+                                    
+                        break # Jika sukses dan bukan 401, keluar dari loop
+                        
+                except Exception as e:
+                    LOGGER.warning(f"Musixmatch Lyrics Error: {e}")
+                    break
 
-            return plain, synced
+            return None, None
 
 
 class LRCLibAPI:
@@ -196,17 +227,18 @@ class GeniusAPI:
             'x-genius-android-version': '5.8.0'
         }
 
-    # [FIX] Sistem auto-retry saat server Genius memblokir karena Spam (Rate Limit)
+    # [PERBAIKAN] Mengamankan Rate Limit Genius dengan Exponential Backoff
     async def _fetch_with_retry(self, session, url, params):
-        for attempt in range(5): 
+        for attempt in range(4): 
             try:
                 async with GENIUS_LIMITER:
                     async with session.get(url, params=params, headers=self.headers, timeout=15) as r:
                         if r.status == 200:
                             return await r.json(content_type=None)
                         elif r.status in (429, 503):
-                            retry_after = int(r.headers.get('Retry-After', 5))
-                            LOGGER.warning(f"Genius Rate Limit 429 Terdeteksi! Menunggu {retry_after}s...")
+                            # Jika ditolak, mundurkan waktu tunggu progresif
+                            retry_after = int(r.headers.get('Retry-After', 3)) + (attempt * 2)
+                            LOGGER.warning(f"Genius Terkena Spam Limit ({r.status}). Menunggu {retry_after}s...")
                             await asyncio.sleep(retry_after)
                             continue
                         else:
