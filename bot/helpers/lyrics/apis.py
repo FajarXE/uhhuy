@@ -3,13 +3,9 @@
 import re
 import aiohttp
 import asyncio
-import uuid
-import hmac
-import base64
 import logging
 import aiolimiter
-from urllib.parse import urlencode
-from datetime import datetime
+# Tidak ada lagi uuid, hmac, base64, urlencode, dan datetime!
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +16,7 @@ GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 # ------------------------------------------------
 
 # =======================================================
-# FUNGSI VALIDASI CERDAS
+# FUNGSI VALIDASI CERDAS (STRICT MATCH)
 # =======================================================
 def clean_string(text):
     if not text: return ""
@@ -50,6 +46,7 @@ def is_valid_match(t1, t2, a1=None, a2=None):
 
 class MusixmatchAPI:
     def __init__(self):
+        # Menggunakan API Mobile iOS yang Bebas Signature
         self.API_URL = "https://apic-appmobile.musixmatch.com/ws/1.1/"
         self.headers = {
             "Host": "apic-appmobile.musixmatch.com",
@@ -61,13 +58,17 @@ class MusixmatchAPI:
             "Connection": "keep-alive",
             "Accept": "application/json"
         }
+        self.cookies = {'AWSELB': '0', 'AWSELBCORS': '0'}
         self.token = None
+
+    # Fungsi sign_request sudah DIMUSNAHKAN!
 
     async def get_token(self, session):
         try:
+            # Token request sangat sederhana berkat mac-ios-v2.0
             params = {"app_id": "mac-ios-v2.0"}
             async with MX_LIMITER:
-                async with session.get(self.API_URL + "token.get", params=params, headers=self.headers, timeout=15) as r:
+                async with session.get(self.API_URL + "token.get", params=params, headers=self.headers, cookies=self.cookies, timeout=15) as r:
                     data = await r.json(content_type=None)
                     if data.get('message', {}).get('header', {}).get('status_code') == 200:
                         token = data['message']['body']['user_token']
@@ -79,13 +80,14 @@ class MusixmatchAPI:
         return None
 
     async def get_lyrics(self, title, artist, album, duration=None):
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(cookies=self.cookies) as session:
             if not self.token:
                 await self.get_token(session)
 
             plain = None
             synced = None
 
+            # Langsung tebak dan ambil lirik dalam 1 request!
             params = {
                 "format": "json",
                 "namespace": "lyrics_richsynched",
@@ -104,6 +106,7 @@ class MusixmatchAPI:
                         data = await r.json(content_type=None)
                         macro_calls = data.get("message", {}).get("body", {}).get("macro_calls", {})
                         
+                        # Ambil Teks Biasa
                         lyrics_get = macro_calls.get("track.lyrics.get", {}).get("message", {})
                         if lyrics_get.get("header", {}).get("status_code") == 200:
                             lyrics_body = lyrics_get.get("body", {}).get("lyrics", {})
@@ -112,6 +115,7 @@ class MusixmatchAPI:
                             elif not lyrics_body.get("restricted"):
                                 plain = lyrics_body.get("lyrics_body")
 
+                        # Ambil Teks LRC (Synced)
                         subs_get = macro_calls.get("track.subtitles.get", {}).get("message", {})
                         if subs_get.get("header", {}).get("status_code") == 200:
                             sub_list = subs_get.get("body", {}).get("subtitle_list", [])
@@ -151,11 +155,13 @@ class LRCLibAPI:
 
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
+            # Coba ambil langsung jika durasi diketahui
             params = {'track_name': title, 'artist_name': artist, 'album_name': album, 'duration': duration}
             data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
             if data:
                 return data.get('plainLyrics'), data.get('syncedLyrics')
             
+            # Jika gagal, lakukan pencarian samar + filter pintar
             params_search = {'q': f"{title} {artist}"}
             data = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
             if data and isinstance(data, list) and len(data) > 0:
@@ -200,6 +206,7 @@ class GeniusAPI:
                                     res_title_feat = result.get('title_with_featured', '')
                                     res_artist = result.get('artist_names', '')
                                     
+                                    # Pengecekan cerdas
                                     if is_valid_match(title, res_title, artist, res_artist) or \
                                        is_valid_match(title, res_title_feat, artist, res_artist):
                                         track_id = result.get('id')
@@ -218,7 +225,6 @@ class GeniusAPI:
                             data = await r.json(content_type=None)
                             song_data = data.get('response', {}).get('song', {})
                             
-                            # --- PROTEKSI KETAT UNTUK GENIUS (Mencegah AttributeError) ---
                             lyrics_obj = song_data.get('lyrics')
                             if isinstance(lyrics_obj, dict):
                                 plain_lyrics = lyrics_obj.get('plain')
