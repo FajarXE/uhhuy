@@ -76,7 +76,6 @@ async def format_string(text: str, data: dict, user=None):
     release_date = safe_get('release_date')
     date = safe_get('date')
 
-    # Buat dictionary pemetaan (mapping)
     mapping = {
         '{title}': safe_get('title'),
         '{album}': safe_get('album'),
@@ -103,10 +102,7 @@ async def format_string(text: str, data: dict, user=None):
         mapping['{user}'] = user.get('name') or ''
         mapping['{username}'] = user.get('user_name') or ''
 
-    # Compile regex untuk mencocokkan semua key di dalam dictionary
     pattern = re.compile('|'.join(re.escape(k) for k in mapping.keys()))
-    
-    # Ganti seluruh kemunculan dalam satu sapuan O(N)
     return pattern.sub(lambda m: mapping[m.group(0)], text)
 
 
@@ -120,10 +116,8 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = N
     from .utils import get_readable_file_size, get_readable_time
     from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS, GLOBAL_STATE_LOCK
 
-    # --- [PERBAIKAN: MENGGUNAKAN VARIABEL SERVER] ---
     actual_limit = limit if limit else Config.MAX_WORKERS
     sem = asyncio.Semaphore(actual_limit)
-    # ------------------------------------------------
     
     total_tasks = len(tasks)
     completed_tasks = 0
@@ -151,12 +145,10 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = N
             LOGGER.warning("⚠️ 1 Lagu dilewati karena macet (Timeout > 10 Menit). Playlist dilanjutkan.")
             res = False
             
-        # --- [PERBAIKAN] TANGKAP SINYAL BATAL DAN TUTUP COROUTINE TELANTAR ---
         except asyncio.CancelledError:
             if hasattr(task, 'close'): 
                 task.close()
             raise
-        # ---------------------------------------------------------------------
         
         except Exception as e:
             LOGGER.error(f"Task Error di Concurrent: {e}")
@@ -275,7 +267,7 @@ async def create_link(path, basepath):
     return rclone_link, index_link
 
 
-# --- [FIX] OPTIMASI NATIVE SYSTEM ZIP UNTUK SPLIT ---
+# --- [FIX] OPTIMASI NATIVE SYSTEM ZIP & PATHING ABSOLUT ---
 async def zip_handler(folderpath):
     user_mode = bot_set.upload_mode
     try:
@@ -300,9 +292,10 @@ async def zip_handler(folderpath):
 
 
 async def split_zip_system(folderpath):
-    zip_path = f"{folderpath}.zip"
+    # [FIX] Merubah ke Absolute Path agar native OS Zip tidak crash karena root cwd yang keliru
+    zip_path = os.path.abspath(f"{folderpath}.zip")
     base_name = os.path.basename(folderpath)
-    parent_dir = os.path.dirname(folderpath)
+    parent_dir = os.path.abspath(os.path.dirname(folderpath))
     
     for f in os.listdir(parent_dir):
         if f == f"{base_name}.zip" or (f.startswith(f"{base_name}.z") and f.replace(f"{base_name}.z", "").isdigit()):
@@ -329,13 +322,12 @@ async def split_zip_system(folderpath):
                 process.wait()
             )
         except asyncio.CancelledError:
-            # --- BUNUH ZOMBIE PROCESS ZIP (PROTEKSI GANDA) ---
             try:
                 if process.returncode is None:
-                    process.terminate()          # Percobaan penghentian halus (SIGTERM)
-                    await asyncio.sleep(0.5)     # Beri jeda OS merespons
+                    process.terminate()
+                    await asyncio.sleep(0.5)
                     if process.returncode is None:
-                        process.kill()           # Penghentian paksa absolut (SIGKILL)
+                        process.kill()
                         LOGGER.warning("Proses ZIP dipaksa mati dengan SIGKILL (Zombie terdeteksi).")
             except Exception as kill_err:
                 LOGGER.error(f"Gagal menghentikan paksa proses zip: {kill_err}")
@@ -360,10 +352,12 @@ async def split_zip_system(folderpath):
 
 
 async def create_zip_system(folderpath):
-    zip_path = f"{folderpath}.zip"
+    # [FIX] Merubah ke Absolute Path
+    zip_path = os.path.abspath(f"{folderpath}.zip")
     if os.path.exists(zip_path): 
         try: os.remove(zip_path)
         except: pass
+        
     cmd = ["zip", "-r", "-0", zip_path, "."]
     try:
         process = await asyncio.create_subprocess_exec(
@@ -384,16 +378,14 @@ async def create_zip_system(folderpath):
                 process.wait()
             )
         except asyncio.CancelledError:
-            # --- BUNUH ZOMBIE PROCESS ZIP (PROTEKSI GANDA) ---
             try:
                 if process.returncode is None:
-                    process.terminate()          # Percobaan penghentian halus (SIGTERM)
-                    await asyncio.sleep(0.5)     # Beri jeda OS merespons
+                    process.terminate()
+                    await asyncio.sleep(0.5)
                     if process.returncode is None:
-                        process.kill()           # Penghentian paksa absolut (SIGKILL)
-                        LOGGER.warning("Proses ZIP dipaksa mati dengan SIGKILL (Zombie terdeteksi).")
+                        process.kill()
             except Exception as kill_err:
-                LOGGER.error(f"Gagal menghentikan paksa proses zip: {kill_err}")
+                pass
             raise
         
         if process.returncode == 0: return zip_path
@@ -569,7 +561,6 @@ def get_readable_file_size(size_in_bytes) -> str:
 
 
 async def cleanup(user=None, metadata=None, user_dict: dict=None):
-    # Memindahkan jeda waktu ke ruang asinkron agar tidak memblokir thread pool
     await asyncio.sleep(0.5)
     
     def _sync_cleanup():
