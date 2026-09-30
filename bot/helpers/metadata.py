@@ -944,21 +944,38 @@ async def _download_cover_with_headers(url: str, destination: str, proxy: str = 
         if client_proxy:
             get_kwargs['proxy'] = client_proxy
             
-        async with session.get(url, timeout=30, **get_kwargs) as resp:
-            if resp.status == 200:
-                import aiofiles
-                async with aiofiles.open(destination, 'wb') as f:
-                    await f.write(await resp.read())
-                if used_proxy:
-                    await proxy_manager.report_success(used_proxy)
-            else:
-                if used_proxy:
-                    await proxy_manager.report_fail(used_proxy)
-                LOGGER.error(f"Gagal download cover: HTTP {resp.status} | URL: {url}")
+        # --- [FIX] Tambahkan Mekanisme Retry & Chunking ---
+        for attempt in range(3):
+            try:
+                async with session.get(url, timeout=30, **get_kwargs) as resp:
+                    if resp.status == 200:
+                        import aiofiles
+                        async with aiofiles.open(destination, 'wb') as f:
+                            # Baca data per bagian (64KB) agar aman untuk gambar raksasa dan RAM
+                            async for chunk in resp.content.iter_chunked(1024 * 64):
+                                await f.write(chunk)
+                                
+                        if used_proxy:
+                            await proxy_manager.report_success(used_proxy)
+                            
+                        return  # Berhasil, keluar dari fungsi
+                    else:
+                        if used_proxy:
+                            await proxy_manager.report_fail(used_proxy)
+                        LOGGER.error(f"Gagal download cover: HTTP {resp.status} | URL: {url}")
+                        return  # HTTP Error (misal 404), tidak perlu diulang
+                        
+            except (aiohttp.ClientPayloadError, ConnectionResetError, asyncio.TimeoutError) as net_err:
+                LOGGER.warning(f"Koneksi terputus saat download cover (Percobaan {attempt + 1}/3): {net_err}")
+                await asyncio.sleep(2)  # Jeda 2 detik sebelum mencoba lagi
+            except Exception as e:
+                LOGGER.warning(f"Gagal download cover (Fatal) | URL: {url} | Error: {e}")
+                break  # Error jenis lain, hentikan retry
+                
     except Exception as e:
         if used_proxy:
             await proxy_manager.report_fail(used_proxy)
-        LOGGER.exception(f"Gagal download cover | URL: {url}")
+        LOGGER.error(f"Sistem gagal saat inisialisasi download cover: {e}")
 
 async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = None): 
     if not url: return './project-siesta.png'
