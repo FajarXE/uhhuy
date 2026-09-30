@@ -5,19 +5,16 @@ import aiohttp
 import asyncio
 import logging
 import aiolimiter
-# Tidak ada lagi uuid, hmac, base64, urlencode, dan datetime!
+from datetime import datetime
 
 LOGGER = logging.getLogger(__name__)
 
 # --- KONTROL RATE LIMIT (ANTI-BAN LYRICS API) ---
-MX_LIMITER = aiolimiter.AsyncLimiter(10, 5)
-LRC_LIMITER = aiolimiter.AsyncLimiter(10, 5)
-GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5) 
+MX_LIMITER = aiolimiter.AsyncLimiter(5, 5)
+LRC_LIMITER = aiolimiter.AsyncLimiter(5, 5)
+GENIUS_LIMITER = aiolimiter.AsyncLimiter(5, 5) 
 # ------------------------------------------------
 
-# =======================================================
-# FUNGSI VALIDASI CERDAS (STRICT MATCH)
-# =======================================================
 def clean_string(text):
     if not text: return ""
     text = str(text)
@@ -41,12 +38,10 @@ def is_valid_match(t1, t2, a1=None, a2=None):
         if ca1 and ca2:
             return (ca1 in ca2 or ca2 in ca1)
     return True
-# =======================================================
 
 
 class MusixmatchAPI:
     def __init__(self):
-        # Menggunakan API Mobile iOS yang Bebas Signature
         self.API_URL = "https://apic-appmobile.musixmatch.com/ws/1.1/"
         self.headers = {
             "Host": "apic-appmobile.musixmatch.com",
@@ -61,22 +56,35 @@ class MusixmatchAPI:
         self.cookies = {'AWSELB': '0', 'AWSELBCORS': '0'}
         self.token = None
 
-    # Fungsi sign_request sudah DIMUSNAHKAN!
+    async def _fetch_with_retry(self, session, endpoint, params):
+        # --- [PENGAMAN UTAMA] Mencegah aiohttp crash karena value 'None' ---
+        clean_params = {k: v for k, v in params.items() if v is not None}
+        
+        for attempt in range(4):
+            try:
+                async with MX_LIMITER:
+                    async with session.get(self.API_URL + endpoint, params=clean_params, headers=self.headers, cookies=self.cookies, timeout=15) as r:
+                        if r.status == 200:
+                            return await r.json(content_type=None)
+                        elif r.status in (429, 503):
+                            retry_after = int(r.headers.get('Retry-After', 5))
+                            await asyncio.sleep(retry_after)
+                            continue
+                        else:
+                            return None
+            except Exception as e:
+                LOGGER.debug(f"MX Error Fetch: {e}")
+                await asyncio.sleep(2)
+        return None
 
     async def get_token(self, session):
-        try:
-            # Token request sangat sederhana berkat mac-ios-v2.0
-            params = {"app_id": "mac-ios-v2.0"}
-            async with MX_LIMITER:
-                async with session.get(self.API_URL + "token.get", params=params, headers=self.headers, cookies=self.cookies, timeout=15) as r:
-                    data = await r.json(content_type=None)
-                    if data.get('message', {}).get('header', {}).get('status_code') == 200:
-                        token = data['message']['body']['user_token']
-                        if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
-                            self.token = token
-                            return self.token
-        except Exception as e:
-            LOGGER.error(f"Musixmatch Token Error: {e}")
+        params = {"app_id": "mac-ios-v2.0"}
+        data = await self._fetch_with_retry(session, "token.get", params)
+        if data and data.get('message', {}).get('header', {}).get('status_code') == 200:
+            token = data['message']['body']['user_token']
+            if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
+                self.token = token
+                return self.token
         return None
 
     async def get_lyrics(self, title, artist, album, duration=None):
@@ -86,43 +94,34 @@ class MusixmatchAPI:
 
             plain = None
             synced = None
-
-            # Langsung tebak dan ambil lirik dalam 1 request!
             params = {
                 "format": "json",
                 "namespace": "lyrics_richsynched",
                 "subtitle_format": "lrc",
                 "app_id": "mac-ios-v2.0",
-                "q_artist": artist,
-                "q_track": title,
-                "usertoken": self.token
+                "q_artist": artist or "",  # Fallback string kosong jika None
+                "q_track": title or "",
+                "usertoken": self.token or ""
             }
-            if album:
-                params["q_album"] = album
+            if album: params["q_album"] = album
 
-            try:
-                async with MX_LIMITER:
-                    async with session.get(self.API_URL + "macro.subtitles.get", params=params, headers=self.headers, timeout=15) as r:
-                        data = await r.json(content_type=None)
-                        macro_calls = data.get("message", {}).get("body", {}).get("macro_calls", {})
-                        
-                        # Ambil Teks Biasa
-                        lyrics_get = macro_calls.get("track.lyrics.get", {}).get("message", {})
-                        if lyrics_get.get("header", {}).get("status_code") == 200:
-                            lyrics_body = lyrics_get.get("body", {}).get("lyrics", {})
-                            if lyrics_body.get("instrumental"):
-                                plain = "This song is instrumental.\nLet the music play..."
-                            elif not lyrics_body.get("restricted"):
-                                plain = lyrics_body.get("lyrics_body")
+            data = await self._fetch_with_retry(session, "macro.subtitles.get", params)
+            if data:
+                macro_calls = data.get("message", {}).get("body", {}).get("macro_calls", {})
+                
+                lyrics_get = macro_calls.get("track.lyrics.get", {}).get("message", {})
+                if lyrics_get.get("header", {}).get("status_code") == 200:
+                    lyrics_body = lyrics_get.get("body", {}).get("lyrics", {})
+                    if lyrics_body.get("instrumental"):
+                        plain = "This song is instrumental.\nLet the music play..."
+                    elif not lyrics_body.get("restricted"):
+                        plain = lyrics_body.get("lyrics_body")
 
-                        # Ambil Teks LRC (Synced)
-                        subs_get = macro_calls.get("track.subtitles.get", {}).get("message", {})
-                        if subs_get.get("header", {}).get("status_code") == 200:
-                            sub_list = subs_get.get("body", {}).get("subtitle_list", [])
-                            if sub_list:
-                                synced = sub_list[0].get("subtitle", {}).get("subtitle_body")
-            except Exception as e:
-                LOGGER.warning(f"Musixmatch Lyrics Error: {e}")
+                subs_get = macro_calls.get("track.subtitles.get", {}).get("message", {})
+                if subs_get.get("header", {}).get("status_code") == 200:
+                    sub_list = subs_get.get("body", {}).get("subtitle_list", [])
+                    if sub_list:
+                        synced = sub_list[0].get("subtitle", {}).get("subtitle_body")
 
             return plain, synced
 
@@ -133,10 +132,13 @@ class LRCLibAPI:
         self.headers = {'User-Agent': 'BotMusic/1.0'}
 
     async def _fetch_with_retry(self, session, url, params):
-        for attempt in range(3): 
+        # --- [PENGAMAN UTAMA] Mencegah aiohttp crash karena value 'None' ---
+        clean_params = {k: v for k, v in params.items() if v is not None}
+        
+        for attempt in range(4): 
             try:
                 async with LRC_LIMITER:
-                    async with session.get(url, params=params, headers=self.headers, timeout=15) as r:
+                    async with session.get(url, params=clean_params, headers=self.headers, timeout=15) as r:
                         if r.status == 200:
                             return await r.json(content_type=None)
                         elif r.status in (429, 503):
@@ -149,20 +151,18 @@ class LRCLibAPI:
                         else:
                             return None
             except Exception as e:
-                LOGGER.debug(f"LRCLib Fetch Error: {e}")
-                return None
+                LOGGER.debug(f"LRCLib Error Fetch: {e}")
+                await asyncio.sleep(2)
         return None
 
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
-            # Coba ambil langsung jika durasi diketahui
-            params = {'track_name': title, 'artist_name': artist, 'album_name': album, 'duration': duration}
+            params = {'track_name': title or "", 'artist_name': artist or "", 'album_name': album or "", 'duration': duration}
             data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
             if data:
                 return data.get('plainLyrics'), data.get('syncedLyrics')
             
-            # Jika gagal, lakukan pencarian samar + filter pintar
-            params_search = {'q': f"{title} {artist}"}
+            params_search = {'q': f"{title or ''} {artist or ''}".strip()}
             data = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
             if data and isinstance(data, list) and len(data) > 0:
                 for item in data:
@@ -186,53 +186,55 @@ class GeniusAPI:
             'x-genius-android-version': '5.8.0'
         }
 
+    async def _fetch_with_retry(self, session, endpoint, params):
+        # --- [PENGAMAN UTAMA] Mencegah aiohttp crash karena value 'None' ---
+        clean_params = {k: v for k, v in params.items() if v is not None}
+        
+        for attempt in range(4): 
+            try:
+                async with GENIUS_LIMITER:
+                    async with session.get(self.API_URL + endpoint, params=clean_params, headers=self.headers, timeout=15) as r:
+                        if r.status == 200:
+                            return await r.json(content_type=None)
+                        elif r.status in (429, 503):
+                            retry_after = int(r.headers.get('Retry-After', 5))
+                            LOGGER.warning(f"Genius Rate Limit {r.status}. Retrying in {retry_after}s...")
+                            await asyncio.sleep(retry_after)
+                            continue
+                        else:
+                            return None
+            except Exception as e:
+                LOGGER.debug(f"Genius Error Fetch: {e}")
+                await asyncio.sleep(2)
+        return None
+
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
             track_id = None
-            search_query = f"{artist} {title}"
+            search_query = f"{artist or ''} {title or ''}".strip()
             
-            # 1. Search Track
-            try:
-                async with GENIUS_LIMITER:
-                    async with session.get(f'{self.API_URL}search', params={'q': search_query}, headers=self.headers, timeout=15) as r:
-                        if r.status == 200:
-                            data = await r.json(content_type=None)
-                            hits = data.get('response', {}).get('hits', [])
-                            
-                            if hits:
-                                for hit in hits:
-                                    result = hit.get('result', {})
-                                    res_title = result.get('title', '')
-                                    res_title_feat = result.get('title_with_featured', '')
-                                    res_artist = result.get('artist_names', '')
-                                    
-                                    # Pengecekan cerdas
-                                    if is_valid_match(title, res_title, artist, res_artist) or \
-                                       is_valid_match(title, res_title_feat, artist, res_artist):
-                                        track_id = result.get('id')
-                                        break
-            except Exception as e:
-                LOGGER.warning(f"Genius Search Error: {e}")
+            data = await self._fetch_with_retry(session, 'search', {'q': search_query})
+            if data:
+                hits = data.get('response', {}).get('hits', [])
+                if hits:
+                    for hit in hits:
+                        result = hit.get('result', {})
+                        res_title = result.get('title', '')
+                        res_title_feat = result.get('title_with_featured', '')
+                        res_artist = result.get('artist_names', '')
+                        
+                        if is_valid_match(title, res_title, artist, res_artist) or \
+                           is_valid_match(title, res_title_feat, artist, res_artist):
+                            track_id = result.get('id')
+                            break
             
             if not track_id:
                 return None, None
                 
-            # 2. Get Lyrics
-            try:
-                async with GENIUS_LIMITER:
-                    async with session.get(f'{self.API_URL}songs/{track_id}', params={'text_format': 'plain'}, headers=self.headers, timeout=15) as r:
-                        if r.status == 200:
-                            data = await r.json(content_type=None)
-                            song_data = data.get('response', {}).get('song', {})
-                            
-                            lyrics_obj = song_data.get('lyrics')
-                            if isinstance(lyrics_obj, dict):
-                                plain_lyrics = lyrics_obj.get('plain')
-                            else:
-                                plain_lyrics = None
-                                
-                            return plain_lyrics, None 
-            except Exception as e:
-                LOGGER.warning(f"Genius Lyrics Error: {e}")
+            song_data = await self._fetch_with_retry(session, f'songs/{track_id}', {'text_format': 'plain'})
+            if song_data:
+                lyrics_obj = song_data.get('response', {}).get('song', {}).get('lyrics')
+                if isinstance(lyrics_obj, dict):
+                    return lyrics_obj.get('plain'), None 
             
             return None, None
