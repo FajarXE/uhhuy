@@ -171,6 +171,7 @@ class MusixmatchAPI:
 class LRCLibAPI:
     def __init__(self):
         self.base_url = 'https://lrclib.net/api'
+        # Menggunakan User-Agent yang lebih menyerupai browser/aplikasi asli seperti di referensi
         self.headers = {'User-Agent': 'BotMusic/1.0'}
 
     async def _fetch_with_retry(self, session, url, params):
@@ -181,7 +182,11 @@ class LRCLibAPI:
                         if r.status == 200:
                             return await r.json(content_type=None)
                         elif r.status in (429, 503):
-                            retry_after = int(r.headers.get('Retry-After', 5))
+                            # [FIX] Aman dari error ValueError jika header Retry-After bukan angka
+                            try:
+                                retry_after = int(r.headers.get('Retry-After', 5))
+                            except ValueError:
+                                retry_after = 5
                             LOGGER.warning(f"LRCLib Rate Limit {r.status}. Retrying in {retry_after}s...")
                             await asyncio.sleep(retry_after)
                             continue
@@ -196,20 +201,33 @@ class LRCLibAPI:
 
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
-            # --- Try Cached (/get) ---
-            params = {'track_name': title, 'artist_name': artist, 'album_name': album, 'duration': duration}
+            # --- 1. [FIX] SUSUN PARAMETER SECARA DINAMIS (Seperti Referensi) ---
+            params = {'track_name': title, 'artist_name': artist}
+            
+            # Hanya masukkan album jika string-nya tidak kosong
+            if album:
+                params['album_name'] = album
+                
+            # Hanya masukkan durasi jika lebih dari 0 detik (menghindari error default 0 dari manager)
+            if duration and int(duration) > 0:
+                params['duration'] = str(duration)
+
+            # --- 2. COBA EXACT MATCH (/get) ---
             data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
             if data:
                 return data.get('plainLyrics'), data.get('syncedLyrics')
             
-            # --- Try Search (/search) ---
-            params_search = {'q': f"{title} {artist}"}
-            data = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
-            if data and isinstance(data, list) and len(data) > 0:
-                for item in data:
+            # --- 3. [FIX] COBA SEARCH FALLBACK (/search) ---
+            # Jangan gunakan parameter 'q', gunakan parameter spesifik seperti referensi
+            search_params = {'track_name': title, 'artist_name': artist}
+            data_list = await self._fetch_with_retry(session, f'{self.base_url}/search', search_params)
+            
+            if data_list and isinstance(data_list, list) and len(data_list) > 0:
+                for item in data_list:
                     res_title = item.get('trackName', '')
                     res_artist = item.get('artistName', '')
                     
+                    # Tetap gunakan fungsi validasi Anda untuk memastikan kecocokan
                     if is_valid_match(title, res_title, artist, res_artist):
                         return item.get('plainLyrics'), item.get('syncedLyrics')
             
