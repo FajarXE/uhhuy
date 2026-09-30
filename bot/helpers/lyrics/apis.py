@@ -246,47 +246,61 @@ class GeniusAPI:
             'x-genius-android-version': '5.8.0'
         }
 
+    async def _fetch_with_retry(self, session, endpoint, params):
+        # Mengadaptasi sistem HTTPAdapter max_retries=10 dari referensi
+        for attempt in range(5):
+            try:
+                async with GENIUS_LIMITER:
+                    async with session.get(f'{self.API_URL}{endpoint}', params=params, headers=self.headers, timeout=15) as r:
+                        if r.status in [200, 201, 202]:
+                            data = await r.json(content_type=None)
+                            if data.get('meta', {}).get('status') == 200:
+                                return data.get('response')
+                            return None
+                        
+                        # Menangkap status forcelist (429, 500, 502, 503, 504) seperti referensi
+                        elif r.status in [429, 500, 502, 503, 504]:
+                            delay = 0.4 * (2 ** attempt) # Backoff factor
+                            LOGGER.warning(f"Genius API {r.status}. Retrying in {delay}s...")
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            return None
+            except Exception as e:
+                LOGGER.debug(f"Genius Fetch Error: {e}")
+                await asyncio.sleep(0.4 * (2 ** attempt))
+        return None
+
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
             track_id = None
             
-            # 1. Search Track
+            # 1. Search Track (Mengikuti kueri pencarian dari interface_2.py)
             search_query = f"{artist} {title}"
-            try:
-                async with GENIUS_LIMITER:
-                    async with session.get(f'{self.API_URL}search', params={'q': search_query}, headers=self.headers, timeout=15) as r:
-                        if r.status == 200:
-                            data = await r.json(content_type=None)
-                            hits = data.get('response', {}).get('hits', [])
-                            
-                            if hits:
-                                for hit in hits:
-                                    result = hit.get('result', {})
-                                    res_title = result.get('title', '')
-                                    res_title_feat = result.get('title_with_featured', '')
-                                    res_artist = result.get('artist_names', '')
-                                    
-                                    # Pengecekan cerdas
-                                    if is_valid_match(title, res_title, artist, res_artist) or \
-                                       is_valid_match(title, res_title_feat, artist, res_artist):
-                                        track_id = result.get('id')
-                                        break
-            except Exception as e:
-                LOGGER.warning(f"Genius Search Error: {e}")
+            response = await self._fetch_with_retry(session, 'search', {'q': search_query})
             
+            if response and 'hits' in response:
+                for hit in response['hits']:
+                    result = hit.get('result', {})
+                    res_title = result.get('title', '')
+                    res_title_feat = result.get('title_with_featured', '')
+                    res_artist = result.get('artist_names', '')
+                    
+                    if is_valid_match(title, res_title, artist, res_artist) or \
+                       is_valid_match(title, res_title_feat, artist, res_artist):
+                        track_id = result.get('id')
+                        break
+                        
             if not track_id:
                 return None, None
                 
-            # 2. Get Lyrics
-            try:
-                async with GENIUS_LIMITER:
-                    async with session.get(f'{self.API_URL}songs/{track_id}', params={'text_format': 'plain'}, headers=self.headers, timeout=15) as r:
-                        if r.status == 200:
-                            data = await r.json(content_type=None)
-                            song_data = data.get('response', {}).get('song', {})
-                            plain_lyrics = song_data.get('lyrics', {}).get('plain')
-                            return plain_lyrics, None 
-            except Exception as e:
-                LOGGER.warning(f"Genius Lyrics Error: {e}")
+            # 2. Get Lyrics (Mengikuti endpoint songs/{id} dari genius_api.py)
+            song_data = await self._fetch_with_retry(session, f'songs/{track_id}', {'text_format': 'plain'})
+            
+            if song_data and 'song' in song_data:
+                lyrics_data = song_data['song'].get('lyrics')
+                if lyrics_data:
+                    plain_lyrics = lyrics_data.get('plain')
+                    return plain_lyrics, None
             
             return None, None
