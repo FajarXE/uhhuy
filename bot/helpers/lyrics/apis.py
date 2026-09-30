@@ -46,7 +46,6 @@ def is_valid_match(t1, t2, a1=None, a2=None):
 
 class MusixmatchAPI:
     def __init__(self):
-        # Menggunakan Endpoint API Mobile iOS yang Jauh Lebih Fleksibel
         self.API_URL = "https://apic-appmobile.musixmatch.com/ws/1.1/"
         self.headers = {
             "Host": "apic-appmobile.musixmatch.com",
@@ -59,56 +58,84 @@ class MusixmatchAPI:
             "Accept": "application/json"
         }
         self.token = None
+        # [FIX 1] Tambahkan Lock untuk mencegah Race Condition saat fetch token
+        self._token_lock = asyncio.Lock()
 
     async def get_token(self, session):
-        try:
-            params = {"app_id": "mac-ios-v2.0"}
-            async with MX_LIMITER:
-                async with session.get(self.API_URL + "token.get", params=params, headers=self.headers, timeout=15) as r:
-                    data = await r.json(content_type=None)
-                    if data.get('message', {}).get('header', {}).get('status_code') == 200:
-                        token = data['message']['body']['user_token']
-                        if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
-                            self.token = token
-                            return self.token
-        except Exception as e:
-            LOGGER.error(f"Musixmatch Token Error: {e}")
-        return None
+        # Gunakan Lock agar 23 proses lagu tidak menembak API token bersamaan
+        async with self._token_lock:
+            # Jika token sudah didapat oleh proses lagu pertama, lewati
+            if self.token:
+                return self.token
+                
+            try:
+                params = {"app_id": "mac-ios-v2.0"}
+                async with MX_LIMITER:
+                    async with session.get(self.API_URL + "token.get", params=params, headers=self.headers, timeout=15) as r:
+                        data = await r.json(content_type=None)
+                        
+                        # [FIX 2] Pastikan respons adalah Dictionary
+                        if isinstance(data, dict):
+                            if data.get('message', {}).get('header', {}).get('status_code') == 200:
+                                token = data['message']['body']['user_token']
+                                if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
+                                    self.token = token
+                                    LOGGER.info("Musixmatch: Token berhasil diperbarui.")
+                                    return self.token
+            except Exception as e:
+                LOGGER.error(f"Musixmatch Token Error: {e}")
+            return None
 
     async def get_lyrics(self, title, artist, album, duration=None):
+        # [FIX 3] Cegah params NoneType jika title atau artist tidak ada
+        if not title or not artist:
+            return None, None
+
         async with aiohttp.ClientSession() as session:
             if not self.token:
                 await self.get_token(session)
+                
+            # [FIX 4] Jika token TETAP None setelah dicoba, batalkan pencarian agar aiohttp tidak crash
+            if not self.token:
+                LOGGER.warning(f"Musixmatch: Lewati '{title}' karena gagal mendapatkan token.")
+                return None, None
 
             plain = None
             synced = None
 
-            # API Mobile mengizinkan kita melakukan pencarian dan pengambilan lirik sekaligus
+            # Pastikan semua dikonversi ke string agar aiohttp aman dari NoneType
             params = {
                 "format": "json",
                 "namespace": "lyrics_richsynched",
                 "subtitle_format": "lrc",
                 "app_id": "mac-ios-v2.0",
-                "q_artist": artist,
-                "q_track": title,
-                "usertoken": self.token
+                "q_artist": str(artist),
+                "q_track": str(title),
+                "usertoken": str(self.token)
             }
             if album:
-                params["q_album"] = album
+                params["q_album"] = str(album)
 
             try:
                 async with MX_LIMITER:
                     async with session.get(self.API_URL + "macro.subtitles.get", params=params, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
                         
+                        # [FIX 5] Cegah Error: 'list' object has no attribute 'get'
+                        if not isinstance(data, dict):
+                            LOGGER.debug(f"Musixmatch: Respons bukan JSON valid untuk '{title}'. (Rate Limit?)")
+                            return None, None
+                            
                         macro_calls = data.get("message", {}).get("body", {}).get("macro_calls", {})
+                        
+                        if not isinstance(macro_calls, dict):
+                            return None, None
                         
                         # 1. Parsing Plain Lyrics
                         lyrics_get = macro_calls.get("track.lyrics.get", {}).get("message", {})
                         if lyrics_get.get("header", {}).get("status_code") == 200:
                             lyrics_body = lyrics_get.get("body", {}).get("lyrics", {})
                             
-                            # Cek status lirik
                             if lyrics_body.get("restricted"):
                                 LOGGER.debug(f"Musixmatch: Lirik restricted untuk {title}")
                             elif lyrics_body.get("instrumental"):
@@ -120,10 +147,10 @@ class MusixmatchAPI:
                         subs_get = macro_calls.get("track.subtitles.get", {}).get("message", {})
                         if subs_get.get("header", {}).get("status_code") == 200:
                             sub_list = subs_get.get("body", {}).get("subtitle_list", [])
-                            if sub_list:
+                            if sub_list and isinstance(sub_list, list):
                                 synced = sub_list[0].get("subtitle", {}).get("subtitle_body")
             except Exception as e:
-                LOGGER.warning(f"Musixmatch Lyrics Error: {e}")
+                LOGGER.warning(f"Musixmatch Lyrics Error untuk '{title}': {e}")
 
             return plain, synced
 
