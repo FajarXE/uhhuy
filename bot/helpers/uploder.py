@@ -235,16 +235,9 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
     return None
 
 def handle_lyrics_files(folderpath, user_id):
-    # [PERBAIKAN] Mengatasi inkonsistensi tipe data ID (Int vs String) yang menyebabkan file dihapus paksa
-    user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
-    send_lyrics = user_settings.get('send_lyrics_file', False)
-    
-    if not send_lyrics and folderpath and os.path.exists(folderpath):
-        for root, dirs, files in os.walk(folderpath):
-            for file in files:
-                if file.lower().endswith(('.lrc', '.txt')):
-                    try: os.remove(os.path.join(root, file))
-                    except Exception as e: LOGGER.error(f"Gagal menghapus lirik {file}: {e}")
+    # [PERBAIKAN] Fungsi perusak file telah dilucuti sepenuhnya.
+    # Tidak akan ada lagi file lirik yang dihapus sebelum proses kompresi ZIP!
+    pass
 
 async def album_upload(metadata: dict, user: UserDetails):
     user_dict = user.copy()
