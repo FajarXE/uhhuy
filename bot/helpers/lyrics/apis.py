@@ -5,7 +5,6 @@ import aiohttp
 import asyncio
 import logging
 import aiolimiter
-from datetime import datetime
 
 LOGGER = logging.getLogger(__name__)
 
@@ -14,6 +13,18 @@ MX_LIMITER = aiolimiter.AsyncLimiter(5, 5)
 LRC_LIMITER = aiolimiter.AsyncLimiter(5, 5)
 GENIUS_LIMITER = aiolimiter.AsyncLimiter(5, 5) 
 # ------------------------------------------------
+
+# =======================================================
+# FUNGSI PENGAMAN TIPE DATA (ANTI-CRASH)
+# =======================================================
+def safe_dict(d):
+    """Memastikan data selalu berupa dictionary, bukan list atau None."""
+    return d if isinstance(d, dict) else {}
+    
+def safe_list(l):
+    """Memastikan data selalu berupa list, bukan dict atau None."""
+    return l if isinstance(l, list) else []
+# =======================================================
 
 def clean_string(text):
     if not text: return ""
@@ -57,9 +68,7 @@ class MusixmatchAPI:
         self.token = None
 
     async def _fetch_with_retry(self, session, endpoint, params):
-        # --- [PENGAMAN UTAMA] Mencegah aiohttp crash karena value 'None' ---
         clean_params = {k: v for k, v in params.items() if v is not None}
-        
         for attempt in range(4):
             try:
                 async with MX_LIMITER:
@@ -80,9 +89,16 @@ class MusixmatchAPI:
     async def get_token(self, session):
         params = {"app_id": "mac-ios-v2.0"}
         data = await self._fetch_with_retry(session, "token.get", params)
-        if data and data.get('message', {}).get('header', {}).get('status_code') == 200:
-            token = data['message']['body']['user_token']
-            if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
+        
+        # Pengecekan Kebal Error
+        data = safe_dict(data)
+        message = safe_dict(data.get('message'))
+        header = safe_dict(message.get('header'))
+        body = safe_dict(message.get('body'))
+        
+        if header.get('status_code') == 200:
+            token = body.get('user_token')
+            if token and token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
                 self.token = token
                 return self.token
         return None
@@ -99,29 +115,41 @@ class MusixmatchAPI:
                 "namespace": "lyrics_richsynched",
                 "subtitle_format": "lrc",
                 "app_id": "mac-ios-v2.0",
-                "q_artist": artist or "",  # Fallback string kosong jika None
+                "q_artist": artist or "",  
                 "q_track": title or "",
                 "usertoken": self.token or ""
             }
             if album: params["q_album"] = album
 
             data = await self._fetch_with_retry(session, "macro.subtitles.get", params)
-            if data:
-                macro_calls = data.get("message", {}).get("body", {}).get("macro_calls", {})
+            
+            # Pengecekan Kebal Error Berjenjang
+            data = safe_dict(data)
+            message = safe_dict(data.get("message"))
+            body = safe_dict(message.get("body"))
+            macro_calls = safe_dict(body.get("macro_calls"))
+            
+            # Cek Lirik Teks Biasa
+            lyrics_get = safe_dict(macro_calls.get("track.lyrics.get"))
+            lyrics_msg = safe_dict(lyrics_get.get("message"))
+            if safe_dict(lyrics_msg.get("header")).get("status_code") == 200:
+                lyrics_body = safe_dict(lyrics_msg.get("body")).get("lyrics")
+                lyrics_body = safe_dict(lyrics_body)
                 
-                lyrics_get = macro_calls.get("track.lyrics.get", {}).get("message", {})
-                if lyrics_get.get("header", {}).get("status_code") == 200:
-                    lyrics_body = lyrics_get.get("body", {}).get("lyrics", {})
-                    if lyrics_body.get("instrumental"):
-                        plain = "This song is instrumental.\nLet the music play..."
-                    elif not lyrics_body.get("restricted"):
-                        plain = lyrics_body.get("lyrics_body")
+                if lyrics_body.get("instrumental"):
+                    plain = "This song is instrumental.\nLet the music play..."
+                elif not lyrics_body.get("restricted"):
+                    plain = lyrics_body.get("lyrics_body")
 
-                subs_get = macro_calls.get("track.subtitles.get", {}).get("message", {})
-                if subs_get.get("header", {}).get("status_code") == 200:
-                    sub_list = subs_get.get("body", {}).get("subtitle_list", [])
-                    if sub_list:
-                        synced = sub_list[0].get("subtitle", {}).get("subtitle_body")
+            # Cek Lirik LRC Tersinkronisasi
+            subs_get = safe_dict(macro_calls.get("track.subtitles.get"))
+            subs_msg = safe_dict(subs_get.get("message"))
+            if safe_dict(subs_msg.get("header")).get("status_code") == 200:
+                subs_body = safe_dict(subs_msg.get("body"))
+                sub_list = safe_list(subs_body.get("subtitle_list"))
+                if sub_list:
+                    first_sub = safe_dict(sub_list[0])
+                    synced = safe_dict(first_sub.get("subtitle")).get("subtitle_body")
 
             return plain, synced
 
@@ -132,9 +160,7 @@ class LRCLibAPI:
         self.headers = {'User-Agent': 'BotMusic/1.0'}
 
     async def _fetch_with_retry(self, session, url, params):
-        # --- [PENGAMAN UTAMA] Mencegah aiohttp crash karena value 'None' ---
         clean_params = {k: v for k, v in params.items() if v is not None}
-        
         for attempt in range(4): 
             try:
                 async with LRC_LIMITER:
@@ -158,18 +184,22 @@ class LRCLibAPI:
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
             params = {'track_name': title or "", 'artist_name': artist or "", 'album_name': album or "", 'duration': duration}
-            data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
-            if data:
-                return data.get('plainLyrics'), data.get('syncedLyrics')
+            
+            data_get = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
+            data_get = safe_dict(data_get)
+            if data_get and (data_get.get('plainLyrics') or data_get.get('syncedLyrics')):
+                return data_get.get('plainLyrics'), data_get.get('syncedLyrics')
             
             params_search = {'q': f"{title or ''} {artist or ''}".strip()}
-            data = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
-            if data and isinstance(data, list) and len(data) > 0:
-                for item in data:
-                    res_title = item.get('trackName', '')
-                    res_artist = item.get('artistName', '')
-                    if is_valid_match(title, res_title, artist, res_artist):
-                        return item.get('plainLyrics'), item.get('syncedLyrics')
+            data_search = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
+            data_search = safe_list(data_search)
+            
+            for item in data_search:
+                item = safe_dict(item)
+                res_title = item.get('trackName', '')
+                res_artist = item.get('artistName', '')
+                if is_valid_match(title, res_title, artist, res_artist):
+                    return item.get('plainLyrics'), item.get('syncedLyrics')
             
             return None, None
 
@@ -187,9 +217,7 @@ class GeniusAPI:
         }
 
     async def _fetch_with_retry(self, session, endpoint, params):
-        # --- [PENGAMAN UTAMA] Mencegah aiohttp crash karena value 'None' ---
         clean_params = {k: v for k, v in params.items() if v is not None}
-        
         for attempt in range(4): 
             try:
                 async with GENIUS_LIMITER:
@@ -214,27 +242,31 @@ class GeniusAPI:
             search_query = f"{artist or ''} {title or ''}".strip()
             
             data = await self._fetch_with_retry(session, 'search', {'q': search_query})
-            if data:
-                hits = data.get('response', {}).get('hits', [])
-                if hits:
-                    for hit in hits:
-                        result = hit.get('result', {})
-                        res_title = result.get('title', '')
-                        res_title_feat = result.get('title_with_featured', '')
-                        res_artist = result.get('artist_names', '')
-                        
-                        if is_valid_match(title, res_title, artist, res_artist) or \
-                           is_valid_match(title, res_title_feat, artist, res_artist):
-                            track_id = result.get('id')
-                            break
+            data = safe_dict(data)
+            
+            response = safe_dict(data.get('response'))
+            hits = safe_list(response.get('hits'))
+            
+            for hit in hits:
+                hit = safe_dict(hit)
+                result = safe_dict(hit.get('result'))
+                res_title = str(result.get('title', ''))
+                res_title_feat = str(result.get('title_with_featured', ''))
+                res_artist = str(result.get('artist_names', ''))
+                
+                if is_valid_match(title, res_title, artist, res_artist) or \
+                   is_valid_match(title, res_title_feat, artist, res_artist):
+                    track_id = result.get('id')
+                    break
             
             if not track_id:
                 return None, None
                 
             song_data = await self._fetch_with_retry(session, f'songs/{track_id}', {'text_format': 'plain'})
-            if song_data:
-                lyrics_obj = song_data.get('response', {}).get('song', {}).get('lyrics')
-                if isinstance(lyrics_obj, dict):
-                    return lyrics_obj.get('plain'), None 
+            song_data = safe_dict(song_data)
             
-            return None, None
+            s_response = safe_dict(song_data.get('response'))
+            song = safe_dict(s_response.get('song'))
+            lyrics_obj = safe_dict(song.get('lyrics'))
+            
+            return lyrics_obj.get('plain'), None 
