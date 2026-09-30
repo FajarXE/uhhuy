@@ -112,7 +112,7 @@ class VikingfilesStrategy(CloudStrategy):
 # ==========================================
 
 async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, mode: str):
-    user_id = user['user_id']  # Editor sekarang tahu bahwa 'user_id' memang valid ada di dalam 'user'
+    user_id = user['user_id'] 
     user_data = bot_set.user_data.get(user_id, {})
     mode = mode.title() if mode else 'Telegram'
     
@@ -176,12 +176,12 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         for attempt in range(3):
             try:
                 await strategy.prepare_folder(uploader, token, folder_name)
-                break # Sukses, keluar dari loop
+                break 
             except Exception as e:
                 if attempt == 2:
                     LOGGER.warning(f"{mode} Folder API gagal setelah 3x percobaan: {e}")
                 else:
-                    delay = 2 * (2 ** attempt) # 2s, 4s
+                    delay = 2 * (2 ** attempt)
                     LOGGER.warning(f"{mode} Folder API Error. Retry {attempt+1} dalam {delay}s...")
                     await asyncio.sleep(delay)
         
@@ -199,7 +199,7 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
             for attempt in range(3):
                 try:
                     res = await uploader.upload(filename, 0, details=details, **upload_kwargs)
-                    break # Sukses
+                    break 
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -207,19 +207,18 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
                         raise
                     
                     if attempt == 2:
-                        raise e # Lempar ke blok Exception utama di bawah jika sudah 3x gagal
+                        raise e 
                         
-                    delay = 2 * (2 ** attempt) # 2s, 4s
+                    delay = 2 * (2 ** attempt) 
                     LOGGER.warning(f"Upload {filename} gagal ({e}). Retry {attempt+1} dalam {delay}s...")
                     await asyncio.sleep(delay)
 
             if res: 
                 uploaded_links.append(list(res.values())[0])
 
-        # 5. Ekstraksi Hasil (Didelegasikan ke Strategy)
+        # 5. Ekstraksi Hasil
         return strategy.format_result(uploaded_links)
 
-    # --- PENANGANAN ERROR SPESIFIK & TRACEBACK ---
     except asyncio.TimeoutError:
         LOGGER.error(f"[UPLOAD TIMEOUT] Cloud API {mode} terlalu lambat merespons.")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> Request Timeout.", 'text')
@@ -230,14 +229,14 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         LOGGER.error(f"[UPLOAD KEY ERROR] Struktur respon API berubah: {e}")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> Respons API tidak terduga (Kehilangan key {e}).", 'text')
     except Exception as e:
-        # Menggunakan .exception() agar traceback penuh tercetak di log
         LOGGER.exception(f"[UPLOAD FATAL ERROR] Exception tidak terduga di Cloud Handler: {e}")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> {e}", 'text')
     
     return None
 
 def handle_lyrics_files(folderpath, user_id):
-    user_settings = bot_set.user_data.get(user_id, {})
+    # [PERBAIKAN] Mengatasi inkonsistensi tipe data ID (Int vs String) yang menyebabkan file dihapus paksa
+    user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
     send_lyrics = user_settings.get('send_lyrics_file', False)
     
     if not send_lyrics and folderpath and os.path.exists(folderpath):
@@ -250,7 +249,7 @@ def handle_lyrics_files(folderpath, user_id):
 async def album_upload(metadata: dict, user: UserDetails):
     user_dict = user.copy()
     user_id = user['user_id']
-    user_settings = bot_set.user_data.get(user_id, {})
+    user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
     _, is_zip, _, show_poster = fetch_zip_settings(user)
@@ -323,7 +322,7 @@ async def album_upload(metadata: dict, user: UserDetails):
 async def artist_upload(metadata: dict, user: UserDetails):
     user_dict = user.copy()
     user_id = user['user_id']
-    user_settings = bot_set.user_data.get(user_id, {})
+    user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
     _, _, is_zip, show_poster = fetch_zip_settings(user)
@@ -384,7 +383,7 @@ async def artist_upload(metadata: dict, user: UserDetails):
 
 async def playlist_upload(metadata: dict, user: UserDetails):
     user_id = user['user_id']
-    user_settings = bot_set.user_data.get(user_id, {})
+    user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
     user_mode = user_settings.get('upload_mode', 'Telegram')
     
     is_zip, _, _, show_poster = fetch_zip_settings(user)
@@ -457,7 +456,8 @@ async def playlist_upload(metadata: dict, user: UserDetails):
     await cleanup(None, metadata, user)
 
 async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = False):
-    user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', bot_set.upload_mode)
+    user_settings = bot_set.user_data.get(user['user_id']) or bot_set.user_data.get(str(user['user_id'])) or {}
+    user_mode = user_settings.get('upload_mode', bot_set.upload_mode)
     upload_success = False
     
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
@@ -468,7 +468,6 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
             await send_message(user, caption, 'text')
             upload_success = True
             
-            # --- [FIX SILENT ERROR] Retry Hapus File ---
             await asyncio.sleep(0.5)
             for _ in range(3):
                 try:
@@ -479,7 +478,6 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
                 except Exception as e: 
                     LOGGER.debug(f"Gagal menghapus file lokal: {e}")
                     break
-            # -------------------------------------------
             return 
 
     if not upload_success:
@@ -489,7 +487,6 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
             rclone_link, index_link = await rclone_upload(user, metadata['filepath'])
             if not disable_link: await post_simple_message(user, metadata, rclone_link, index_link)
             
-    # --- [FIX SILENT ERROR] Retry Hapus File Default ---
     await asyncio.sleep(0.5)
     for _ in range(3):
         try:
@@ -500,7 +497,6 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
         except Exception as e: 
             LOGGER.debug(f"Gagal menghapus file lokal default: {e}")
             break
-    # ---------------------------------------------------
 
 async def rclone_upload(user: UserDetails, realpath):
     path_to_upload = realpath
@@ -528,12 +524,11 @@ async def rclone_upload(user: UserDetails, realpath):
             process.wait()
         )
     except asyncio.CancelledError:
-        # --- BUNUH ZOMBIE PROCESS RCLONE ---
         try:
             process.terminate()
         except Exception:
             pass
-        raise # Lempar kembali error ke fungsi pemanggil agar antrean dibersihkan
+        raise 
     
     r_link, i_link = await create_link(realpath, base_path)
     return r_link, i_link
@@ -578,7 +573,7 @@ async def telegram_upload(track: dict, user: UserDetails, batch_mode: bool = Fal
             
         await send_message(user, filepath, media_type, meta=meta, progress=tg_progress_callback, progress_args=(details,))
 
-        user_settings = bot_set.user_data.get(user['user_id'], {})
+        user_settings = bot_set.user_data.get(user['user_id']) or bot_set.user_data.get(str(user['user_id'])) or {}
         if user_settings.get('send_lyrics_file', False):
             base_path = os.path.splitext(filepath)[0]
             for ext in ['.lrc', '.txt']:
@@ -590,7 +585,6 @@ async def telegram_upload(track: dict, user: UserDetails, batch_mode: bool = Fal
         LOGGER.error(f"[UPLOAD ERROR] File tidak ada: {e}")
         raise e
     except Exception as e:
-        # [FIX] Jangan ditelan! Cetak hirarki lengkapnya
         LOGGER.exception(f"[UPLOAD ERROR] send_message failed for {filepath}:")
         raise e
 
@@ -619,5 +613,4 @@ async def batch_telegram_upload(metadata: dict, user: UserDetails):
         except FileNotFoundError:
             pass
         except Exception as e:
-            # [FIX]
             LOGGER.exception("Gagal mengunggah track dalam mode batch:")
