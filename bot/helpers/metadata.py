@@ -348,7 +348,7 @@ async def set_metadata(metadata:dict, user_id: int = None):
                         
                     # 2. Buat file lirik terpisah (Hanya jika Send Lyrics File: ON)
                     if send_file_lyrics:
-                        ext = ".lrc" if "[00:" in lyrics_text else ".txt"
+                        ext = ".lrc"
                         base_path = os.path.splitext(audio_path)[0]
                         lyrics_file_path = f"{base_path}{ext}"
                         
