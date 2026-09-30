@@ -58,13 +58,10 @@ class MusixmatchAPI:
             "Accept": "application/json"
         }
         self.token = None
-        # [FIX 1] Tambahkan Lock untuk mencegah Race Condition saat fetch token
         self._token_lock = asyncio.Lock()
 
     async def get_token(self, session):
-        # Gunakan Lock agar 23 proses lagu tidak menembak API token bersamaan
         async with self._token_lock:
-            # Jika token sudah didapat oleh proses lagu pertama, lewati
             if self.token:
                 return self.token
                 
@@ -74,20 +71,24 @@ class MusixmatchAPI:
                     async with session.get(self.API_URL + "token.get", params=params, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
                         
-                        # [FIX 2] Pastikan respons adalah Dictionary
+                        # Validasi mendalam untuk Token
                         if isinstance(data, dict):
-                            if data.get('message', {}).get('header', {}).get('status_code') == 200:
-                                token = data['message']['body']['user_token']
-                                if token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
-                                    self.token = token
-                                    LOGGER.info("Musixmatch: Token berhasil diperbarui.")
-                                    return self.token
+                            msg = data.get('message')
+                            if isinstance(msg, dict):
+                                header = msg.get('header', {})
+                                if isinstance(header, dict) and header.get('status_code') == 200:
+                                    body = msg.get('body', {})
+                                    if isinstance(body, dict):
+                                        token = body.get('user_token')
+                                        if token and token != 'UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly':
+                                            self.token = token
+                                            LOGGER.info("Musixmatch: Token berhasil diperbarui.")
+                                            return self.token
             except Exception as e:
                 LOGGER.error(f"Musixmatch Token Error: {e}")
             return None
 
     async def get_lyrics(self, title, artist, album, duration=None):
-        # [FIX 3] Cegah params NoneType jika title atau artist tidak ada
         if not title or not artist:
             return None, None
 
@@ -95,7 +96,6 @@ class MusixmatchAPI:
             if not self.token:
                 await self.get_token(session)
                 
-            # [FIX 4] Jika token TETAP None setelah dicoba, batalkan pencarian agar aiohttp tidak crash
             if not self.token:
                 LOGGER.warning(f"Musixmatch: Lewati '{title}' karena gagal mendapatkan token.")
                 return None, None
@@ -103,7 +103,6 @@ class MusixmatchAPI:
             plain = None
             synced = None
 
-            # Pastikan semua dikonversi ke string agar aiohttp aman dari NoneType
             params = {
                 "format": "json",
                 "namespace": "lyrics_richsynched",
@@ -121,34 +120,48 @@ class MusixmatchAPI:
                     async with session.get(self.API_URL + "macro.subtitles.get", params=params, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
                         
-                        # [FIX 5] Cegah Error: 'list' object has no attribute 'get'
-                        if not isinstance(data, dict):
-                            LOGGER.debug(f"Musixmatch: Respons bukan JSON valid untuk '{title}'. (Rate Limit?)")
-                            return None, None
-                            
-                        macro_calls = data.get("message", {}).get("body", {}).get("macro_calls", {})
+                        # 0. Validasi Lapis demi Lapis untuk mencegah List Object Error
+                        if not isinstance(data, dict): return None, None
                         
-                        if not isinstance(macro_calls, dict):
-                            return None, None
+                        message = data.get("message")
+                        if not isinstance(message, dict): return None, None
                         
-                        # 1. Parsing Plain Lyrics
-                        lyrics_get = macro_calls.get("track.lyrics.get", {}).get("message", {})
-                        if lyrics_get.get("header", {}).get("status_code") == 200:
-                            lyrics_body = lyrics_get.get("body", {}).get("lyrics", {})
-                            
-                            if lyrics_body.get("restricted"):
-                                LOGGER.debug(f"Musixmatch: Lirik restricted untuk {title}")
-                            elif lyrics_body.get("instrumental"):
-                                plain = "This song is instrumental.\nLet the music play..."
-                            else:
-                                plain = lyrics_body.get("lyrics_body")
+                        body = message.get("body")
+                        if not isinstance(body, dict): return None, None
+                        
+                        macro_calls = body.get("macro_calls")
+                        if not isinstance(macro_calls, dict): return None, None
+                        
+                        # 1. Parsing Plain Lyrics secara aman
+                        track_lyrics = macro_calls.get("track.lyrics.get")
+                        if isinstance(track_lyrics, dict):
+                            tl_msg = track_lyrics.get("message")
+                            if isinstance(tl_msg, dict) and tl_msg.get("header", {}).get("status_code") == 200:
+                                tl_body = tl_msg.get("body")
+                                if isinstance(tl_body, dict):
+                                    lyrics = tl_body.get("lyrics")
+                                    if isinstance(lyrics, dict):
+                                        if lyrics.get("restricted"):
+                                            LOGGER.debug(f"Musixmatch: Lirik restricted untuk {title}")
+                                        elif lyrics.get("instrumental"):
+                                            plain = "This song is instrumental.\nLet the music play..."
+                                        else:
+                                            plain = lyrics.get("lyrics_body")
 
-                        # 2. Parsing Synced LRC
-                        subs_get = macro_calls.get("track.subtitles.get", {}).get("message", {})
-                        if subs_get.get("header", {}).get("status_code") == 200:
-                            sub_list = subs_get.get("body", {}).get("subtitle_list", [])
-                            if sub_list and isinstance(sub_list, list):
-                                synced = sub_list[0].get("subtitle", {}).get("subtitle_body")
+                        # 2. Parsing Synced LRC secara aman
+                        track_subs = macro_calls.get("track.subtitles.get")
+                        if isinstance(track_subs, dict):
+                            ts_msg = track_subs.get("message")
+                            if isinstance(ts_msg, dict) and ts_msg.get("header", {}).get("status_code") == 200:
+                                ts_body = ts_msg.get("body")
+                                if isinstance(ts_body, dict):
+                                    sub_list = ts_body.get("subtitle_list")
+                                    if isinstance(sub_list, list) and len(sub_list) > 0:
+                                        first_sub = sub_list[0]
+                                        if isinstance(first_sub, dict):
+                                            subtitle = first_sub.get("subtitle")
+                                            if isinstance(subtitle, dict):
+                                                synced = subtitle.get("subtitle_body")
             except Exception as e:
                 LOGGER.warning(f"Musixmatch Lyrics Error untuk '{title}': {e}")
 
