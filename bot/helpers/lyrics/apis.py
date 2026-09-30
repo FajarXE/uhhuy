@@ -3,8 +3,12 @@
 import re
 import aiohttp
 import asyncio
+import uuid
+import hmac
+import base64
 import logging
 import aiolimiter
+from urllib.parse import urlencode
 from datetime import datetime
 
 LOGGER = logging.getLogger(__name__)
@@ -16,7 +20,7 @@ GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 # ------------------------------------------------
 
 # =======================================================
-# FUNGSI VALIDASI CERDAS UNTUK LRCLIB & GENIUS
+# FUNGSI VALIDASI CERDAS
 # =======================================================
 def clean_string(text):
     if not text: return ""
@@ -46,7 +50,6 @@ def is_valid_match(t1, t2, a1=None, a2=None):
 
 class MusixmatchAPI:
     def __init__(self):
-        # Menggunakan Endpoint API Mobile iOS yang Jauh Lebih Fleksibel
         self.API_URL = "https://apic-appmobile.musixmatch.com/ws/1.1/"
         self.headers = {
             "Host": "apic-appmobile.musixmatch.com",
@@ -83,7 +86,6 @@ class MusixmatchAPI:
             plain = None
             synced = None
 
-            # API Mobile mengizinkan kita melakukan pencarian dan pengambilan lirik sekaligus
             params = {
                 "format": "json",
                 "namespace": "lyrics_richsynched",
@@ -100,23 +102,16 @@ class MusixmatchAPI:
                 async with MX_LIMITER:
                     async with session.get(self.API_URL + "macro.subtitles.get", params=params, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
-                        
                         macro_calls = data.get("message", {}).get("body", {}).get("macro_calls", {})
                         
-                        # 1. Parsing Plain Lyrics
                         lyrics_get = macro_calls.get("track.lyrics.get", {}).get("message", {})
                         if lyrics_get.get("header", {}).get("status_code") == 200:
                             lyrics_body = lyrics_get.get("body", {}).get("lyrics", {})
-                            
-                            # Cek status lirik
-                            if lyrics_body.get("restricted"):
-                                LOGGER.debug(f"Musixmatch: Lirik restricted untuk {title}")
-                            elif lyrics_body.get("instrumental"):
+                            if lyrics_body.get("instrumental"):
                                 plain = "This song is instrumental.\nLet the music play..."
-                            else:
+                            elif not lyrics_body.get("restricted"):
                                 plain = lyrics_body.get("lyrics_body")
 
-                        # 2. Parsing Synced LRC
                         subs_get = macro_calls.get("track.subtitles.get", {}).get("message", {})
                         if subs_get.get("header", {}).get("status_code") == 200:
                             sub_list = subs_get.get("body", {}).get("subtitle_list", [])
@@ -156,20 +151,17 @@ class LRCLibAPI:
 
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
-            # --- Try Cached (/get) ---
             params = {'track_name': title, 'artist_name': artist, 'album_name': album, 'duration': duration}
             data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
             if data:
                 return data.get('plainLyrics'), data.get('syncedLyrics')
             
-            # --- Try Search (/search) ---
             params_search = {'q': f"{title} {artist}"}
             data = await self._fetch_with_retry(session, f'{self.base_url}/search', params_search)
             if data and isinstance(data, list) and len(data) > 0:
                 for item in data:
                     res_title = item.get('trackName', '')
                     res_artist = item.get('artistName', '')
-                    
                     if is_valid_match(title, res_title, artist, res_artist):
                         return item.get('plainLyrics'), item.get('syncedLyrics')
             
@@ -191,9 +183,9 @@ class GeniusAPI:
     async def get_lyrics(self, title, artist, album, duration):
         async with aiohttp.ClientSession() as session:
             track_id = None
+            search_query = f"{artist} {title}"
             
             # 1. Search Track
-            search_query = f"{artist} {title}"
             try:
                 async with GENIUS_LIMITER:
                     async with session.get(f'{self.API_URL}search', params={'q': search_query}, headers=self.headers, timeout=15) as r:
@@ -208,7 +200,6 @@ class GeniusAPI:
                                     res_title_feat = result.get('title_with_featured', '')
                                     res_artist = result.get('artist_names', '')
                                     
-                                    # Pengecekan cerdas
                                     if is_valid_match(title, res_title, artist, res_artist) or \
                                        is_valid_match(title, res_title_feat, artist, res_artist):
                                         track_id = result.get('id')
@@ -226,7 +217,14 @@ class GeniusAPI:
                         if r.status == 200:
                             data = await r.json(content_type=None)
                             song_data = data.get('response', {}).get('song', {})
-                            plain_lyrics = song_data.get('lyrics', {}).get('plain')
+                            
+                            # --- PROTEKSI KETAT UNTUK GENIUS (Mencegah AttributeError) ---
+                            lyrics_obj = song_data.get('lyrics')
+                            if isinstance(lyrics_obj, dict):
+                                plain_lyrics = lyrics_obj.get('plain')
+                            else:
+                                plain_lyrics = None
+                                
                             return plain_lyrics, None 
             except Exception as e:
                 LOGGER.warning(f"Genius Lyrics Error: {e}")
