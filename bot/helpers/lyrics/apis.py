@@ -12,7 +12,8 @@ LOGGER = logging.getLogger(__name__)
 # --- KONTROL RATE LIMIT (ANTI-BAN LYRICS API) ---
 MX_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 LRC_LIMITER = aiolimiter.AsyncLimiter(10, 5)
-GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5) 
+# Batasi Genius lebih ketat (Max 2 request / 3 detik) agar aman saat download Album
+GENIUS_LIMITER = aiolimiter.AsyncLimiter(2, 3) 
 # ------------------------------------------------
 
 # =======================================================
@@ -82,6 +83,7 @@ class MusixmatchAPI:
             plain = None
             synced = None
 
+            # [FIX] Mencegah parameter NoneType
             params = {
                 "format": "json",
                 "namespace": "lyrics_richsynched",
@@ -90,8 +92,6 @@ class MusixmatchAPI:
                 "q_artist": artist or "",
                 "q_track": title or ""
             }
-            
-            # [PERBAIKAN] Mencegah Error NoneType dari Aiohttp
             if self.token:
                 params["usertoken"] = self.token
             if album:
@@ -107,7 +107,7 @@ class MusixmatchAPI:
                         
                         macro_calls = body.get("macro_calls", {})
                         
-                        # [PERBAIKAN] Mencegah Error 'list' object has no attribute 'get'
+                        # [FIX] Mengamankan parsing list vs dict
                         if isinstance(macro_calls, dict):
                             # 1. Parsing Plain Lyrics
                             lyrics_get = macro_calls.get("track.lyrics.get", {})
@@ -196,9 +196,9 @@ class GeniusAPI:
             'x-genius-android-version': '5.8.0'
         }
 
-    # [PERBAIKAN] Penambahan logika Auto-Retry untuk Mencegah Rate Limit di Album/Playlist
+    # [FIX] Sistem auto-retry saat server Genius memblokir karena Spam (Rate Limit)
     async def _fetch_with_retry(self, session, url, params):
-        for attempt in range(3): 
+        for attempt in range(5): 
             try:
                 async with GENIUS_LIMITER:
                     async with session.get(url, params=params, headers=self.headers, timeout=15) as r:
@@ -206,14 +206,12 @@ class GeniusAPI:
                             return await r.json(content_type=None)
                         elif r.status in (429, 503):
                             retry_after = int(r.headers.get('Retry-After', 5))
-                            LOGGER.warning(f"Genius Rate Limit {r.status}. Retrying in {retry_after}s...")
+                            LOGGER.warning(f"Genius Rate Limit 429 Terdeteksi! Menunggu {retry_after}s...")
                             await asyncio.sleep(retry_after)
                             continue
                         else:
                             return None
             except Exception as e:
-                if attempt == 2:
-                    LOGGER.debug(f"Genius Fetch Error: {e}")
                 await asyncio.sleep(2)
         return None
 
