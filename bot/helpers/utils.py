@@ -169,8 +169,7 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = N
 
     async def live_updater():
         from .aria2_helper import get_aria2_global_stat
-        import bot.helpers.ui_manager as ui_module 
-        from bot.logger import LOGGER
+        import bot.helpers.ui_manager as ui_module
         
         try:
             user_id = update_details['msg'].chat.id if update_details and update_details.get('msg') else 0
@@ -590,23 +589,20 @@ async def cleanup(user=None, metadata=None, user_dict: dict=None):
                         if os.path.exists(zp):
                             try: os.remove(zp)
                             except OSError: pass
-            except Exception as e: 
-                from bot.logger import LOGGER
+            except Exception as e:
                 LOGGER.debug(f"Cleanup metadata error: {e}")
                 
         if user:
             try: 
                 target_dir = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
                 if os.path.exists(target_dir): shutil.rmtree(target_dir, ignore_errors=True)
-            except OSError as e: 
-                from bot.logger import LOGGER
+            except OSError as e:
                 LOGGER.debug(f"Cleanup user dir OSError: {e}")
                 
             try: 
                 temp_dir = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
                 if os.path.exists(temp_dir): shutil.rmtree(temp_dir, ignore_errors=True)
-            except OSError as e: 
-                from bot.logger import LOGGER
+            except OSError as e:
                 LOGGER.debug(f"Cleanup user temp dir OSError: {e}")
 
     await asyncio.to_thread(_sync_cleanup)
