@@ -41,18 +41,25 @@ class TidalApi:
 
         
     async def _get(self, url: str, params: dict | None = None, session=None, refresh=False):
+        # --- [FIX] AUTO-RECONNECT SESI YANG MATI ---
+        if self.session is None or self.session.closed:
+            LOGGER.warning("TidalApi: Session is closed! Membuka ulang sesi aiohttp on-the-fly...")
+            self.session = aiohttp.ClientSession()
+            # Perbarui referensi sesi di objek turunan
+            if self.tv_session: self.tv_session.session = self.session
+            if self.mobile_hires: self.mobile_hires.session = self.session
+            if self.mobile_atmos: self.mobile_atmos.session = self.session
+        # -------------------------------------------
+        
         # if no session is given, use the first one (default)
         if session is None:
-            # --- MODIFIKASI: Gunakan sesi pertama yang disimpan di instance ini ---
             if not self.saved:
                  raise Exception("TidalApi: Tidak ada sesi (self.saved) yang tersedia untuk panggilan _get.")
             session = self.saved[0]
-            # --- MODIFIKASI SELESAI ---
 
         params = params or {}
         params.setdefault("countryCode", session.country_code)
         
-        # --- MODIFIKASI: Hanya set limit default jika tidak ada limit yg_disediakan ---
         if 'limit' not in params:
             params["limit"] = "9999"
         # --- MODIFIKASI SELESAI ---
