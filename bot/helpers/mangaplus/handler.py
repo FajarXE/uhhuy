@@ -16,10 +16,11 @@ from bot.helpers.mangaplus.api import MangaPlusAPI
 api = MangaPlusAPI()
 
 async def start_mangaplus(link: str, user: dict):
-    # Ekstrak Chapter ID dari URL
     match = re.search(r'/viewer/(\d+)', link)
     if not match:
-        raise Exception("URL MangaPlus tidak valid. Pastikan format URL mengandung /viewer/[ID_CHAPTER]")
+        if '/titles/' in link:
+             raise Exception("❌ Anda mengirimkan link daftar isi manga. Silakan buka salah satu chapter dan kirimkan link dari halaman membacanya (harus mengandung `/viewer/`).")
+        raise Exception("❌ URL MangaPlus tidak valid. Pastikan format URL mengandung /viewer/[ID_CHAPTER]")
     
     chapter_id = match.group(1)
     msg = user.get('bot_msg')
@@ -36,13 +37,12 @@ async def start_mangaplus(link: str, user: dict):
     total_pages = len(pages)
     
     if total_pages == 0:
-        raise Exception("Tidak ada halaman manga yang ditemukan. Konten mungkin dikunci berdasarkan region.")
+        raise Exception("Tidak ada halaman manga yang ditemukan. Konten mungkin dikunci berdasarkan region server Anda, atau chapter tersebut dibatasi untuk akun Premium.")
         
     chapter_title = f"MangaPlus_Chapter_{chapter_id}"
     base_path = os.path.join(Config.DOWNLOAD_BASE_DIR, str(user['r_id']), "MangaPlus", chapter_title)
     os.makedirs(base_path, exist_ok=True)
     
-    # Persiapan Tracking Radar UI
     task_id = hashlib.md5(str(msg.id).encode()).hexdigest()[:16] if msg else "unknown"
     update_details = {
         'msg': msg, 'title': chapter_title,
@@ -50,7 +50,6 @@ async def start_mangaplus(link: str, user: dict):
         'machine': 'Native Decryptor', 'task_id': task_id
     }
 
-    # Konkurensi Unduhan Ringan
     sem = asyncio.Semaphore(Config.MAX_WORKERS or 10)
     completed = 0
     
@@ -66,39 +65,32 @@ async def start_mangaplus(link: str, user: dict):
         async with sem:
             if task_id in GLOBAL_CANCEL_DICT: return False
             try:
-                # 1. Download Gambar Scrambled
                 async with aiohttp.ClientSession(headers=api.headers) as session:
                     async with session.get(img_url, timeout=30) as resp:
                         raw_bytes = await resp.read()
                         
-                # 2. Descramble/Decrypt dengan XOR
                 decrypted_bytes = api.decrypt_image(raw_bytes, hex_key)
                 
-                # 3. Simpan ke Disk
                 async with aiofiles.open(filepath, 'wb') as f:
                     await f.write(decrypted_bytes)
                     
                 completed += 1
-                
-                # Update UI Progress Bar
                 await progress_message(completed, total_pages, update_details)
                 return True
             except Exception as e:
                 LOGGER.error(f"Gagal mengunduh halaman {page_data['page_num']}: {e}")
                 return False
 
-    # Jalankan unduhan halaman secara serentak
     tasks = [download_page(p) for p in pages]
     await asyncio.gather(*tasks)
     
     if task_id in GLOBAL_CANCEL_DICT:
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
-    # Susun Fake-Metadata agar uploader.py memperlakukannya seperti Full Album
     metadata = {
         'itemid': chapter_id,
         'title': chapter_title,
-        'type': 'album', # Dipalsukan jadi 'album' agar langsung di-ZIP oleh uploader
+        'type': 'album',
         'provider': 'MangaPlus',
         'quality': 'Super High (Descrambled)',
         'folderpath': base_path,
@@ -109,7 +101,6 @@ async def start_mangaplus(link: str, user: dict):
         'tracks': []
     }
     
-    # Paksa mode ZIP khusus untuk sesi ini (Manga tidak ada artinya jika diekstrak lepas)
     user_id = user['user_id']
     original_zip = bot_set.user_data.get(user_id, {}).get('ALBUM_ZIP')
     bot_set.user_data.setdefault(user_id, {})['ALBUM_ZIP'] = True
@@ -118,7 +109,6 @@ async def start_mangaplus(link: str, user: dict):
         from bot.helpers.uploder import album_upload
         await album_upload(metadata, user)
     finally:
-        # Kembalikan pengaturan ZIP pengguna ke keadaan semula
         if original_zip is not None:
             bot_set.user_data[user_id]['ALBUM_ZIP'] = original_zip
         else:
