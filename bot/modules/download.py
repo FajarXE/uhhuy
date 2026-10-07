@@ -158,6 +158,12 @@ try:
 except ImportError:
     genie_manager = None
 
+# 19. Audiomack
+try:
+    from bot.helpers.audiomack.manager import audiomack_manager
+except ImportError:
+    audiomack_manager = None
+
 
 # --- IMPOR HANDLER LAYANAN ---
 
