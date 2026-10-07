@@ -38,9 +38,10 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         
     ext = 'm4a' if '.m4a' in stream_url else 'mp3'
     
+    # --- [PERBAIKAN KEYERROR] Menggunakan 'title' bukan 'albumTitle' ---
     folder_name = f"{user['r_id']}/Audiomack"
     if album_meta:
-        folder_name += f"/{album_meta['albumTitle']}"
+        folder_name += f"/{album_meta['title']}"
         
     file_name = f"{artist} - {title}.{ext}".replace("/", "_")
     filepath = os.path.join(Config.DOWNLOAD_BASE_DIR, folder_name, file_name)
@@ -48,28 +49,26 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
     metadata = {
         'title': title,
         'artist': artist,
-        'album': album_meta['albumTitle'] if album_meta else title,
-        'albumartist': album_meta['albumArtist'] if album_meta else artist,
-        'release_date': track_data.get('releaseDate') or (album_meta.get('albumReleaseDate') if album_meta else ''),
-        'date': track_data.get('year') or (album_meta.get('albumYear') if album_meta else ''),
-        'genre': track_data.get('genre') or (album_meta.get('albumGenre') if album_meta else ''),
+        'album': album_meta['title'] if album_meta else title,
+        'albumartist': album_meta['artist'] if album_meta else artist,
+        'release_date': track_data.get('releaseDate') or (album_meta.get('release_date') if album_meta else ''),
+        'date': track_data.get('year') or (album_meta.get('date') if album_meta else ''),
+        'genre': track_data.get('genre') or (album_meta.get('genre') if album_meta else ''),
         'producer': track_data.get('producer', ''),
         'duration': track_data.get('duration', '0:00'),
         'tracknumber': str(track_data.get('trackNumber', 1)),
-        'totaltracks': str(album_meta['albumTotalTracks']) if album_meta else '1',
+        'totaltracks': str(album_meta.get('totaltracks', 1)) if album_meta else '1',
         'filepath': filepath,
         'provider': 'Audiomack',
         'type': 'track',
         'quality': 'HQ',
-        # Mendaftarkan direktori sementara seperti yang Qobuz lakukan
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
+    # -------------------------------------------------------------------
     
-    # --- MENGIKUTI STRUKTUR QOBUZ SECARA NATIVE ---
-    cover_url = track_data.get('trackImageUrl') or (album_meta.get('albumImageUrl') if album_meta else '')
+    cover_url = track_data.get('trackImageUrl') or (album_meta.get('cover') if album_meta else '')
     metadata['cover'] = await create_cover_file(cover_url, metadata)
     metadata['thumbnail'] = await create_cover_file(cover_url, metadata, True)
-    # ----------------------------------------------
     
     details = {'msg': user.get('bot_msg'), 'title': title, 'type': 'Track', 'action': 'Download'}
     err = await download_file(stream_url, filepath, details=details)
@@ -79,7 +78,6 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
     await set_metadata(metadata, user['user_id'])
     
     if not album_meta:
-        # Kirim Art Poster untuk single track menggunakan fungsi asli
         metadata['poster_msg'] = await post_art_poster(user, metadata)
         if not metadata['poster_msg']:
             metadata['poster_msg'] = user.get('bot_msg')
@@ -97,26 +95,28 @@ async def process_album(link: str, user: dict):
         
     folder_path = os.path.join(Config.DOWNLOAD_BASE_DIR, f"{user['r_id']}/Audiomack", album_data['albumTitle'])
     
+    # --- [PERBAIKAN] Menambahkan field data tambahan yang dibutuhkan process_track ---
     album_meta = {
         'type': 'album',
         'title': album_data['albumTitle'],
         'artist': album_data['albumArtist'],
+        'release_date': album_data.get('albumReleaseDate', ''),
+        'date': album_data.get('albumYear', ''),
+        'genre': album_data.get('albumGenre', ''),
+        'totaltracks': total_tracks,
         'folderpath': folder_path,
+        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/",
         'provider': 'Audiomack',
         'tracks': [],
         'poster_msg': None,
-        'quality': 'HQ',
-        # Mendaftarkan direktori sementara seperti yang Qobuz lakukan
-        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+        'quality': 'HQ'
     }
+    # -------------------------------------------------------------------------------
     
-    # --- MENGIKUTI STRUKTUR QOBUZ SECARA NATIVE ---
     cover_url = album_data.get('albumImageUrl')
     album_meta['cover'] = await create_cover_file(cover_url, album_meta)
     album_meta['thumbnail'] = await create_cover_file(cover_url, album_meta, True)
-    # ----------------------------------------------
     
-    # Kirim Art Poster SEBELUM pengunduhan track
     album_meta['poster_msg'] = await post_art_poster(user, album_meta)
     if not album_meta['poster_msg']:
         album_meta['poster_msg'] = user.get('bot_msg')
