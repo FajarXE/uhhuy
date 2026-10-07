@@ -4,7 +4,7 @@ import asyncio
 from bot.logger import LOGGER
 from config import Config
 from bot.helpers.utils import download_file
-from bot.helpers.metadata import set_metadata
+from bot.helpers.metadata import set_metadata, create_cover_file
 from bot.helpers.uploder import track_upload, album_upload
 import hashlib
 
@@ -91,12 +91,19 @@ async def process_album(link: str, user: dict):
         'title': album_data['albumTitle'],
         'artist': album_data['albumArtist'],
         'folderpath': folder_path,
+        'tempfolder': folder_path,  # <-- TAMBAHKAN BARIS INI
         'provider': 'Audiomack',
         'tracks': [],
         'poster_msg': user.get('bot_msg'),
         'cover': album_data.get('albumImageUrl'),
         'quality': 'HQ'
     }
+    
+    # --- [TAMBAHKAN BLOK INI] ---
+    # Mengunduh cover album secara lokal agar tidak crash saat diunggah
+    if album_meta['cover']:
+        album_meta['cover'] = await create_cover_file(album_meta['cover'], album_meta)
+    # ----------------------------
     
     # KARENA RENDER/NORTHFLANK RAWAN OOM (RAM PENUH), KITA EKSEKUSI SCRAPER SATU PER SATU
     for i in range(1, total_tracks + 1):
