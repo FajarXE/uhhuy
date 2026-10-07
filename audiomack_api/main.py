@@ -50,6 +50,14 @@ def song(
             status_code=400,
             detail="Invalid Audiomack URL"
         )
+        
+    # --- [TAMBAHAN FILTER] ---
+    if "/song/" not in url.lower():
+        raise HTTPException(
+            status_code=400,
+            detail="URL must be an Audiomack song URL"
+        )
+    # -------------------------
 
     start_time = time.perf_counter()
     try:
