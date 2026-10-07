@@ -290,7 +290,15 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
             try:
                 final_caption = caption if caption is not None else (meta.get('caption', '') if meta else '')
                 thumb = meta.get('cover') if meta and meta.get('cover') else None
+                
+                # --- [TAMBAHAN PROTEKSI] ---
+                # Mengubah thumbnail jadi None jika ia berupa link HTTP atau file sudah terhapus
+                if thumb and not os.path.exists(thumb):
+                    thumb = None
+                # ---------------------------
+                
                 task_type = "File" if type == 'doc' else type.capitalize()
+
                 
                 if progress is not None:
                     prog_func = progress
