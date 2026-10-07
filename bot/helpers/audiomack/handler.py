@@ -1,12 +1,13 @@
-# [BUAT FILE: bot/helpers/audiomack/handler.py]
+# [GANTI SELURUH ISI FILE: bot/helpers/audiomack/handler.py]
 import os
 import asyncio
+import hashlib
+from PIL import Image
 from bot.logger import LOGGER
 from config import Config
-from bot.helpers.utils import download_file
+from bot.helpers.utils import download_file, post_art_poster
 from bot.helpers.metadata import set_metadata, create_cover_file
 from bot.helpers.uploder import track_upload, album_upload
-import hashlib
 
 from .api import AudiomackAPI
 
@@ -50,7 +51,7 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         'artist': artist,
         'album': album_meta['albumTitle'] if album_meta else title,
         'albumartist': album_meta['albumArtist'] if album_meta else artist,
-        'cover': track_data.get('trackImageUrl') or (album_meta.get('albumImageUrl') if album_meta else ''),
+        'cover': track_data.get('trackImageUrl') or (album_meta.get('cover') if album_meta else ''),
         'release_date': track_data.get('releaseDate') or (album_meta.get('albumReleaseDate') if album_meta else ''),
         'date': track_data.get('year') or (album_meta.get('albumYear') if album_meta else ''),
         'genre': track_data.get('genre') or (album_meta.get('albumGenre') if album_meta else ''),
@@ -72,12 +73,29 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
     await set_metadata(metadata, user['user_id'])
     
     if not album_meta:
+        # --- [SOLUSI THUMBNAIL TRACK TUNGGAL] ---
+        if metadata['cover'] and metadata['cover'].startswith('http'):
+            metadata['cover'] = await create_cover_file(metadata['cover'], metadata)
+            try:
+                with Image.open(metadata['cover']) as img:
+                    img = img.convert('RGB')
+                    img.thumbnail((320, 320))
+                    thumb_path = metadata['cover'] + "_thumb.jpg"
+                    img.save(thumb_path, "JPEG")
+                    metadata['thumbnail'] = thumb_path
+            except Exception as e:
+                LOGGER.error(f"Gagal membuat thumbnail: {e}")
+        
+        # Kirim Art Poster
+        metadata['poster_msg'] = await post_art_poster(user, metadata)
+        if not metadata['poster_msg']:
+            metadata['poster_msg'] = user.get('bot_msg')
+            
         await track_upload(metadata, user)
         
     return metadata
 
 async def process_album(link: str, user: dict):
-    # Mengambil kerangka informasi album
     album_data = await api.get_album(link)
     total_tracks = album_data.get('albumTotalTracks', 0)
     
@@ -91,21 +109,38 @@ async def process_album(link: str, user: dict):
         'title': album_data['albumTitle'],
         'artist': album_data['albumArtist'],
         'folderpath': folder_path,
-        'tempfolder': folder_path,  # <-- TAMBAHKAN BARIS INI
+        'tempfolder': folder_path,
         'provider': 'Audiomack',
         'tracks': [],
-        'poster_msg': user.get('bot_msg'),
+        'poster_msg': None,
         'cover': album_data.get('albumImageUrl'),
         'quality': 'HQ'
     }
     
-    # --- [TAMBAHKAN BLOK INI] ---
-    # Mengunduh cover album secara lokal agar tidak crash saat diunggah
+    # --- [SOLUSI POSTER & THUMBNAIL ALBUM] ---
     if album_meta['cover']:
+        # 1. Unduh cover WebP secara lokal
         album_meta['cover'] = await create_cover_file(album_meta['cover'], album_meta)
-    # ----------------------------
+        
+        # 2. Paksa konversi ke JPEG 320x320 agar Telegram mau menampilkannya di file ZIP
+        try:
+            with Image.open(album_meta['cover']) as img:
+                img = img.convert('RGB')
+                img.thumbnail((320, 320))
+                thumb_path = album_meta['cover'] + "_thumb.jpg"
+                img.save(thumb_path, "JPEG")
+                album_meta['thumbnail'] = thumb_path
+        except Exception as e:
+            LOGGER.error(f"Gagal memotong thumbnail Audiomack: {e}")
+
+    # 3. Kirim pesan Art Poster ke Telegram SEBELUM lagu diproses
+    album_meta['poster_msg'] = await post_art_poster(user, album_meta)
     
-    # KARENA RENDER/NORTHFLANK RAWAN OOM (RAM PENUH), KITA EKSEKUSI SCRAPER SATU PER SATU
+    # Fallback jika poster dinonaktifkan di /usetting
+    if not album_meta['poster_msg']:
+        album_meta['poster_msg'] = user.get('bot_msg')
+    # -----------------------------------------
+    
     for i in range(1, total_tracks + 1):
         try:
             import bot.helpers.ui_manager as ui_manager
@@ -118,7 +153,7 @@ async def process_album(link: str, user: dict):
             track_data_resp = await api.get_album(link, track=i)
             track_info = track_data_resp.get('track')
             if track_info:
-                meta = await process_track(link, user, track_info, album_data)
+                meta = await process_track(link, user, track_info, album_meta)
                 album_meta['tracks'].append(meta)
         except Exception as e:
             LOGGER.error(f"Gagal memproses lagu ke-{i} dari album Audiomack: {e}")
