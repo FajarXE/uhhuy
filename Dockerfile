@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /usr/src/app
 
-# Menginstal dependensi inti, termasuk Python 3, pip, dan header pengembangan (python3-dev)
+# Menginstal dependensi inti
 RUN apt-get update -qq && \
     apt-get install -qq -y python3 python3-pip python3-dev \
     ffmpeg gcc libffi-dev curl zip cargo pkg-config git aria2 && \
@@ -36,8 +36,15 @@ COPY --from=builder /usr/bin/rclone /usr/bin/rclone
 COPY --from=builder /usr/bin/mp4decrypt /usr/bin/mp4decrypt
 COPY requirements.txt .
 
-# Menggunakan modul pip bawaan python3 untuk menginstal dependensi
+# Menginstal library python (Playwright akan terinstall di tahap ini)
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
+
+# --- [TAMBAHAN UNTUK AUDIOMACK] ---
+# Menginstal Chromium Browser dan Dependensi OS yang dibutuhkan Playwright
+RUN playwright install chromium
+RUN playwright install-deps chromium
+# ----------------------------------
+
 COPY . .
 
 ENTRYPOINT ["bash", "start.sh"]
