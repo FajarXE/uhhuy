@@ -8,7 +8,8 @@ from datetime import datetime
 from PIL import Image
 from bot.logger import LOGGER
 from config import Config
-from bot.helpers.utils import download_file, post_art_poster, format_string
+import bot.helpers.translations as lang
+from bot.helpers.utils import download_file, post_art_poster, format_string, run_concurrent_tasks
 from bot.helpers.metadata import set_metadata, create_cover_file
 from bot.helpers.uploder import track_upload, album_upload
 
@@ -30,15 +31,12 @@ def _convert_to_jpeg(img_path):
     return img_path
 
 def _fix_date(date_str, year_str):
-    """Ubah 'August 31st' menjadi '2025-08-31' dengan aman"""
+    """Ubah format tanggal bahasa Inggris ke format standar YYYY-MM-DD"""
     if not date_str: return ""
     
-    # Jika scraper sudah memberikan format YYYY-MM-DD
     if re.match(r"^\d{4}-\d{2}-\d{2}", date_str):
         return date_str[:10]
     
-    # PERBAIKAN: (?<=\d) memastikan st/nd/rd/th HANYA dihapus jika depannya adalah angka!
-    # Ini mencegah "August" berubah menjadi "Augu".
     clean_date = re.sub(r'(?<=\d)(st|nd|rd|th)', '', date_str)
     
     if not year_str:
@@ -57,15 +55,8 @@ async def start_audiomack(link: str, user: dict):
     else:
         await process_track(link, user)
 
-async def process_track(link: str, user: dict, track_data=None, album_meta=None):
+async def process_track(link: str, user: dict, track_data=None, album_meta=None, upload=True):
     if not track_data:
-        import bot.helpers.ui_manager as ui_manager
-        if 'bot_msg' in user:
-            task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-            async with ui_manager.GLOBAL_STATE_LOCK:
-                if task_id in ui_manager.GLOBAL_TASKS:
-                    ui_manager.GLOBAL_TASKS[task_id]['processed'] = 'Scraping Audiomack... (Membuka Web)'
-        
         track_data = await api.get_song(link)
         
     title = track_data.get('title', 'Unknown Title')
@@ -107,7 +98,6 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
     
-    # Format dinamis nama file
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, metadata, user)
     raw_filename = raw_filename.replace("/", "_")
     file_name = f"{raw_filename}.{ext}"
@@ -128,7 +118,7 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
     
     await set_metadata(metadata, user['user_id'])
     
-    if not album_meta:
+    if upload and not album_meta:
         metadata['poster_msg'] = await post_art_poster(user, metadata)
         if not metadata['poster_msg']:
             metadata['poster_msg'] = user.get('bot_msg')
@@ -136,6 +126,17 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         await track_upload(metadata, user)
         
     return metadata
+
+# Helper task untuk concurrent runner
+async def _scrape_and_download(link, track_num, user, album_meta):
+    try:
+        track_data_resp = await api.get_album(link, track=track_num)
+        track_info = track_data_resp.get('track')
+        if track_info:
+            return await process_track(link, user, track_info, album_meta, upload=False)
+    except Exception as e:
+        LOGGER.error(f"Gagal memproses lagu ke-{track_num} dari album Audiomack: {e}")
+    return None
 
 async def process_album(link: str, user: dict):
     album_data = await api.get_album(link)
@@ -185,22 +186,22 @@ async def process_album(link: str, user: dict):
     if not album_meta['poster_msg']:
         album_meta['poster_msg'] = user.get('bot_msg')
     
+    # Menyiapkan konfigurasi Papan Progress (UI) agar rapi
+    update_details = {'text': lang.s.DOWNLOAD_PROGRESS, 'msg': user['bot_msg'], 'title': album_meta['title'], 'type': album_meta['type']}
+    
+    tasks = []
     for i in range(1, total_tracks + 1):
-        try:
-            import bot.helpers.ui_manager as ui_manager
-            if 'bot_msg' in user:
-                task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-                async with ui_manager.GLOBAL_STATE_LOCK:
-                    if task_id in ui_manager.GLOBAL_TASKS:
-                        ui_manager.GLOBAL_TASKS[task_id]['processed'] = f'Scraping Track {i}/{total_tracks}...'
-                        
-            track_data_resp = await api.get_album(link, track=i)
-            track_info = track_data_resp.get('track')
-            if track_info:
-                meta = await process_track(link, user, track_info, album_meta)
-                album_meta['tracks'].append(meta)
-        except Exception as e:
-            LOGGER.error(f"Gagal memproses lagu ke-{i} dari album Audiomack: {e}")
+        tasks.append(_scrape_and_download(link, i, user, album_meta))
+        
+    # --- [PERBAIKAN UI] ---
+    # Menggunakan antrean resmi (run_concurrent_tasks) dengan limit=1 agar 
+    # tampilannya 100% konsisten seperti Qobuz dan tidak membebani server
+    task_results = await run_concurrent_tasks(tasks, update_details, limit=1)
+    # ----------------------
+    
+    successful_tracks = [res for res in task_results if res]
+    album_meta['tracks'] = successful_tracks
+    album_meta['totaltracks'] = len(successful_tracks)
             
     if not album_meta['tracks']:
         raise Exception("Gagal mengekstrak dan mengunduh lagu apa pun dari album ini.")
