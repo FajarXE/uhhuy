@@ -30,19 +30,25 @@ def _convert_to_jpeg(img_path):
     return img_path
 
 def _fix_date(date_str, year_str):
-    """Ubah 'August 31st' menjadi '2025-08-31'"""
+    """Ubah 'August 31st' menjadi '2025-08-31' dengan aman"""
     if not date_str: return ""
     
     # Jika scraper sudah memberikan format YYYY-MM-DD
     if re.match(r"^\d{4}-\d{2}-\d{2}", date_str):
         return date_str[:10]
     
-    # Bersihkan imbuhan bahasa Inggris: st, nd, rd, th
-    clean_date = re.sub(r'(st|nd|rd|th)', '', date_str)
+    # PERBAIKAN: (?<=\d) memastikan st/nd/rd/th HANYA dihapus jika depannya adalah angka!
+    # Ini mencegah "August" berubah menjadi "Augu".
+    clean_date = re.sub(r'(?<=\d)(st|nd|rd|th)', '', date_str)
+    
+    if not year_str:
+        year_str = str(datetime.now().year)
+        
     try:
-        dt = datetime.strptime(f"{clean_date} {year_str}", "%B %d %Y")
+        dt = datetime.strptime(f"{clean_date.strip()} {year_str.strip()}", "%B %d %Y")
         return dt.strftime("%Y-%m-%d")
-    except Exception:
+    except Exception as e:
+        LOGGER.debug(f"Gagal parsing tanggal Audiomack: {e}")
         return date_str
 
 async def start_audiomack(link: str, user: dict):
@@ -75,13 +81,10 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
     if album_meta:
         folder_name += f"/{album_meta['title']}"
         
-    # --- [PERBAIKAN TANGGAL] ---
     raw_date = track_data.get('releaseDate') or (album_meta.get('release_date') if album_meta else '')
     raw_year = track_data.get('year') or (album_meta.get('date') if album_meta else '')
     fixed_date = _fix_date(raw_date, raw_year)
-    # ---------------------------
     
-    # Kumpulkan metadata DULU sebelum membentuk nama file agar fungsi format_string bisa bekerja!
     metadata = {
         'title': title,
         'artist': artist,
@@ -92,7 +95,7 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         'genre': track_data.get('genre') or (album_meta.get('genre') if album_meta else ''),
         'producer': track_data.get('producer', ''),
         'duration': track_data.get('duration', '0:00'),
-        'tracknumber': str(track_data.get('trackNumber', 1)).zfill(2), # Format nomor track agar selalu 01, 02, dst
+        'tracknumber': str(track_data.get('trackNumber', 1)).zfill(2),
         'totaltracks': str(album_meta.get('totaltracks', 1)) if album_meta else '1',
         'totalvolume': str(album_meta.get('totalvolume', 1)) if album_meta else '1',
         'volume': '1',
@@ -104,15 +107,13 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
     
-    # --- [PERBAIKAN NAMA FILE] Mengikuti setting config bot pengguna ---
+    # Format dinamis nama file
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, metadata, user)
-    # Sanitasi karakter '/' agar sistem OS tidak mengira itu folder
     raw_filename = raw_filename.replace("/", "_")
     file_name = f"{raw_filename}.{ext}"
     
     filepath = os.path.join(Config.DOWNLOAD_BASE_DIR, folder_name, file_name)
     metadata['filepath'] = filepath
-    # -------------------------------------------------------------------
     
     cover_url = track_data.get('trackImageUrl') or (album_meta.get('cover_url') if album_meta else '')
     metadata['cover'] = await create_cover_file(cover_url, metadata)
@@ -145,11 +146,9 @@ async def process_album(link: str, user: dict):
         
     folder_path = os.path.join(Config.DOWNLOAD_BASE_DIR, f"{user['r_id']}/Audiomack", album_data['albumTitle'])
     
-    # --- [PERBAIKAN TANGGAL] ---
     raw_date = album_data.get('albumReleaseDate', '')
     raw_year = album_data.get('albumYear', '')
     fixed_date = _fix_date(raw_date, raw_year)
-    # ---------------------------
     
     album_meta = {
         'type': 'album',
