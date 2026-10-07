@@ -834,7 +834,7 @@ def extract_album_info(
         raise ValueError("URL must be an Audiomack album or playlist URL.")
     # ------------------------------------
 
-    print(f"[*] Extracting Audiomack album: {album_url}")
+    print(f"[*] Extracting Audiomack album/playlist: {album_url}")
 
     album_data = {
         "albumId": extract_slug_from_url(album_url),
@@ -873,6 +873,29 @@ def extract_album_info(
                 wait_until="domcontentloaded",
                 timeout=20000,
             )
+
+            # --- [TAMBAHAN LOGIKA INFINITE SCROLL] ---
+            print("[*] Menggulir halaman ke bawah untuk memuat seluruh lagu...")
+            last_height = page.evaluate("document.body.scrollHeight")
+            # Batasi maksimal 40x scroll agar tidak terjebak infinite loop
+            for _ in range(40):
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(1000) # Tunggu 1 detik agar Audiomack memuat elemen
+                
+                new_height = page.evaluate("document.body.scrollHeight")
+                if new_height == last_height:
+                    # Pancing lazy load dengan scroll sedikit ke atas lalu ke bawah lagi
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight - 500)")
+                    page.wait_for_timeout(500)
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(1000)
+                    
+                    new_height = page.evaluate("document.body.scrollHeight")
+                    if new_height == last_height:
+                        break # Hentikan scroll jika sudah sampai ujung bawah halaman
+                last_height = new_height
+            print("[*] Selesai menggulir halaman.")
+            # ------------------------------------------
 
             # Brief pause for album meta tags and track links
             page.wait_for_timeout(600)
