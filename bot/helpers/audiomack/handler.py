@@ -3,10 +3,12 @@ import os
 import asyncio
 import hashlib
 import shutil
+import re
+from datetime import datetime
 from PIL import Image
 from bot.logger import LOGGER
 from config import Config
-from bot.helpers.utils import download_file, post_art_poster
+from bot.helpers.utils import download_file, post_art_poster, format_string
 from bot.helpers.metadata import set_metadata, create_cover_file
 from bot.helpers.uploder import track_upload, album_upload
 
@@ -26,6 +28,22 @@ def _convert_to_jpeg(img_path):
     except Exception as e:
         LOGGER.error(f"Gagal konversi gambar: {e}")
     return img_path
+
+def _fix_date(date_str, year_str):
+    """Ubah 'August 31st' menjadi '2025-08-31'"""
+    if not date_str: return ""
+    
+    # Jika scraper sudah memberikan format YYYY-MM-DD
+    if re.match(r"^\d{4}-\d{2}-\d{2}", date_str):
+        return date_str[:10]
+    
+    # Bersihkan imbuhan bahasa Inggris: st, nd, rd, th
+    clean_date = re.sub(r'(st|nd|rd|th)', '', date_str)
+    try:
+        dt = datetime.strptime(f"{clean_date} {year_str}", "%B %d %Y")
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return date_str
 
 async def start_audiomack(link: str, user: dict):
     if "/album/" in link.lower():
@@ -57,37 +75,48 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
     if album_meta:
         folder_name += f"/{album_meta['title']}"
         
-    file_name = f"{artist} - {title}.{ext}".replace("/", "_")
-    filepath = os.path.join(Config.DOWNLOAD_BASE_DIR, folder_name, file_name)
+    # --- [PERBAIKAN TANGGAL] ---
+    raw_date = track_data.get('releaseDate') or (album_meta.get('release_date') if album_meta else '')
+    raw_year = track_data.get('year') or (album_meta.get('date') if album_meta else '')
+    fixed_date = _fix_date(raw_date, raw_year)
+    # ---------------------------
     
+    # Kumpulkan metadata DULU sebelum membentuk nama file agar fungsi format_string bisa bekerja!
     metadata = {
         'title': title,
         'artist': artist,
         'album': album_meta['title'] if album_meta else title,
         'albumartist': album_meta['artist'] if album_meta else artist,
-        'release_date': track_data.get('releaseDate') or (album_meta.get('release_date') if album_meta else ''),
-        'date': track_data.get('year') or (album_meta.get('date') if album_meta else ''),
+        'release_date': fixed_date,
+        'date': raw_year,
         'genre': track_data.get('genre') or (album_meta.get('genre') if album_meta else ''),
         'producer': track_data.get('producer', ''),
         'duration': track_data.get('duration', '0:00'),
-        'tracknumber': str(track_data.get('trackNumber', 1)),
+        'tracknumber': str(track_data.get('trackNumber', 1)).zfill(2), # Format nomor track agar selalu 01, 02, dst
         'totaltracks': str(album_meta.get('totaltracks', 1)) if album_meta else '1',
-        # --- [PERBAIKAN CAPTION TEKS] ---
         'totalvolume': str(album_meta.get('totalvolume', 1)) if album_meta else '1',
         'volume': '1',
         'explicit': 'False',
-        # --------------------------------
-        'filepath': filepath,
         'provider': 'Audiomack',
         'type': 'track',
         'quality': 'HQ',
+        'extension': ext,
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
+    
+    # --- [PERBAIKAN NAMA FILE] Mengikuti setting config bot pengguna ---
+    raw_filename = await format_string(Config.TRACK_NAME_FORMAT, metadata, user)
+    # Sanitasi karakter '/' agar sistem OS tidak mengira itu folder
+    raw_filename = raw_filename.replace("/", "_")
+    file_name = f"{raw_filename}.{ext}"
+    
+    filepath = os.path.join(Config.DOWNLOAD_BASE_DIR, folder_name, file_name)
+    metadata['filepath'] = filepath
+    # -------------------------------------------------------------------
     
     cover_url = track_data.get('trackImageUrl') or (album_meta.get('cover_url') if album_meta else '')
     metadata['cover'] = await create_cover_file(cover_url, metadata)
     
-    # --- [KONVERSI WEBP -> JPEG] ---
     if metadata['cover'] and os.path.exists(metadata['cover']):
         metadata['cover'] = await asyncio.to_thread(_convert_to_jpeg, metadata['cover'])
     
@@ -116,19 +145,23 @@ async def process_album(link: str, user: dict):
         
     folder_path = os.path.join(Config.DOWNLOAD_BASE_DIR, f"{user['r_id']}/Audiomack", album_data['albumTitle'])
     
+    # --- [PERBAIKAN TANGGAL] ---
+    raw_date = album_data.get('albumReleaseDate', '')
+    raw_year = album_data.get('albumYear', '')
+    fixed_date = _fix_date(raw_date, raw_year)
+    # ---------------------------
+    
     album_meta = {
         'type': 'album',
         'title': album_data['albumTitle'],
         'artist': album_data['albumArtist'],
-        'release_date': album_data.get('albumReleaseDate', ''),
-        'date': album_data.get('albumYear', ''),
+        'release_date': fixed_date,
+        'date': raw_year,
         'genre': album_data.get('albumGenre', ''),
         'totaltracks': total_tracks,
-        # --- [PERBAIKAN CAPTION TEKS] ---
         'totalvolume': '1',
         'volume': '1',
         'explicit': 'False',
-        # --------------------------------
         'folderpath': folder_path,
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/",
         'provider': 'Audiomack',
@@ -140,18 +173,14 @@ async def process_album(link: str, user: dict):
     
     album_meta['cover'] = await create_cover_file(album_meta['cover_url'], album_meta)
     
-    # --- [PERBAIKAN COVER THUMBNAIL DAN FOLDER ZIP] ---
     if album_meta['cover'] and os.path.exists(album_meta['cover']):
-        # Konversi WebP ke JPEG agar Telegram menerimanya sebagai Thumbnail ZIP
         album_meta['cover'] = await asyncio.to_thread(_convert_to_jpeg, album_meta['cover'])
         
-        # Menyalin file cover.jpg ke folder album sebelum di-zip
         os.makedirs(folder_path, exist_ok=True)
         try:
             shutil.copy2(album_meta['cover'], os.path.join(folder_path, "cover.jpg"))
         except Exception as e:
             LOGGER.error(f"Gagal menyalin cover ke folder album: {e}")
-    # --------------------------------------------------
     
     album_meta['poster_msg'] = await post_art_poster(user, album_meta)
     if not album_meta['poster_msg']:
