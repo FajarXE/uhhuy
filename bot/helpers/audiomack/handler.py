@@ -2,7 +2,6 @@
 import os
 import asyncio
 import hashlib
-from PIL import Image
 from bot.logger import LOGGER
 from config import Config
 from bot.helpers.utils import download_file, post_art_poster
@@ -70,23 +69,11 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
     if err:
         raise Exception(f"Gagal mengunduh stream Aria2: {err}")
     
+    # Fungsi bawaan ini akan otomatis mengunduh 'cover' menjadi file .jpg jika masih berupa http URL
     await set_metadata(metadata, user['user_id'])
     
     if not album_meta:
-        # --- [SOLUSI THUMBNAIL TRACK TUNGGAL] ---
-        if metadata['cover'] and metadata['cover'].startswith('http'):
-            metadata['cover'] = await create_cover_file(metadata['cover'], metadata)
-            try:
-                with Image.open(metadata['cover']) as img:
-                    img = img.convert('RGB')
-                    img.thumbnail((320, 320))
-                    thumb_path = metadata['cover'] + "_thumb.jpg"
-                    img.save(thumb_path, "JPEG")
-                    metadata['thumbnail'] = thumb_path
-            except Exception as e:
-                LOGGER.error(f"Gagal membuat thumbnail: {e}")
-        
-        # Kirim Art Poster
+        # Kirim Art Poster untuk single track
         metadata['poster_msg'] = await post_art_poster(user, metadata)
         if not metadata['poster_msg']:
             metadata['poster_msg'] = user.get('bot_msg')
@@ -117,29 +104,16 @@ async def process_album(link: str, user: dict):
         'quality': 'HQ'
     }
     
-    # --- [SOLUSI POSTER & THUMBNAIL ALBUM] ---
+    # 1. Download cover mentah menjadi file lokal (.jpg). Pyrogram yang akan mengurus pemotongannya.
     if album_meta['cover']:
-        # 1. Unduh cover WebP secara lokal
         album_meta['cover'] = await create_cover_file(album_meta['cover'], album_meta)
         
-        # 2. Paksa konversi ke JPEG 320x320 agar Telegram mau menampilkannya di file ZIP
-        try:
-            with Image.open(album_meta['cover']) as img:
-                img = img.convert('RGB')
-                img.thumbnail((320, 320))
-                thumb_path = album_meta['cover'] + "_thumb.jpg"
-                img.save(thumb_path, "JPEG")
-                album_meta['thumbnail'] = thumb_path
-        except Exception as e:
-            LOGGER.error(f"Gagal memotong thumbnail Audiomack: {e}")
-
-    # 3. Kirim pesan Art Poster ke Telegram SEBELUM lagu diproses
+    # 2. Kirim pesan Art Poster ke Telegram SEBELUM lagu diproses (memakai fungsi bawaan bot)
     album_meta['poster_msg'] = await post_art_poster(user, album_meta)
     
     # Fallback jika poster dinonaktifkan di /usetting
     if not album_meta['poster_msg']:
         album_meta['poster_msg'] = user.get('bot_msg')
-    # -----------------------------------------
     
     for i in range(1, total_tracks + 1):
         try:
