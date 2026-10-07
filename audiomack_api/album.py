@@ -829,10 +829,10 @@ def extract_album_info(
     if not album_url:
         raise ValueError("Album URL is required.")
 
-    # --- [PERBAIKAN: IZINKAN PLAYLIST] ---
+    # --- [PERBAIKAN: IZINKAN URL PLAYLIST] ---
     if "/album/" not in album_url.lower() and "/playlist/" not in album_url.lower():
         raise ValueError("URL must be an Audiomack album or playlist URL.")
-    # ------------------------------------
+    # -----------------------------------------
 
     print(f"[*] Extracting Audiomack album/playlist: {album_url}")
 
@@ -874,28 +874,55 @@ def extract_album_info(
                 timeout=20000,
             )
 
-            # --- [TAMBAHAN LOGIKA INFINITE SCROLL] ---
-            print("[*] Menggulir halaman ke bawah untuk memuat seluruh lagu...")
+            # --- [PERBAIKAN: KOLEKTOR LINK DINAMIS SAAT SCROLL] ---
+            all_track_urls = []
+            seen_urls = set()
+
+            def _collect_visible_tracks():
+                try:
+                    hrefs = page.evaluate('''() => {
+                        return Array.from(document.querySelectorAll('a[href*="/song/"]')).map(a => a.href);
+                    }''')
+                    for href in hrefs:
+                        if href and "/song/" in href:
+                            parsed = urlparse(href)
+                            clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                            if clean not in seen_urls:
+                                seen_urls.add(clean)
+                                all_track_urls.append(clean)
+                except Exception:
+                    pass
+
+            print("[*] Menggulir halaman dan mengekstrak link lagu bertahap...")
             last_height = page.evaluate("document.body.scrollHeight")
-            # Batasi maksimal 40x scroll agar tidak terjebak infinite loop
-            for _ in range(40):
+            
+            # Kumpulkan lagu pertama kali halaman dimuat
+            _collect_visible_tracks()
+            
+            for _ in range(50):  # Maksimal 50 scroll (cukup untuk 500+ lagu)
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(1000) # Tunggu 1 detik agar Audiomack memuat elemen
+                page.wait_for_timeout(1500) # Beri waktu render
+                
+                # Kumpulkan lagu yang baru muncul
+                _collect_visible_tracks()
                 
                 new_height = page.evaluate("document.body.scrollHeight")
                 if new_height == last_height:
-                    # Pancing lazy load dengan scroll sedikit ke atas lalu ke bawah lagi
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight - 500)")
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight - 600)")
                     page.wait_for_timeout(500)
                     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    page.wait_for_timeout(1000)
+                    page.wait_for_timeout(1500)
+                    
+                    # Kumpulkan lagi setelah pancingan
+                    _collect_visible_tracks()
                     
                     new_height = page.evaluate("document.body.scrollHeight")
                     if new_height == last_height:
-                        break # Hentikan scroll jika sudah sampai ujung bawah halaman
+                        break # Sudah mencapai bawah halaman
                 last_height = new_height
-            print("[*] Selesai menggulir halaman.")
-            # ------------------------------------------
+                
+            print(f"[*] Selesai menggulir. Sukses mengamankan: {len(all_track_urls)} lagu.")
+            # ------------------------------------------------------
 
             # Brief pause for album meta tags and track links
             page.wait_for_timeout(600)
@@ -972,8 +999,14 @@ def extract_album_info(
                         if t_url:
                             track_urls.append(urljoin(album_url, str(t_url)))
 
+            # --- [GABUNGKAN HASIL SCROLL DENGAN DOM BAWAAN] ---
+            for url in all_track_urls:
+                if url not in track_urls:
+                    track_urls.append(url)
+            # --------------------------------------------------
+
             album_data["albumTotalTracks"] = len(track_urls)
-            print(f"[✓] Found {len(track_urls)} tracks.")
+            print(f"[✓] Total Final {len(track_urls)} tracks terdeteksi.")
 
             # Fast album total duration extraction
             total_seconds = 0
