@@ -281,6 +281,15 @@ except ImportError as e:
     async def start_genie(*args, **kwargs):
         raise NotImplementedError(f"Modul Genie gagal dimuat.")
 
+# [TAMBAHAN BARU MANGAPLUS DISINI]
+try:
+    from bot.helpers.mangaplus.handler import start_mangaplus
+except ImportError as e:
+    from bot.logger import LOGGER
+    LOGGER.error(f"Gagal memuat modul MangaPlus: {e}")
+    async def start_mangaplus(*args, **kwargs):
+        raise NotImplementedError("Modul MangaPlus belum diimplementasikan.")
+
 
 from ..helpers.message import send_message, check_user, fetch_user_details, edit_message
 
@@ -714,6 +723,8 @@ async def start_link(link: str, user: dict) -> None:
     amazon = ["https://music.amazon.com", "https://music.amazon.co.jp", "https://music.amazon.co.uk", "https://music.amazon.fr", "https://music.amazon.com.mx", "https://music.amazon.com.br", "https://music.amazon.de", "https://music.amazon.com.au", "https://music.amazon.ca", "https://music.amazon.it", "https://music.amazon.es", "https://music.amazon.com.ar", "https://music.amazon.com/es-ar", "https://music.amazon.com/en-ar", "https://music.amazon.in", "music.amazon"]
 
     genie = ["https://www.genie.co.kr", "genie.co.kr", "https://app.genie.co.kr"]
+
+    mangaplus = ["https://mangaplus.shueisha.co.jp"]
     
     # Blok TIDAL
     if link.startswith(tuple(tidal)):
@@ -1187,6 +1198,17 @@ async def start_link(link: str, user: dict) -> None:
             return
         except Exception as e:
             LOGGER.error(f"Genie Gagal: {e}")
+            raise e
+
+    # [TAMBAHAN BLOK MANGAPLUS]
+    elif any(d in link for d in mangaplus):
+        user['provider'] = 'MangaPlus'
+        try:
+            await start_mangaplus(link, user)
+            LOGGER.info("MangaPlus: Unduhan berhasil.")
+            return
+        except Exception as e:
+            LOGGER.error(f"MangaPlus Gagal: {e}")
             raise e
 
     else:
