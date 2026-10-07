@@ -152,7 +152,9 @@ async def start_khinsider(url, user):
             filepath = f"{album_folder_path}/{filename}"
             
             # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
-            headers_dict = {"User-Agent": khinsider_manager.headers["User-Agent"]}
+            # Salin seluruh header browser dan tambahkan halaman track sebagai Referer
+            headers_dict = khinsider_manager.headers.copy()
+            headers_dict["Referer"] = track['url']
             
             # [KUNCI RAHASIA] Gunakan 'msg': None.
             # Aria2 tetap mendapat Headers penyamaran, tidak akan crash, dan UI tetap rapi!
