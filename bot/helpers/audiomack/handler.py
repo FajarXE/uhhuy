@@ -2,6 +2,8 @@
 import os
 import asyncio
 import hashlib
+import shutil
+from PIL import Image
 from bot.logger import LOGGER
 from config import Config
 from bot.helpers.utils import download_file, post_art_poster
@@ -11,6 +13,19 @@ from bot.helpers.uploder import track_upload, album_upload
 from .api import AudiomackAPI
 
 api = AudiomackAPI()
+
+def _convert_to_jpeg(img_path):
+    """Konversi gambar WebP ke JPEG agar didukung penuh oleh Telegram"""
+    try:
+        with Image.open(img_path) as img:
+            if img.format != 'JPEG':
+                rgb_im = img.convert('RGB')
+                new_path = img_path + "_converted.jpg"
+                rgb_im.save(new_path, "JPEG")
+                return new_path
+    except Exception as e:
+        LOGGER.error(f"Gagal konversi gambar: {e}")
+    return img_path
 
 async def start_audiomack(link: str, user: dict):
     if "/album/" in link.lower():
@@ -38,7 +53,6 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         
     ext = 'm4a' if '.m4a' in stream_url else 'mp3'
     
-    # --- [PERBAIKAN KEYERROR] Menggunakan 'title' bukan 'albumTitle' ---
     folder_name = f"{user['r_id']}/Audiomack"
     if album_meta:
         folder_name += f"/{album_meta['title']}"
@@ -58,17 +72,24 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         'duration': track_data.get('duration', '0:00'),
         'tracknumber': str(track_data.get('trackNumber', 1)),
         'totaltracks': str(album_meta.get('totaltracks', 1)) if album_meta else '1',
+        # --- [PERBAIKAN CAPTION TEKS] ---
+        'totalvolume': str(album_meta.get('totalvolume', 1)) if album_meta else '1',
+        'volume': '1',
+        'explicit': 'False',
+        # --------------------------------
         'filepath': filepath,
         'provider': 'Audiomack',
         'type': 'track',
         'quality': 'HQ',
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
-    # -------------------------------------------------------------------
     
-    cover_url = track_data.get('trackImageUrl') or (album_meta.get('cover') if album_meta else '')
+    cover_url = track_data.get('trackImageUrl') or (album_meta.get('cover_url') if album_meta else '')
     metadata['cover'] = await create_cover_file(cover_url, metadata)
-    metadata['thumbnail'] = await create_cover_file(cover_url, metadata, True)
+    
+    # --- [KONVERSI WEBP -> JPEG] ---
+    if metadata['cover'] and os.path.exists(metadata['cover']):
+        metadata['cover'] = await asyncio.to_thread(_convert_to_jpeg, metadata['cover'])
     
     details = {'msg': user.get('bot_msg'), 'title': title, 'type': 'Track', 'action': 'Download'}
     err = await download_file(stream_url, filepath, details=details)
@@ -95,7 +116,6 @@ async def process_album(link: str, user: dict):
         
     folder_path = os.path.join(Config.DOWNLOAD_BASE_DIR, f"{user['r_id']}/Audiomack", album_data['albumTitle'])
     
-    # --- [PERBAIKAN] Menambahkan field data tambahan yang dibutuhkan process_track ---
     album_meta = {
         'type': 'album',
         'title': album_data['albumTitle'],
@@ -104,18 +124,34 @@ async def process_album(link: str, user: dict):
         'date': album_data.get('albumYear', ''),
         'genre': album_data.get('albumGenre', ''),
         'totaltracks': total_tracks,
+        # --- [PERBAIKAN CAPTION TEKS] ---
+        'totalvolume': '1',
+        'volume': '1',
+        'explicit': 'False',
+        # --------------------------------
         'folderpath': folder_path,
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/",
         'provider': 'Audiomack',
         'tracks': [],
         'poster_msg': None,
-        'quality': 'HQ'
+        'quality': 'HQ',
+        'cover_url': album_data.get('albumImageUrl')
     }
-    # -------------------------------------------------------------------------------
     
-    cover_url = album_data.get('albumImageUrl')
-    album_meta['cover'] = await create_cover_file(cover_url, album_meta)
-    album_meta['thumbnail'] = await create_cover_file(cover_url, album_meta, True)
+    album_meta['cover'] = await create_cover_file(album_meta['cover_url'], album_meta)
+    
+    # --- [PERBAIKAN COVER THUMBNAIL DAN FOLDER ZIP] ---
+    if album_meta['cover'] and os.path.exists(album_meta['cover']):
+        # Konversi WebP ke JPEG agar Telegram menerimanya sebagai Thumbnail ZIP
+        album_meta['cover'] = await asyncio.to_thread(_convert_to_jpeg, album_meta['cover'])
+        
+        # Menyalin file cover.jpg ke folder album sebelum di-zip
+        os.makedirs(folder_path, exist_ok=True)
+        try:
+            shutil.copy2(album_meta['cover'], os.path.join(folder_path, "cover.jpg"))
+        except Exception as e:
+            LOGGER.error(f"Gagal menyalin cover ke folder album: {e}")
+    # --------------------------------------------------
     
     album_meta['poster_msg'] = await post_art_poster(user, album_meta)
     if not album_meta['poster_msg']:
