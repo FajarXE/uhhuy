@@ -1208,9 +1208,10 @@ async def start_link(link: str, user: dict) -> None:
     # Blok AUDIOMACK
     elif any(d in link for d in audiomack):
         user['provider'] = 'Audiomack'
-        # Cek jika Scraper API sedang tidak dihidupkan
-        if not audiomack_manager or not audiomack_manager.clients:
-            raise Exception("Maaf, layanan Audiomack sedang offline (Scraper API tidak aktif).")
+        
+        # UBAH PENGECEKAN INI:
+        if not audiomack_manager:
+            raise Exception("Maaf, modul Audiomack tidak berhasil dimuat di sistem.")
         
         try:
             await start_audiomack(link, user)
