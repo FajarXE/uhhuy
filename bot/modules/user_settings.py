@@ -83,6 +83,11 @@ try:
 except ImportError:
     logging.warning("UserSettings: Gagal mengimpor genie_manager.")
     genie_manager = None
+try:
+    from ..helpers.audiomack.manager import audiomack_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor audiomack_manager.")
+    audiomack_manager = None
 
 # --- IMPORT BUTTONS ---
 # Pastikan Anda sudah menambahkan 'beatport_user_auth_buttons' di bot/helpers/buttons/settings.py
@@ -90,7 +95,7 @@ from ..helpers.buttons.settings import (
     usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
     sc_button, id_button, bugs_button, lyrics_button, mv_button,
-    lp_button, khi_button, beatport_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button
+    lp_button, khi_button, beatport_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button, amack_button
 )
 from ..helpers.database.mongo_async import database
 from ..helpers.utils import fetch_zip_settings
@@ -1353,7 +1358,7 @@ async def uset_upload_mode_handler(client, query):
 
 
 # --- HANDLER UTAMA TOMBOL MENU (PROVIDER SETTINGS) ---
-@Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider|amazon|genie)"))
+@Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider|amazon|genie|audiomack)"))
 async def uset_cb(client, query, datatype=""):
     if not await check_user(msg=query.message):
         return
@@ -1727,6 +1732,21 @@ async def uset_cb(client, query, datatype=""):
             quality[current] = quality[current] + '✅'
             
         return await edit_message(query.message, text, markup=gn_button(quality, user_id))
+
+    # --- AUDIOMACK MENU ---
+    if data[1] == "audiomack" or datatype == "audiomack":
+        text = f"Choose Audiomack Audio Quality bellow:"
+        quality = {"HQ": "HQ (Default Server)"}
+        
+        if not audiomack_manager:
+            return await edit_message(query.message, "Layanan Audiomack tidak aktif.")
+
+        current = bot_set.user_data.get(user_id, {}).get("audiomack_qual", getattr(audiomack_manager, 'quality', 'HQ')) 
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+            
+        return await edit_message(query.message, text, markup=amack_button(quality, user_id))
 
 
 # --- HANDLER SETTING TIDAL SPECIFIC ---
@@ -2244,6 +2264,27 @@ async def uset_genie_handler(client, query):
     await uset_cb(client, query, "genie")
 
 
+@Client.on_callback_query(filters.regex("^uamacks_"))
+async def uset_audiomack_handler(client, query):
+    if not await check_user(msg=query.message):
+        return
+    
+    to_set = query.data.split('_')[1]
+    user_id = query.from_user.id
+    
+    if not audiomack_manager:
+        return await query.answer("Layanan Audiomack tidak aktif!", show_alert=True)
+    
+    if hasattr(audiomack_manager, 'setup_quality'):
+        await audiomack_manager.setup_quality(user_id, to_set)
+        
+    bot_set.user_data.setdefault(user_id, {})['audiomack_qual'] = to_set 
+    from bot.helpers.database.mongo_async import database
+    await database.save_user_settings(user_id, {'audiomack_qual': to_set})
+    
+    await uset_cb(client, query, "audiomack")
+
+
 # --- HANDLER CALLBACK BARU UNTUK LIRIK ---
 # Ubah filter regex untuk menyertakan 'uset_sendly'
 @Client.on_callback_query(filters.regex("^uset_ly|^uset_sendly"))
@@ -2537,11 +2578,23 @@ async def debug(c, m):
         dt_gn += "Tidak ada klien Genie yang aktif."
     # =========================================
 
+    # =========================================
+    # TAMBAHKAN AUDIOMACK DEBUG DI SINI
+    # =========================================
+    dt_amack = "\n\nAUDIOMACK:\n"
+    if audiomack_manager:
+        dt_amack += f"Klien Audiomack aktif (Scraper API Connected).\n"
+        dt_amack += f"Kualitas Default: {getattr(audiomack_manager, 'quality', 'HQ')}\n"
+        dt_amack += f"Cache User (Global): {len([u for u in bot_set.user_data if 'audiomack_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_amack += "Tidak ada klien Audiomack yang aktif."
+    # =========================================
+
     # ZIP SETTINGS DEBUG
     zips = f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
     
-    # Combine all debug texts (Pastikan dt_amz ditambahkan ke dalam final_debug_text)
-    final_debug_text = dt_qb + dt_bp + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + zips
+    # Combine all debug texts (Pastikan dt_amz dan dt_amack ditambahkan ke dalam final_debug_text)
+    final_debug_text = dt_qb + dt_bp + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + dt_amack + zips
     
     # Reply safely
     await m.reply(final_debug_text, True)
