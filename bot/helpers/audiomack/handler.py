@@ -50,7 +50,15 @@ def _fix_date(date_str, year_str):
         return date_str
 
 async def start_audiomack(link: str, user: dict):
-    if "/album/" in link.lower():
+    link_lower = link.lower()
+    
+    # --- [TAMBAHAN FILTER] ---
+    # Memblokir secara paksa semua URL yang bukan track atau album
+    if "/song/" not in link_lower and "/album/" not in link_lower:
+        raise Exception("Tautan Audiomack tidak didukung. Bot hanya memproses tautan Song (/song/) dan Album (/album/).")
+    # -------------------------
+        
+    if "/album/" in link_lower:
         await process_album(link, user)
     else:
         await process_track(link, user)
