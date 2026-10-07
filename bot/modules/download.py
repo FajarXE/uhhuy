@@ -281,6 +281,14 @@ except ImportError as e:
     async def start_genie(*args, **kwargs):
         raise NotImplementedError(f"Modul Genie gagal dimuat.")
 
+# Audiomack
+try:
+    from ..helpers.audiomack.handler import start_audiomack
+except ImportError as e:
+    LOGGER.error(f"Gagal memuat modul Audiomack Handler: {e}")
+    async def start_audiomack(*args, **kwargs):
+        raise NotImplementedError("Modul Audiomack gagal dimuat.")
+
 
 from ..helpers.message import send_message, check_user, fetch_user_details, edit_message
 
@@ -714,6 +722,8 @@ async def start_link(link: str, user: dict) -> None:
     amazon = ["https://music.amazon.com", "https://music.amazon.co.jp", "https://music.amazon.co.uk", "https://music.amazon.fr", "https://music.amazon.com.mx", "https://music.amazon.com.br", "https://music.amazon.de", "https://music.amazon.com.au", "https://music.amazon.ca", "https://music.amazon.it", "https://music.amazon.es", "https://music.amazon.com.ar", "https://music.amazon.com/es-ar", "https://music.amazon.com/en-ar", "https://music.amazon.in", "music.amazon"]
 
     genie = ["https://www.genie.co.kr", "genie.co.kr", "https://app.genie.co.kr"]
+
+    audiomack = ["https://audiomack.com", "audiomack.com"]
     
     # Blok TIDAL
     if link.startswith(tuple(tidal)):
@@ -1187,6 +1197,21 @@ async def start_link(link: str, user: dict) -> None:
             return
         except Exception as e:
             LOGGER.error(f"Genie Gagal: {e}")
+            raise e
+
+    # Blok AUDIOMACK
+    elif any(d in link for d in audiomack):
+        user['provider'] = 'Audiomack'
+        # Cek jika Scraper API sedang tidak dihidupkan
+        if not audiomack_manager or not audiomack_manager.clients:
+            raise Exception("Maaf, layanan Audiomack sedang offline (Scraper API tidak aktif).")
+        
+        try:
+            await start_audiomack(link, user)
+            LOGGER.info("Audiomack: Unduhan berhasil.")
+            return
+        except Exception as e:
+            LOGGER.error(f"Audiomack Gagal: {e}")
             raise e
 
     else:
