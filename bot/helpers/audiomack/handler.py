@@ -93,6 +93,20 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None,
         'date': raw_year,
         'genre': track_data.get('genre') or (album_meta.get('genre') if album_meta else ''),
         'producer': track_data.get('producer', ''),
+        
+        # --- [PERBAIKAN METADATA YANG HILANG] ---
+        'composer': track_data.get('producer') or track_data.get('artist', artist),
+        'publisher': album_meta.get('label', '') if album_meta else track_data.get('label', ''),
+        'pub': album_meta.get('label', '') if album_meta else track_data.get('label', ''),
+        'label': album_meta.get('label', '') if album_meta else track_data.get('label', ''),
+        'isrc': track_data.get('isrc', ''),
+        'upc': album_meta.get('upc', '') if album_meta else track_data.get('upc', ''),
+        'ean': album_meta.get('upc', '') if album_meta else track_data.get('upc', ''),
+        'barcode': album_meta.get('upc', '') if album_meta else track_data.get('upc', ''),
+        'copyright': album_meta.get('copyright', '') if album_meta else track_data.get('copyright', ''),
+        'cpr': album_meta.get('copyright', '') if album_meta else track_data.get('copyright', ''),
+        # ----------------------------------------
+        
         'duration': track_data.get('duration', '0:00'),
         'tracknumber': str(track_data.get('trackNumber', 1)).zfill(2),
         'totaltracks': str(album_meta.get('totaltracks', 1)) if album_meta else '1',
@@ -169,6 +183,13 @@ async def process_album(link: str, user: dict):
         'totalvolume': '1',
         'volume': '1',
         'explicit': 'False',
+        
+        # --- [PERBAIKAN METADATA ALBUM YANG HILANG] ---
+        'label': '',
+        'upc': '',
+        'copyright': '',
+        # ----------------------------------------------
+        
         'folderpath': folder_path,
         'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/",
         'provider': 'Audiomack',
