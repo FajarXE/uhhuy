@@ -89,11 +89,13 @@ def album(
             detail="Invalid Audiomack URL"
         )
 
-    if "/album/" not in url:
+    # --- [PERBAIKAN: IZINKAN PLAYLIST] ---
+    if "/album/" not in url and "/playlist/" not in url:
         raise HTTPException(
             status_code=400,
-            detail="URL must be an Audiomack album URL"
+            detail="URL must be an Audiomack album or playlist URL"
         )
+    # ------------------------------------
 
     if track is not None and track < 1:
         raise HTTPException(
