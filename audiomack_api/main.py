@@ -2,8 +2,8 @@ import time
 from fastapi import FastAPI, Query, HTTPException, Request
 
 try:
-    from app.test import extract_track_info
-    from app.album import extract_album_info
+    from audiomack_api.test import extract_track_info
+    from audiomack_api.album import extract_album_info
 except ModuleNotFoundError:
     from test import extract_track_info
     from album import extract_album_info
