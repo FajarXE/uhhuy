@@ -31,3 +31,6 @@ platformdirs
 PySocks
 pyplayready
 packaging
+fastapi
+uvicorn
+playwright
