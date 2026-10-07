@@ -50,7 +50,6 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         'artist': artist,
         'album': album_meta['albumTitle'] if album_meta else title,
         'albumartist': album_meta['albumArtist'] if album_meta else artist,
-        'cover': track_data.get('trackImageUrl') or (album_meta.get('cover') if album_meta else ''),
         'release_date': track_data.get('releaseDate') or (album_meta.get('albumReleaseDate') if album_meta else ''),
         'date': track_data.get('year') or (album_meta.get('albumYear') if album_meta else ''),
         'genre': track_data.get('genre') or (album_meta.get('albumGenre') if album_meta else ''),
@@ -61,19 +60,26 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None)
         'filepath': filepath,
         'provider': 'Audiomack',
         'type': 'track',
-        'quality': 'HQ'
+        'quality': 'HQ',
+        # Mendaftarkan direktori sementara seperti yang Qobuz lakukan
+        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
+    
+    # --- MENGIKUTI STRUKTUR QOBUZ SECARA NATIVE ---
+    cover_url = track_data.get('trackImageUrl') or (album_meta.get('albumImageUrl') if album_meta else '')
+    metadata['cover'] = await create_cover_file(cover_url, metadata)
+    metadata['thumbnail'] = await create_cover_file(cover_url, metadata, True)
+    # ----------------------------------------------
     
     details = {'msg': user.get('bot_msg'), 'title': title, 'type': 'Track', 'action': 'Download'}
     err = await download_file(stream_url, filepath, details=details)
     if err:
         raise Exception(f"Gagal mengunduh stream Aria2: {err}")
     
-    # Fungsi bawaan ini akan otomatis mengunduh 'cover' menjadi file .jpg jika masih berupa http URL
     await set_metadata(metadata, user['user_id'])
     
     if not album_meta:
-        # Kirim Art Poster untuk single track
+        # Kirim Art Poster untuk single track menggunakan fungsi asli
         metadata['poster_msg'] = await post_art_poster(user, metadata)
         if not metadata['poster_msg']:
             metadata['poster_msg'] = user.get('bot_msg')
@@ -96,22 +102,22 @@ async def process_album(link: str, user: dict):
         'title': album_data['albumTitle'],
         'artist': album_data['albumArtist'],
         'folderpath': folder_path,
-        'tempfolder': folder_path,
         'provider': 'Audiomack',
         'tracks': [],
         'poster_msg': None,
-        'cover': album_data.get('albumImageUrl'),
-        'quality': 'HQ'
+        'quality': 'HQ',
+        # Mendaftarkan direktori sementara seperti yang Qobuz lakukan
+        'tempfolder': f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     }
     
-    # 1. Download cover mentah menjadi file lokal (.jpg). Pyrogram yang akan mengurus pemotongannya.
-    if album_meta['cover']:
-        album_meta['cover'] = await create_cover_file(album_meta['cover'], album_meta)
-        
-    # 2. Kirim pesan Art Poster ke Telegram SEBELUM lagu diproses (memakai fungsi bawaan bot)
-    album_meta['poster_msg'] = await post_art_poster(user, album_meta)
+    # --- MENGIKUTI STRUKTUR QOBUZ SECARA NATIVE ---
+    cover_url = album_data.get('albumImageUrl')
+    album_meta['cover'] = await create_cover_file(cover_url, album_meta)
+    album_meta['thumbnail'] = await create_cover_file(cover_url, album_meta, True)
+    # ----------------------------------------------
     
-    # Fallback jika poster dinonaktifkan di /usetting
+    # Kirim Art Poster SEBELUM pengunduhan track
+    album_meta['poster_msg'] = await post_art_poster(user, album_meta)
     if not album_meta['poster_msg']:
         album_meta['poster_msg'] = user.get('bot_msg')
     
