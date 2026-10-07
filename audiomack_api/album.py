@@ -829,8 +829,10 @@ def extract_album_info(
     if not album_url:
         raise ValueError("Album URL is required.")
 
-    if "/album/" not in album_url.lower():
-        raise ValueError("URL must be an Audiomack album URL.")
+    # --- [PERBAIKAN: IZINKAN PLAYLIST] ---
+    if "/album/" not in album_url.lower() and "/playlist/" not in album_url.lower():
+        raise ValueError("URL must be an Audiomack album or playlist URL.")
+    # ------------------------------------
 
     print(f"[*] Extracting Audiomack album: {album_url}")
 
