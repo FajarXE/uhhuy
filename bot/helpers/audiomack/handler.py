@@ -11,7 +11,7 @@ from config import Config
 import bot.helpers.translations as lang
 from bot.helpers.utils import download_file, post_art_poster, format_string, run_concurrent_tasks
 from bot.helpers.metadata import set_metadata, create_cover_file
-from bot.helpers.uploder import track_upload, album_upload
+from bot.helpers.uploder import track_upload, album_upload, playlist_upload
 
 from .api import AudiomackAPI
 
@@ -50,7 +50,8 @@ def _fix_date(date_str, year_str):
         return date_str
 
 async def start_audiomack(link: str, user: dict):
-    if "/album/" in link.lower():
+    # --- [MENDUKUNG PLAYLIST] ---
+    if "/album/" in link.lower() or "/playlist/" in link.lower():
         await process_album(link, user)
     else:
         await process_track(link, user)
@@ -119,15 +120,10 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None,
     await set_metadata(metadata, user['user_id'])
     
     if upload and not album_meta:
-        metadata['poster_msg'] = await post_art_poster(user, metadata)
-        if not metadata['poster_msg']:
-            metadata['poster_msg'] = user.get('bot_msg')
-            
         await track_upload(metadata, user)
         
     return metadata
 
-# Helper task untuk concurrent runner
 async def _scrape_and_download(link, track_num, user, album_meta):
     try:
         track_data_resp = await api.get_album(link, track=track_num)
@@ -135,15 +131,18 @@ async def _scrape_and_download(link, track_num, user, album_meta):
         if track_info:
             return await process_track(link, user, track_info, album_meta, upload=False)
     except Exception as e:
-        LOGGER.error(f"Gagal memproses lagu ke-{track_num} dari album Audiomack: {e}")
+        LOGGER.error(f"Gagal memproses lagu ke-{track_num} dari album/playlist Audiomack: {e}")
     return None
 
 async def process_album(link: str, user: dict):
+    # Identifikasi apakah ini playlist atau album
+    is_playlist = "/playlist/" in link.lower()
+    
     album_data = await api.get_album(link)
     total_tracks = album_data.get('albumTotalTracks', 0)
     
     if total_tracks == 0:
-        raise Exception("Tidak ada lagu yang ditemukan di album ini.")
+        raise Exception("Tidak ada lagu yang ditemukan di tautan ini.")
         
     folder_path = os.path.join(Config.DOWNLOAD_BASE_DIR, f"{user['r_id']}/Audiomack", album_data['albumTitle'])
     
@@ -152,7 +151,7 @@ async def process_album(link: str, user: dict):
     fixed_date = _fix_date(raw_date, raw_year)
     
     album_meta = {
-        'type': 'album',
+        'type': 'playlist' if is_playlist else 'album',
         'title': album_data['albumTitle'],
         'artist': album_data['albumArtist'],
         'release_date': fixed_date,
@@ -180,30 +179,30 @@ async def process_album(link: str, user: dict):
         try:
             shutil.copy2(album_meta['cover'], os.path.join(folder_path, "cover.jpg"))
         except Exception as e:
-            LOGGER.error(f"Gagal menyalin cover ke folder album: {e}")
+            LOGGER.error(f"Gagal menyalin cover ke folder: {e}")
     
     album_meta['poster_msg'] = await post_art_poster(user, album_meta)
     if not album_meta['poster_msg']:
         album_meta['poster_msg'] = user.get('bot_msg')
     
-    # Menyiapkan konfigurasi Papan Progress (UI) agar rapi
     update_details = {'text': lang.s.DOWNLOAD_PROGRESS, 'msg': user['bot_msg'], 'title': album_meta['title'], 'type': album_meta['type']}
     
     tasks = []
     for i in range(1, total_tracks + 1):
         tasks.append(_scrape_and_download(link, i, user, album_meta))
         
-    # --- [PERBAIKAN UI] ---
-    # Menggunakan antrean resmi (run_concurrent_tasks) dengan limit=1 agar 
-    # tampilannya 100% konsisten seperti Qobuz dan tidak membebani server
     task_results = await run_concurrent_tasks(tasks, update_details, limit=1)
-    # ----------------------
     
     successful_tracks = [res for res in task_results if res]
     album_meta['tracks'] = successful_tracks
     album_meta['totaltracks'] = len(successful_tracks)
             
     if not album_meta['tracks']:
-        raise Exception("Gagal mengekstrak dan mengunduh lagu apa pun dari album ini.")
+        raise Exception("Gagal mengekstrak dan mengunduh lagu apa pun dari tautan ini.")
         
-    await album_upload(album_meta, user)
+    # --- [PERBAIKAN UPLOAD KHUSUS PLAYLIST] ---
+    if is_playlist:
+        await playlist_upload(album_meta, user)
+    else:
+        await album_upload(album_meta, user)
+    # ------------------------------------------
