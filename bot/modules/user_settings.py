@@ -168,6 +168,17 @@ async def del_vk_cmd(client, message):
     if await check_user(msg=message):
         await _del_token(message, 'viking_token', 'Vikingfiles')
 
+# --- 4. PIXELDRAIN ---
+@Client.on_message(filters.command(["set_pixeldrain", "set_pd"]))
+async def set_pd_cmd(client, message):
+    if await check_user(msg=message):
+        await _save_token(message, 'pixeldrain_token', 'Pixeldrain')
+
+@Client.on_message(filters.command(["del_pixeldrain", "delete_pixeldrain", "del_pd"]))
+async def del_pd_cmd(client, message):
+    if await check_user(msg=message):
+        await _del_token(message, 'pixeldrain_token', 'Pixeldrain')
+
 
 # ==================================
 # BEATPORT PRIVATE AUTH (USER SETTINGS)
@@ -1299,8 +1310,8 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     t_bh = "✅" if curr_settings.get('buzzheavier_token') else "❌"
     t_vk = "✅" if curr_settings.get('viking_token') else "❌"
     t_tf = "✅ (No Token Needed)" # Langsung menyala karena anonim
+    t_pd = "✅" if curr_settings.get('pixeldrain_token') else "❌"
 
-    # Template Teks Menu
     USETTING_TEXT = f"""
 <blockquote>
 <b>📦 ZIP SETTINGS</b>
@@ -1311,10 +1322,12 @@ VIDEO : {v_zip}
 <b>☁️ UPLOAD MODE: {upload_mode}</b>
 Gofile: {t_gf} | Buzz: {t_bh}
 Viking: {t_vk} | Transfer: {t_tf}
+Pixeldrain: {t_pd}
 </blockquote>
 {m.date.now().strftime("%d/%m/%Y %H:%M:%S")}
 Choose Menu option below:
 """
+    
     
     # Kirim Pesan
     target_chat = m.chat.id if not edit else m.chat.id # Logic send message biasa
@@ -1337,7 +1350,7 @@ async def uset_upload_mode_handler(client, query):
     current_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', 'Telegram')
     
     # Daftar Mode yang tersedia
-    modes = ['Telegram', 'Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']
+    modes = ['Telegram', 'Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain']
     
     # Cari index saat ini
     try:
