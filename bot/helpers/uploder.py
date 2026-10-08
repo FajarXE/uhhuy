@@ -277,7 +277,7 @@ async def album_upload(metadata: dict, user: UserDetails):
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
         LOGGER.info(f"[DEBUG ALBUM] Hasil Zipping: {metadata.get('zip_path')}")
 
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']:
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path'] 
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
@@ -346,7 +346,7 @@ async def artist_upload(metadata: dict, user: UserDetails):
             await progress_message(0, 1, up_zip)
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
 
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']:
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path']
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
@@ -407,7 +407,7 @@ async def playlist_upload(metadata: dict, user: UserDetails):
             await progress_message(0, 1, up_zip)
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
 
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']:
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path'] 
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
@@ -470,7 +470,7 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
     user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', bot_set.upload_mode)
     upload_success = False
     
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']:
         link = await upload_to_cloud_handler(metadata['filepath'], user, metadata, user_mode.title())
         if link:
             caption = await create_simple_text(metadata, user)
