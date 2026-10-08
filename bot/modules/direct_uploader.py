@@ -8,6 +8,7 @@ import re
 import io
 import time
 import aiohttp
+import base64
 from urllib.parse import quote
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -333,6 +334,74 @@ class DirectUpload:
                 # ------------------------------------
         return None
 
+    # ============================
+    # PIXELDRAIN HANDLER (AIOHTTP)
+    # ============================
+    async def pixeldrain_create_list(self, token, title, file_ids):
+        url = "https://pixeldrain.com/api/list"
+        headers = {}
+        if token:
+            auth_str = base64.b64encode(f":{token}".encode()).decode()
+            headers["Authorization"] = f"Basic {auth_str}"
+        
+        payload = {
+            "title": title,
+            "anonymous": False if token else True,
+            "files": [{"id": fid} for fid in file_ids]
+        }
+        try:
+            session = get_upload_session()
+            async with session.post(url, json=payload, headers=headers, timeout=15) as r:
+                res = await r.json()
+                if res.get('success') or res.get('id'):
+                    return f"https://pixeldrain.com/l/{res.get('id')}"
+        except Exception as e:
+            LOGGER.error(f"Pixeldrain Create List Error: {e}")
+        return None
+
+    async def _upload_pixeldrain_aiohttp(self, filepath, token, details):
+        url = "https://pixeldrain.com/api/file"
+        filename = os.path.basename(filepath)
+
+        headers = {}
+        if token:
+            auth_str = base64.b64encode(f":{token}".encode()).decode()
+            headers["Authorization"] = f"Basic {auth_str}"
+
+        data = aiohttp.FormData(quote_fields=False)
+        data.add_field("name", filename)
+        data.add_field("anonymous", "False" if token else "True")
+
+        wrapper = ProgressFileWrapper(filepath, details)
+        data.add_field("file", wrapper, filename=filename)
+
+        try:
+            session = get_upload_session()
+            async with session.post(url, data=data, headers=headers, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+                res = await resp.json()
+                wrapper.close()
+                if res.get('id'):
+                    return f"https://pixeldrain.com/u/{res.get('id')}"
+                else:
+                    LOGGER.error(f"Pixeldrain Response Error: {res}")
+        except Exception as e:
+            wrapper.close()
+            if 'DIBATALKAN_PENGGUNA' in str(e):
+                LOGGER.warning(f"Pixeldrain Upload dibatalkan oleh pengguna: {filename}")
+                try:
+                    from bot.helpers.message import edit_message
+                    if details and 'msg' in details:
+                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                except Exception:
+                    pass
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+            else:
+                LOGGER.error(f"Pixeldrain Upload Error: {e}")
+                if isinstance(e, (ServerDisconnectedError, ClientConnectorError, asyncio.TimeoutError)):
+                    get_upload_session(force_refresh=True)
+                    LOGGER.info("Cloud Uploader: Sesi aiohttp Pixeldrain dibuang karena terdeteksi mati.")
+        return None
+
     # Tambahkan ini di dalam kelas DirectUpload (di bawah metode _upload_viking_aiohttp)
     async def _upload_transferit_subprocess(self, filepath, details):
         import sys, tempfile, re
@@ -460,6 +529,12 @@ class DirectUpload:
                 LOGGER.info(f"Uploading Viking (Aiohttp): {file_name}")
                 link = await self._upload_viking_aiohttp(filepath, token, details)
                 return {'Vikingfiles': link} if link else None
+
+        elif upload_type in ['pd', 'pixeldrain']:
+            token = self.user_dict.get("pixeldrain", {}).get("api")
+            LOGGER.info(f"Uploading Pixeldrain (Aiohttp): {file_name}")
+            link = await self._upload_pixeldrain_aiohttp(filepath, token, details)
+            return {'Pixeldrain': link} if link else None
 
         # Tambahan baru untuk Transfer.it
         elif upload_type in ['tf', 'transferit']:
