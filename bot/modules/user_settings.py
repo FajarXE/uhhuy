@@ -1298,7 +1298,7 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     t_gf = "✅" if curr_settings.get('gofile_token') else "❌"
     t_bh = "✅" if curr_settings.get('buzzheavier_token') else "❌"
     t_vk = "✅" if curr_settings.get('viking_token') else "❌"
-    t_tf = "✅ (No Token)" # Langsung menyala karena anonim
+    t_tf = "✅ (No Token Needed)" # Langsung menyala karena anonim
 
     # Template Teks Menu
     USETTING_TEXT = f"""
