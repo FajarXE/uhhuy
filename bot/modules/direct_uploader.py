@@ -8,6 +8,7 @@ import re
 import io
 import time
 import aiohttp
+import hashlib
 import base64
 import unicodedata
 import uuid
