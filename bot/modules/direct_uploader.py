@@ -333,8 +333,93 @@ class DirectUpload:
                 # ------------------------------------
         return None
 
+    # Tambahkan ini di dalam kelas DirectUpload (di bawah metode _upload_viking_aiohttp)
+    async def _upload_transferit_subprocess(self, filepath, details):
+        import sys, tempfile, re
+        
+        filename = os.path.basename(filepath)
+        state_file = os.path.join(tempfile.gettempdir(), f"tf_{os.urandom(4).hex()}.json")
+        script_path = os.path.join(os.getcwd(), "transferit_upload.py")
+        
+        # Mengeksekusi script headless uploader bawaan
+        cmd = [sys.executable, script_path, "-v", "--state", state_file, str(filepath)]
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            # Membaca stderr untuk Radar UI Progress
+            async def parse_stderr():
+                try:
+                    from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
+                    import time
+                    
+                    while True:
+                        line = await process.stderr.readline()
+                        if not line:
+                            break
+                            
+                        if details and 'task_id' in details:
+                            if details['task_id'] in GLOBAL_CANCEL_DICT:
+                                process.terminate()
+                                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+                                
+                        line_str = line.decode().strip()
+                        
+                        # Menangkap log: "POST namafile: 10/50 MiB (5.00 MiB/s)"
+                        if "POST" in line_str and "MiB" in line_str:
+                            task_id = details.get('task_id') if details else None
+                            if task_id and task_id in GLOBAL_TASKS:
+                                GLOBAL_TASKS[task_id]['timestamp'] = time.time()
+                                GLOBAL_TASKS[task_id]['action'] = 'Uploading'
+                                GLOBAL_TASKS[task_id]['machine'] = 'Transfer.it CLI'
+                                
+                                match = re.search(r'(\d+)/(\d+)\s+MiB', line_str)
+                                if match:
+                                    sent = int(match.group(1)) * 1024 * 1024
+                                    total = int(match.group(2)) * 1024 * 1024
+                                    GLOBAL_TASKS[task_id]['processed'] = f"{match.group(1)} MiB of {match.group(2)} MiB"
+                                    
+                                    if total > 0:
+                                        pct = (sent / total) * 100
+                                        filled = int((pct / 100) * 12)
+                                        GLOBAL_TASKS[task_id]['progress_bar'] = "■" * filled + "□" * (12 - filled)
+                                        GLOBAL_TASKS[task_id]['percentage'] = f"{pct:.2f}%"
+                except Exception as e:
+                    LOGGER.debug(f"Transfer.it stderr parser error: {e}")
+
+            stderr_task = asyncio.create_task(parse_stderr())
+            stdout_data, _ = await process.communicate()
+            stderr_task.cancel()
+            
+            if os.path.exists(state_file):
+                os.remove(state_file)
+                
+            if process.returncode == 0:
+                output = stdout_data.decode().strip().split('\n')
+                for line in output:
+                    if "https://transfer.it/t/" in line:
+                        return line.strip()
+            
+            return None
+            
+        except asyncio.CancelledError:
+            if 'process' in locals() and process.returncode is None:
+                process.terminate()
+            if os.path.exists(state_file):
+                os.remove(state_file)
+            raise
+        except Exception as e:
+            LOGGER.error(f"Transfer.it Subprocess Error: {e}")
+            if os.path.exists(state_file):
+                os.remove(state_file)
+            return None
+
     # ============================
-    # PUBLIC METHODS
+    # PUBLIC METHODS (Perbarui metode upload ini)
     # ============================
     async def upload(self, file_name, size, upload_type, specific_folder_id=None, details=None):
         filepath = os.path.join(self.path, file_name)
@@ -361,5 +446,11 @@ class DirectUpload:
                 LOGGER.info(f"Uploading Viking (Aiohttp): {file_name}")
                 link = await self._upload_viking_aiohttp(filepath, token, details)
                 return {'Vikingfiles': link} if link else None
+
+        # Tambahan baru untuk Transfer.it
+        elif upload_type in ['tf', 'transferit']:
+            LOGGER.info(f"Uploading Transfer.it: {file_name}")
+            link = await self._upload_transferit_subprocess(filepath, details)
+            return {'Transfer.it': link} if link else None
 
         return None
