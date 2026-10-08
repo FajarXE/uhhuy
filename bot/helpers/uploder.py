@@ -109,7 +109,13 @@ class VikingfilesStrategy(CloudStrategy):
 
     def format_result(self, uploaded_links):
         return "\n".join(uploaded_links) if uploaded_links else None
-# ==========================================
+
+class TransferitStrategy(CloudStrategy):
+    def get_upload_kwargs(self):
+        return {'upload_type': 'transferit'}
+
+    def format_result(self, uploaded_links):
+        return "\n".join(uploaded_links) if uploaded_links else None
 
 async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, mode: str):
     user_id = user['user_id']  # Editor sekarang tahu bahwa 'user_id' memang valid ada di dalam 'user'
@@ -129,10 +135,14 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
     elif mode == 'Vikingfiles': 
         token = user_data.get('viking_token')
         strategy = VikingfilesStrategy()
+    elif mode == 'Transferit': 
+        token = "anonymous"  # Transfer.it tidak membutuhkan API token pengguna
+        strategy = TransferitStrategy()
         
     if not token or not strategy:
-        await send_message(user, f"⚠️ <b>{mode} Token Missing!</b>", 'text')
-        return None
+        if mode != 'Transferit':
+            await send_message(user, f"⚠️ <b>{mode} Token Missing!</b>", 'text')
+            return None
 
     server_dict = {
         "gofile": {"api": user_data.get('gofile_token')},
