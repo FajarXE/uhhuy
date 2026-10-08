@@ -117,6 +117,32 @@ class TransferitStrategy(CloudStrategy):
     def format_result(self, uploaded_links):
         return "\n".join(uploaded_links) if uploaded_links else None
 
+class PixeldrainStrategy(CloudStrategy):
+    def __init__(self):
+        self.uploader = None
+        self.token = None
+        self.folder_name = None
+
+    async def prepare_folder(self, uploader, token, folder_name):
+        self.uploader = uploader
+        self.token = token
+        self.folder_name = folder_name
+
+    def get_upload_kwargs(self):
+        return {'upload_type': 'pixeldrain'}
+
+    async def format_result(self, uploaded_links):
+        if not uploaded_links:
+            return None
+        # Jika file lebih dari satu (seperti album/playlist), satukan ke dalam Pixeldrain List
+        if len(uploaded_links) > 1 and self.uploader and self.folder_name:
+            file_ids = [l.strip().split('/')[-1] for l in uploaded_links if '/u/' in l]
+            if file_ids:
+                list_url = await self.uploader.pixeldrain_create_list(self.token, self.folder_name, file_ids)
+                if list_url:
+                    return list_url
+        return "\n".join(uploaded_links)
+
 async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, mode: str):
     user_id = user['user_id']  # Editor sekarang tahu bahwa 'user_id' memang valid ada di dalam 'user'
     user_data = bot_set.user_data.get(user_id, {})
@@ -138,6 +164,9 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
     elif mode == 'Transferit': 
         token = "anonymous"  # Transfer.it tidak membutuhkan API token pengguna
         strategy = TransferitStrategy()
+    elif mode == 'Pixeldrain': 
+        token = user_data.get('pixeldrain_token')
+        strategy = PixeldrainStrategy()
         
     if not token or not strategy:
         if mode != 'Transferit':
@@ -147,7 +176,8 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
     server_dict = {
         "gofile": {"api": user_data.get('gofile_token')},
         "buzzheavier": {"api": user_data.get('buzzheavier_token')},
-        "vikingfiles": {"api": user_data.get('viking_token')}
+        "vikingfiles": {"api": user_data.get('viking_token')},
+        "pixeldrain": {"api": user_data.get('pixeldrain_token')}
     }
     
     # 2. Normalisasi Input (Menyatukan Logika List, File Tunggal, dan Direktori)
@@ -237,8 +267,11 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
                 if res: 
                     uploaded_links.append(list(res.values())[0])
 
-        # 5. Ekstraksi Hasil (Didelegasikan ke Strategy)
-        return strategy.format_result(uploaded_links)
+          # 5. Ekstraksi Hasil (Didelegasikan ke Strategy)
+          res = strategy.format_result(uploaded_links)
+          if asyncio.iscoroutine(res):
+              return await res
+          return res
 
     # --- PENANGANAN ERROR SPESIFIK & TRACEBACK ---
     except asyncio.TimeoutError:
@@ -288,7 +321,7 @@ async def album_upload(metadata: dict, user: UserDetails):
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
         LOGGER.info(f"[DEBUG ALBUM] Hasil Zipping: {metadata.get('zip_path')}")
 
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']:
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain']:
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path'] 
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
@@ -357,7 +390,7 @@ async def artist_upload(metadata: dict, user: UserDetails):
             await progress_message(0, 1, up_zip)
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
 
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']:
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain']:
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path']
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
@@ -418,7 +451,7 @@ async def playlist_upload(metadata: dict, user: UserDetails):
             await progress_message(0, 1, up_zip)
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
 
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']:
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain']:
         target = metadata.get('folderpath')
         if metadata.get('zip_path'): target = metadata['zip_path'] 
         link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
@@ -481,7 +514,7 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
     user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', bot_set.upload_mode)
     upload_success = False
     
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']:
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain']:
         link = await upload_to_cloud_handler(metadata['filepath'], user, metadata, user_mode.title())
         if link:
             caption = await create_simple_text(metadata, user)
