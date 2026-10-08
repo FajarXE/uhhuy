@@ -200,31 +200,42 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         total_files = len(files_to_upload)
         
         # 4. Iterasi Eksekusi Upload (Dengan Exponential Backoff: Max 3x Retry)
-        for index, file_part in enumerate(files_to_upload, 1):
-            filename = os.path.basename(file_part)
-            if details:
-                details['title'] = f"[{index}/{total_files}] {filename}" if total_files > 1 else filename
-            
-            res = None
-            for attempt in range(3):
-                try:
-                    res = await uploader.upload(filename, 0, details=details, **upload_kwargs)
-                    break # Sukses
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    if "DIBATALKAN_PENGGUNA" in str(e):
-                        raise
-                    
-                    if attempt == 2:
-                        raise e # Lempar ke blok Exception utama di bawah jika sudah 3x gagal
-                        
-                    delay = 2 * (2 ** attempt) # 2s, 4s
-                    LOGGER.warning(f"Upload {filename} gagal ({e}). Retry {attempt+1} dalam {delay}s...")
-                    await asyncio.sleep(delay)
-
-            if res: 
+        if mode == 'Transferit':
+            if total_files > 1:
+                # Eksekusi 1 folder penuh sekaligus ke Transfer.it
+                if details: details['title'] = f"Mengunggah Folder: {folder_name}"
+                res = await uploader.upload(None, 0, upload_type='transferit', details=details)
+            else:
+                # Eksekusi jika hanya 1 track satuan
+                filename = os.path.basename(files_to_upload[0])
+                if details: details['title'] = filename
+                res = await uploader.upload(filename, 0, upload_type='transferit', details=details)
+                
+            if res:
                 uploaded_links.append(list(res.values())[0])
+        else:
+            # Mode cloud lain (Gofile dkk) tetap menggunakan perulangan satu per satu
+            for index, file_part in enumerate(files_to_upload, 1):
+                filename = os.path.basename(file_part)
+                if details:
+                    details['title'] = f"[{index}/{total_files}] {filename}" if total_files > 1 else filename
+                
+                res = None
+                for attempt in range(3):
+                    try:
+                        res = await uploader.upload(filename, 0, details=details, **upload_kwargs)
+                        break 
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        if "DIBATALKAN_PENGGUNA" in str(e): raise
+                        if attempt == 2: raise e 
+                        delay = 2 * (2 ** attempt)
+                        LOGGER.warning(f"Upload {filename} gagal ({e}). Retry {attempt+1} dalam {delay}s...")
+                        await asyncio.sleep(delay)
+
+                if res: 
+                    uploaded_links.append(list(res.values())[0])
 
         # 5. Ekstraksi Hasil (Didelegasikan ke Strategy)
         return strategy.format_result(uploaded_links)
