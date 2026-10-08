@@ -1,8 +1,10 @@
 # [FILE: bot/modules/user_settings.py]
 
+import os
 import bot.helpers.translations as lang
 import logging, asyncio
 from traceback import format_exc
+from bot.logger import LOGGER
 
 from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
@@ -1204,20 +1206,25 @@ async def uset_amz_instr_handler(client, query):
 
 @Client.on_message(filters.command(["set_terabox", "set_tb"]))
 async def set_tb_cmd(client: Client, message: Message):
+    LOGGER.info(f"[TERABOX] Command /set_tb diterima dari User ID: {message.from_user.id}")
+
+    # 1. Pengecekan Autorisasi (Beri tahu jika user ditolak)
     if not await check_user(msg=message):
-        return
+        LOGGER.warning(f"[TERABOX] User {message.from_user.id} tidak diizinkan (check_user False)")
+        return await message.reply_text("❌ Anda tidak memiliki izin untuk menggunakan bot ini.")
 
     user_id = message.from_user.id
     target_msg = message.reply_to_message
 
-    # 1. Fallback jika Pyrogram tidak meng-cache pesan yang di-reply
-    if not target_msg and message.reply_to_message_id:
+    # 2. Atasi Cache Hilang Akibat Restart: Ambil ulang pesan asli dari server Telegram
+    if (not target_msg or not target_msg.document) and message.reply_to_message_id:
         try:
             target_msg = await client.get_messages(message.chat.id, message.reply_to_message_id)
-        except Exception as err:
-            return await message.reply_text(f"❌ Gagal mengambil pesan reply: <code>{err}</code>")
+            LOGGER.info("[TERABOX] Berhasil mengambil ulang pesan reply dari server Telegram.")
+        except Exception as e:
+            LOGGER.error(f"[TERABOX] Gagal fetch message reply: {e}")
 
-    # 2. Cek apakah ada file dokumen (di pesan reply atau pesan saat ini)
+    # 3. Ambil Dokumen (dari reply atau dari pesan sendiri jika dikirim via caption)
     doc = None
     if target_msg and target_msg.document:
         doc = target_msg.document
@@ -1228,20 +1235,20 @@ async def set_tb_cmd(client: Client, message: Message):
     status_msg = None
 
     try:
-        # Skenario A: Membaca dari File Dokumen
         if doc:
             file_name = doc.file_name or "cookies.txt"
             if not any(file_name.lower().endswith(ext) for ext in [".txt", ".cookie", ".cookies"]):
-                return await message.reply_text("❌ File harus berekstensi teks cookies (.txt atau .cookie)!")
+                return await message.reply_text("❌ File harus berupa file teks cookies (.txt atau .cookie)!")
 
             status_msg = await message.reply_text("📥 <i>Sedang mengunduh dan membaca cookies.txt...</i>")
 
-            # Download menggunakan file_id agar kompatibel di semua versi Pyrogram
-            downloaded = await client.download_media(doc.file_id)
-            
+            # Unduh langsung via objek Message agar aman dari ValueError Pyrogram
+            download_target = target_msg if (target_msg and target_msg.document) else message
+            downloaded = await download_target.download()
+
             if not downloaded or not os.path.exists(downloaded):
                 if status_msg: await status_msg.delete()
-                return await message.reply_text("❌ Gagal mengunduh file dari server Telegram.")
+                return await message.reply_text("❌ Gagal mengunduh file dari Telegram.")
 
             try:
                 with open(downloaded, "r", encoding="utf-8", errors="ignore") as f:
@@ -1250,47 +1257,47 @@ async def set_tb_cmd(client: Client, message: Message):
                 if os.path.exists(downloaded):
                     os.remove(downloaded)
 
-        # Skenario B: Membaca dari Teks Biasa / Argumen Command
         else:
+            # Skenario input string langsung: /set_tb ndus=xxxx...
             args = message.text.split(maxsplit=1) if message.text else []
             if len(args) > 1:
                 cookie_text = args[1].strip()
             elif target_msg and (target_msg.text or target_msg.caption):
                 cookie_text = (target_msg.text or target_msg.caption).strip()
 
-        # Validasi jika teks kosong
         if not cookie_text:
             if status_msg: await status_msg.delete()
             return await message.reply_text(
-                "❌ <b>Cookies tidak terdeteksi!</b>\n\n"
-                "Pastikan Anda me-reply langsung ke file <code>cookies.txt</code> atau ketik:\n"
-                "<code>/set_tb ndus=xxxx...</code>"
+                "❌ <b>File cookies tidak terdeteksi!</b>\n\n"
+                "Kirim ulang file <code>cookies.txt</code> yang baru lalu reply dengan <code>/set_tb</code>, "
+                "atau kirim langsung dengan teks: <code>/set_tb ndus=xxxx...</code>"
             )
 
-        # Validasi format dasar Terabox (wajib ada token ndus / browserid / terabox)
+        # 4. Validasi isi Cookie Terabox
         chk = cookie_text.lower()
         if "ndus" not in chk and "terabox" not in chk and "dubox" not in chk:
             if status_msg: await status_msg.delete()
             return await message.reply_text(
-                "⚠️ <b>Isi file tidak valid sebagai cookies Terabox.</b>\n"
-                "Pastikan cookies diekspor saat akun sudah login di web Terabox (token <code>ndus</code> wajib ada)."
+                "⚠️ <b>Isi file bukan cookies Terabox yang valid.</b>\n"
+                "Pastikan Anda mengekspor cookie saat sudah login di Terabox (wajib terdapat nilai <code>ndus</code>)."
             )
 
-        # Simpan ke memori runtime & MongoDB
+        # 5. Simpan ke Memori & Database
         bot_set.user_data.setdefault(user_id, {})['terabox_cookie'] = cookie_text
         await database.save_user_settings(user_id, {'terabox_cookie': cookie_text})
 
         if status_msg:
             await status_msg.delete()
 
-        await message.reply_text("✅ <b>Terabox Cookies Berhasil Disimpan!</b>\nAkun Anda siap digunakan untuk upload.")
+        LOGGER.info(f"[TERABOX] Cookies berhasil disimpan untuk user {user_id}")
+        await message.reply_text("✅ <b>Terabox Cookies Berhasil Disimpan!</b>\nAkun Terabox Anda siap digunakan untuk upload.")
 
     except Exception as e:
+        LOGGER.exception(f"[TERABOX FATAL ERROR]: {e}")
         if status_msg:
             try: await status_msg.delete()
             except Exception: pass
-        await message.reply_text(f"❌ <b>Error tak terduga saat memproses:</b>\n<code>{e}</code>")
-
+        await message.reply_text(f"❌ <b>Terjadi kesalahan:</b>\n<code>{e}</code>")
 
 @Client.on_message(filters.command(["del_terabox", "delete_terabox", "del_tb"]))
 async def del_tb_cmd(client: Client, message: Message):
