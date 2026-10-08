@@ -179,6 +179,51 @@ async def del_pd_cmd(client, message):
     if await check_user(msg=message):
         await _del_token(message, 'pixeldrain_token', 'Pixeldrain')
 
+# --- 5. TERABOX ---
+@Client.on_message(filters.command(["set_terabox", "set_tb"]))
+async def set_tb_cmd(client, message):
+    if not await check_user(msg=message):
+        return
+    user_id = message.from_user.id
+    doc = message.document or (message.reply_to_message.document if message.reply_to_message else None)
+    cookie_text = None
+
+    if doc:
+        if not doc.file_name.lower().endswith(('.txt', '.cookie', '.cookies')):
+            return await message.reply_text("❌ File harus berupa file cookies teks (.txt)!")
+        status_msg = await message.reply_text("📥 Mengunduh file cookies...")
+        downloaded = await client.download_media(doc)
+        try:
+            with open(downloaded, "r", encoding="utf-8", errors="ignore") as f:
+                cookie_text = f.read()
+        finally:
+            if os.path.exists(downloaded):
+                os.remove(downloaded)
+        await status_msg.delete()
+    else:
+        args = message.text.split(maxsplit=1)
+        if len(args) > 1:
+            cookie_text = args[1].strip()
+        elif message.reply_to_message and message.reply_to_message.text:
+            cookie_text = message.reply_to_message.text.strip()
+
+    if not cookie_text:
+        return await message.reply_text(
+            "❌ **Format Salah / File Tidak Ditemukan!**\n\n"
+            "Kirim file <code>cookies.txt</code> Terabox Anda dengan caption: <code>/set_terabox</code>\n"
+            "atau balas (reply) file tersebut dengan perintah <code>/set_terabox</code>.\n\n"
+            "*(Bisa juga memasukkan string cookie langsung: <code>/set_terabox ndus=...</code>)*"
+        )
+
+    bot_set.user_data.setdefault(user_id, {})['terabox_cookie'] = cookie_text
+    await database.save_user_settings(user_id, {'terabox_cookie': cookie_text})
+    await message.reply_text("✅ <b>Terabox Cookies Saved!</b>\nCookies berhasil disimpan untuk akun Anda.")
+
+@Client.on_message(filters.command(["del_terabox", "delete_terabox", "del_tb"]))
+async def del_tb_cmd(client, message):
+    if await check_user(msg=message):
+        await _del_token(message, 'terabox_cookie', 'Terabox')
+
 
 # ==================================
 # BEATPORT PRIVATE AUTH (USER SETTINGS)
@@ -1311,6 +1356,7 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     t_vk = "✅" if curr_settings.get('viking_token') else "❌"
     t_tf = "✅ (No Token Needed)" # Langsung menyala karena anonim
     t_pd = "✅" if curr_settings.get('pixeldrain_token') else "❌"
+    t_tb = "✅" if curr_settings.get('terabox_cookie') else "❌"
 
     USETTING_TEXT = f"""
 <blockquote>
@@ -1322,7 +1368,7 @@ VIDEO : {v_zip}
 <b>☁️ UPLOAD MODE: {upload_mode}</b>
 Gofile: {t_gf} | Buzz: {t_bh}
 Viking: {t_vk} | Transfer: {t_tf}
-Pixeldrain: {t_pd}
+Pixeldrain: {t_pd} | Terabox: {t_tb}
 </blockquote>
 {m.date.now().strftime("%d/%m/%Y %H:%M:%S")}
 Choose Menu option below:
@@ -1350,7 +1396,7 @@ async def uset_upload_mode_handler(client, query):
     current_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', 'Telegram')
     
     # Daftar Mode yang tersedia
-    modes = ['Telegram', 'Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain']
+    modes = ['Telegram', 'Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain', 'Terabox']
     
     # Cari index saat ini
     try:
