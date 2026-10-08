@@ -9,7 +9,11 @@ import io
 import time
 import aiohttp
 import base64
+import unicodedata
+import uuid
 from urllib.parse import quote
+from urllib.parse import unquote
+from zlib import crc32
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from aiohttp.client_exceptions import ServerDisconnectedError, ClientConnectorError
@@ -402,6 +406,322 @@ class DirectUpload:
                     LOGGER.info("Cloud Uploader: Sesi aiohttp Pixeldrain dibuang karena terdeteksi mati.")
         return None
 
+    # ============================
+    # TERABOX HANDLER (AIOHTTP)
+    # ============================
+    @staticmethod
+    def _parse_tb_cookies(raw_text: str) -> dict:
+        cookies = {}
+        if not raw_text:
+            return cookies
+        if "\t" in raw_text:
+            # Format Netscape cookies.txt
+            for line in raw_text.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or line.startswith("//"):
+                    continue
+                fields = line.split("\t")
+                if len(fields) >= 7:
+                    cookies[fields[5].strip()] = fields[6].strip()
+        else:
+            # Format string semicolon (k=v; k=v)
+            for part in raw_text.split(";"):
+                part = part.strip()
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    cookies[k.strip()] = v.strip()
+
+        if "browserid" not in cookies:
+            cookies["browserid"] = str(uuid.uuid4())
+        if "lang" not in cookies:
+            cookies["lang"] = "en"
+        return cookies
+
+    def _terabox_hash_file(self, filepath: str, size: int) -> dict:
+        MiB = 1024 * 1024
+        chunk_size = 4 * MiB if size < 1024 * MiB else (8 * MiB if size < 3 * 1024 * MiB else 12 * MiB)
+        slice_size = 256 * 1024
+
+        file_hash = hashlib.md5()
+        slice_hash = hashlib.md5()
+        chunk_hashes = []
+        crc_val = 0
+        processed = 0
+
+        with open(filepath, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                file_hash.update(chunk)
+                crc_val = crc32(chunk, crc_val)
+                chunk_hashes.append(hashlib.md5(chunk).hexdigest())
+                if processed == 0:
+                    slice_hash.update(chunk[:slice_size])
+                processed += len(chunk)
+
+        return {
+            "file": file_hash.hexdigest(),
+            "slice": slice_hash.hexdigest(),
+            "crc32": crc_val & 0xFFFFFFFF,
+            "chunks": chunk_hashes,
+            "chunk_size": chunk_size
+        }
+
+    async def _terabox_get_js_token(self, session, cookie_header: str, api_url: str):
+        endpoints = [
+            f"{api_url}/wap/home",
+            f"{api_url}/main",
+            "https://www.terabox.com/wap/home",
+            "https://www.terabox.com/main"
+        ]
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Cookie": cookie_header,
+            "Referer": "https://www.terabox.com/"
+        }
+        for ep in endpoints:
+            try:
+                async with session.get(ep, headers=headers, timeout=10) as resp:
+                    text = await resp.text()
+                    yy_match = re.search(r"window\.yyData\s*=\s*(\{.*?\});", text)
+                    if yy_match:
+                        try:
+                            d = json.loads(yy_match.group(1))
+                            if "jstoken" in d:
+                                token = d["jstoken"]
+                                if "%" in token:
+                                    token = unquote(token)
+                                in_m = re.search(r'fn\("(.*?)"\)', token)
+                                return in_m.group(1) if in_m else token
+                        except Exception:
+                            pass
+
+                    tdata_match = re.search(r"<script>var templateData = (\{.*?\});</script>", text)
+                    if tdata_match:
+                        try:
+                            d = json.loads(tdata_match.group(1))
+                            if "jsToken" in d:
+                                token = d["jsToken"]
+                                if "%" in token:
+                                    token = unquote(token)
+                                in_m = re.search(r'fn\("(.*?)"\)', token)
+                                return in_m.group(1) if in_m else token
+                        except Exception:
+                            pass
+
+                    for pat in [r'window\.jsToken\s*=\s*.*?;fn\("(.*?)"\)', r'fn\("(.+?)"\)', r'"jsToken"\s*:\s*"([^"]+)"']:
+                        m = re.search(pat, text)
+                        if m and len(m.group(1)) > 20:
+                            tok = m.group(1)
+                            return unquote(tok) if "%" in tok else tok
+            except Exception:
+                pass
+        return None
+
+    async def terabox_create_dir(self, remote_dir: str, cookie_raw: str):
+        cookie_dict = self._parse_tb_cookies(cookie_raw)
+        cookie_header = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+        api_url = "https://dm.terabox.com"
+        url = f"{api_url}/api/create"
+        data = {"path": remote_dir, "isdir": "1", "block_list": "[]", "size": "0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Cookie": cookie_header,
+            "Referer": f"{api_url}/main"
+        }
+        try:
+            session = get_upload_session()
+            async with session.post(url, data=data, headers=headers, timeout=15) as resp:
+                await resp.json(content_type=None)
+        except Exception as e:
+            LOGGER.debug(f"Terabox create dir warning: {e}")
+
+    async def terabox_share(self, remote_path: str, cookie_raw: str):
+        cookie_dict = self._parse_tb_cookies(cookie_raw)
+        cookie_header = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+        api_url = "https://dm.terabox.com"
+        url = f"{api_url}/share/pset"
+        data = {
+            "schannel": "0",
+            "channel_list": "[]",
+            "period": "0",
+            "path_list": json.dumps([remote_path])
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Cookie": cookie_header,
+            "Referer": api_url
+        }
+        try:
+            session = get_upload_session()
+            async with session.post(url, data=data, headers=headers, timeout=20) as resp:
+                res = await resp.json(content_type=None)
+                if res.get("errno") == 0 and "shorturl" in res:
+                    shorturl = res["shorturl"]
+                    if shorturl.startswith("http"):
+                        return shorturl
+                    return f"https://terabox.com/s/{shorturl}"
+                elif "link" in res:
+                    return res["link"]
+                else:
+                    LOGGER.error(f"Terabox share failed: {res}")
+        except Exception as e:
+            LOGGER.error(f"Terabox share error: {e}")
+        return None
+
+    async def _upload_terabox_aiohttp(self, filepath: str, cookie_raw: str, remote_dir: str = "/", details=None):
+        if not cookie_raw:
+            LOGGER.error("Terabox: Cookies tidak ditemukan!")
+            return None
+
+        cookie_dict = self._parse_tb_cookies(cookie_raw)
+        cookie_header = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+        api_url = "https://dm.terabox.com"
+
+        session = get_upload_session()
+        base_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Cookie": cookie_header,
+            "Referer": f"{api_url}/main"
+        }
+
+        size = os.path.getsize(filepath)
+        filename = unicodedata.normalize("NFKD", os.path.basename(filepath)).encode("ascii", "ignore").decode()
+        if not filename:
+            filename = f"file_{int(time.time())}"
+
+        hashes = await asyncio.to_thread(self._terabox_hash_file, filepath, size)
+        chunk_size = hashes["chunk_size"]
+        js_token = await self._terabox_get_js_token(session, cookie_header, api_url)
+
+        # 1. Precreate
+        remote_file_path = f"{remote_dir}/{filename}".replace("//", "/")
+        precreate_url = f"{api_url}/api/precreate"
+        pre_params = {
+            "app_id": "250528",
+            "web": "1",
+            "channel": "dubox",
+            "clienttype": "0",
+        }
+        if js_token:
+            pre_params["jsToken"] = js_token
+
+        pre_data = {
+            "path": remote_file_path,
+            "autoinit": "1",
+            "size": str(size),
+            "file_limit_switch_v34": "true",
+            "block_list": json.dumps(hashes["chunks"]),
+            "rtype": "2",
+            "content-md5": hashes["file"],
+            "slice-md5": hashes["slice"],
+            "content-crc32": str(hashes["crc32"])
+        }
+
+        try:
+            async with session.post(precreate_url, params=pre_params, data=pre_data, headers=base_headers, timeout=30) as resp:
+                pre_res = await resp.json(content_type=None)
+        except Exception as e:
+            LOGGER.error(f"Terabox Precreate HTTP error: {e}")
+            return None
+
+        if pre_res.get("errno") != 0:
+            LOGGER.error(f"Terabox Precreate error: {pre_res}")
+            return None
+
+        upload_id = pre_res.get("uploadid")
+
+        # 2. Locate Upload Host
+        locate_url = f"{api_url}/rest/2.0/pcs/file?method=locateupload"
+        try:
+            async with session.get(locate_url, headers=base_headers, timeout=15) as resp:
+                loc_res = await resp.json(content_type=None)
+                upload_host = f"https://{loc_res['host']}"
+        except Exception as e:
+            LOGGER.error(f"Terabox Locate Upload Host error: {e}")
+            return None
+
+        # 3. Upload Chunks
+        total_chunks = len(hashes["chunks"])
+        bytes_uploaded = 0
+        upload_chunk_url = f"{upload_host}/rest/2.0/pcs/superfile2"
+
+        from bot.helpers.ui_manager import progress_message, GLOBAL_CANCEL_DICT
+
+        with open(filepath, "rb") as f:
+            for i in range(total_chunks):
+                if details and details.get('task_id') in GLOBAL_CANCEL_DICT:
+                    LOGGER.warning(f"Terabox Upload dibatalkan oleh pengguna: {filename}")
+                    try:
+                        from bot.helpers.message import edit_message
+                        if 'msg' in details:
+                            await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                    except Exception:
+                        pass
+                    raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+
+                chunk_bytes = f.read(chunk_size)
+                chunk_len = len(chunk_bytes)
+
+                chunk_params = {
+                    "method": "upload",
+                    "app_id": "250528",
+                    "path": remote_file_path,
+                    "uploadid": upload_id,
+                    "partseq": str(i)
+                }
+
+                chunk_form = aiohttp.FormData()
+                chunk_form.add_field("file", chunk_bytes, filename="blob", content_type="application/octet-stream")
+
+                chunk_uploaded = False
+                for attempt in range(4):
+                    try:
+                        async with session.post(upload_chunk_url, params=chunk_params, data=chunk_form, headers=base_headers, timeout=aiohttp.ClientTimeout(total=300)) as resp:
+                            res = await resp.json(content_type=None)
+                            if res.get("md5"):
+                                chunk_uploaded = True
+                                break
+                    except Exception as e:
+                        if attempt == 3:
+                            LOGGER.error(f"Terabox chunk {i} upload error: {e}")
+                        await asyncio.sleep(2)
+
+                if not chunk_uploaded:
+                    LOGGER.error(f"Terabox gagal mengunggah chunk {i}/{total_chunks}")
+                    return None
+
+                bytes_uploaded += chunk_len
+                if details:
+                    await progress_message(bytes_uploaded, size, details)
+
+        # 4. Create File
+        create_url = f"{api_url}/api/create"
+        create_data = {
+            "path": remote_file_path,
+            "size": str(size),
+            "isdir": "0",
+            "content-md5": hashes["file"],
+            "slice-md5": hashes["slice"],
+            "content-crc32": str(hashes["crc32"]),
+            "block_list": json.dumps(hashes["chunks"]),
+            "uploadid": upload_id,
+            "rtype": "2"
+        }
+        try:
+            async with session.post(create_url, data=create_data, headers=base_headers, timeout=30) as resp:
+                create_res = await resp.json(content_type=None)
+                if create_res.get("errno") != 0:
+                    LOGGER.error(f"Terabox create file failed: {create_res}")
+                    return None
+        except Exception as e:
+            LOGGER.error(f"Terabox create file error: {e}")
+            return None
+
+        # 5. Share File
+        return await self.terabox_share(remote_file_path, cookie_raw)
+
     # Tambahkan ini di dalam kelas DirectUpload (di bawah metode _upload_viking_aiohttp)
     async def _upload_transferit_subprocess(self, filepath, details):
         import sys, tempfile, re
@@ -535,6 +855,14 @@ class DirectUpload:
             LOGGER.info(f"Uploading Pixeldrain (Aiohttp): {file_name}")
             link = await self._upload_pixeldrain_aiohttp(filepath, token, details)
             return {'Pixeldrain': link} if link else None
+
+        elif upload_type in ['tb', 'terabox']:
+            cookie = self.user_dict.get("terabox", {}).get("cookie")
+            if cookie:
+                remote_dir = specific_folder_id or "/"
+                LOGGER.info(f"Uploading Terabox (Aiohttp): {file_name}")
+                link = await self._upload_terabox_aiohttp(filepath, cookie, remote_dir=remote_dir, details=details)
+                return {'Terabox': link} if link else None
 
         # Tambahan baru untuk Transfer.it
         elif upload_type in ['tf', 'transferit']:
