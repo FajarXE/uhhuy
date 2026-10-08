@@ -391,9 +391,18 @@ class DirectUpload:
                 except Exception as e:
                     LOGGER.debug(f"Transfer.it stderr parser error: {e}")
 
+            # Jalankan pembacaan stderr di background
             stderr_task = asyncio.create_task(parse_stderr())
-            stdout_data, _ = await process.communicate()
-            stderr_task.cancel()
+            
+            # Baca stdout secara manual agar tidak mencoba membaca stderr yang memicu error
+            stdout_data = await process.stdout.read()
+            
+            # Tunggu proses script selesai
+            await process.wait()
+            
+            # Batalkan task stderr jika masih menggantung
+            if not stderr_task.done():
+                stderr_task.cancel()
             
             if os.path.exists(state_file):
                 os.remove(state_file)
