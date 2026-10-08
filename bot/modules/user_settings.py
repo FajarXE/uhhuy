@@ -1298,9 +1298,9 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     t_gf = "✅" if curr_settings.get('gofile_token') else "❌"
     t_bh = "✅" if curr_settings.get('buzzheavier_token') else "❌"
     t_vk = "✅" if curr_settings.get('viking_token') else "❌"
+    t_tf = "✅ (No Token)" # Langsung menyala karena anonim
 
     # Template Teks Menu
-    # Gunakan variabel baru (p_zip, a_zip, dst)
     USETTING_TEXT = f"""
 <blockquote>
 <b>📦 ZIP SETTINGS</b>
@@ -1309,7 +1309,8 @@ ARTIST : {ar_zip} | POSTER : {po_zip}
 VIDEO : {v_zip}
 
 <b>☁️ UPLOAD MODE: {upload_mode}</b>
-Gofile: {t_gf} | Buzz: {t_bh} | Viking: {t_vk}
+Gofile: {t_gf} | Buzz: {t_bh}
+Viking: {t_vk} | Transfer: {t_tf}
 </blockquote>
 {m.date.now().strftime("%d/%m/%Y %H:%M:%S")}
 Choose Menu option below:
@@ -1336,7 +1337,7 @@ async def uset_upload_mode_handler(client, query):
     current_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', 'Telegram')
     
     # Daftar Mode yang tersedia
-    modes = ['Telegram', 'Gofile', 'Buzzheavier', 'Vikingfiles']
+    modes = ['Telegram', 'Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit']
     
     # Cari index saat ini
     try:
