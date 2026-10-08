@@ -431,7 +431,12 @@ class DirectUpload:
     # PUBLIC METHODS (Perbarui metode upload ini)
     # ============================
     async def upload(self, file_name, size, upload_type, specific_folder_id=None, details=None):
-        filepath = os.path.join(self.path, file_name)
+        # Pengecekan baru: Jika file_name kosong, eksekusi seluruh isi folder
+        if file_name:
+            filepath = os.path.join(self.path, file_name)
+        else:
+            filepath = self.path
+            
         if not os.path.exists(filepath): return None
         
         if upload_type in ['gf', 'gofile']:
