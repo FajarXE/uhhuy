@@ -267,11 +267,11 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
                 if res: 
                     uploaded_links.append(list(res.values())[0])
 
-          # 5. Ekstraksi Hasil (Didelegasikan ke Strategy)
-          res = strategy.format_result(uploaded_links)
-          if asyncio.iscoroutine(res):
-              return await res
-          return res
+        # 5. Ekstraksi Hasil (Didelegasikan ke Strategy)
+        res = strategy.format_result(uploaded_links)
+        if asyncio.iscoroutine(res):
+            return await res
+        return res
 
     # --- PENANGANAN ERROR SPESIFIK & TRACEBACK ---
     except asyncio.TimeoutError:
