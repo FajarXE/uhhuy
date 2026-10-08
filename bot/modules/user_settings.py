@@ -1,10 +1,8 @@
 # [FILE: bot/modules/user_settings.py]
 
-import os
 import bot.helpers.translations as lang
 import logging, asyncio
 from traceback import format_exc
-from bot.logger import LOGGER
 
 from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
@@ -181,48 +179,42 @@ async def del_pd_cmd(client, message):
     if await check_user(msg=message):
         await _del_token(message, 'pixeldrain_token', 'Pixeldrain')
 
-# --- 5. TERABOX ---
+# --- 5. TERABOX (STRING COOKIE ONLY) ---
 @Client.on_message(filters.command(["set_terabox", "set_tb"]))
-async def set_tb_cmd(client, message):
+async def set_tb_cmd(client: Client, message: Message):
     if not await check_user(msg=message):
         return
+
     user_id = message.from_user.id
-    doc = message.document or (message.reply_to_message.document if message.reply_to_message else None)
-    cookie_text = None
+    raw_content = message.text or message.caption or ""
+    args = raw_content.split(maxsplit=1)
 
-    if doc:
-        if not doc.file_name.lower().endswith(('.txt', '.cookie', '.cookies')):
-            return await message.reply_text("❌ File harus berupa file cookies teks (.txt)!")
-        status_msg = await message.reply_text("📥 Mengunduh file cookies...")
-        downloaded = await client.download_media(doc)
-        try:
-            with open(downloaded, "r", encoding="utf-8", errors="ignore") as f:
-                cookie_text = f.read()
-        finally:
-            if os.path.exists(downloaded):
-                os.remove(downloaded)
-        await status_msg.delete()
-    else:
-        args = message.text.split(maxsplit=1)
-        if len(args) > 1:
-            cookie_text = args[1].strip()
-        elif message.reply_to_message and message.reply_to_message.text:
-            cookie_text = message.reply_to_message.text.strip()
-
-    if not cookie_text:
+    if len(args) < 2:
         return await message.reply_text(
-            "❌ **Format Salah / File Tidak Ditemukan!**\n\n"
-            "Kirim file <code>cookies.txt</code> Terabox Anda dengan caption: <code>/set_terabox</code>\n"
-            "atau balas (reply) file tersebut dengan perintah <code>/set_terabox</code>.\n\n"
-            "*(Bisa juga memasukkan string cookie langsung: <code>/set_terabox ndus=...</code>)*"
+            "❌ <b>Format Salah.</b>\n"
+            "Gunakan format teks langsung:\n"
+            "<code>/set_terabox ndus=xxxx...</code> atau <code>/set_tb ndus=xxxx...</code>"
         )
 
+    cookie_text = args[1].strip()
+
+    # Validasi isi string (wajib mengandung ndus atau terabox)
+    chk = cookie_text.lower()
+    if "ndus" not in chk and "terabox" not in chk and "dubox" not in chk:
+        return await message.reply_text(
+            "⚠️ <b>Format cookie tidak valid!</b>\n"
+            "Pastikan string menyertakan nilai token <code>ndus</code> (contoh: <code>/set_tb ndus=xxxx...</code>)."
+        )
+
+    # Simpan ke memori runtime bot & database MongoDB
     bot_set.user_data.setdefault(user_id, {})['terabox_cookie'] = cookie_text
     await database.save_user_settings(user_id, {'terabox_cookie': cookie_text})
-    await message.reply_text("✅ <b>Terabox Cookies Saved!</b>\nCookies berhasil disimpan untuk akun Anda.")
+
+    await message.reply_text("✅ <b>Terabox Cookie Saved!</b>\nCookie berhasil disimpan untuk akun Anda.")
+
 
 @Client.on_message(filters.command(["del_terabox", "delete_terabox", "del_tb"]))
-async def del_tb_cmd(client, message):
+async def del_tb_cmd(client: Client, message: Message):
     if await check_user(msg=message):
         await _del_token(message, 'terabox_cookie', 'Terabox')
 
@@ -1198,111 +1190,6 @@ async def uset_amz_instr_handler(client, query):
     )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="uamz_auth", style=ButtonStyle.PRIMARY)]]
     await edit_message(query.message, text, markup=InlineKeyboardMarkup(buttons))
-
-
-# ==================================
-# TERABOX PRIVATE AUTH & COOKIES
-# ==================================
-
-@Client.on_message(filters.command(["set_terabox", "set_tb"]))
-async def set_tb_cmd(client: Client, message: Message):
-    LOGGER.info(f"[TERABOX] Command /set_tb diterima dari User ID: {message.from_user.id}")
-
-    # 1. Pengecekan Autorisasi (Beri tahu jika user ditolak)
-    if not await check_user(msg=message):
-        LOGGER.warning(f"[TERABOX] User {message.from_user.id} tidak diizinkan (check_user False)")
-        return await message.reply_text("❌ Anda tidak memiliki izin untuk menggunakan bot ini.")
-
-    user_id = message.from_user.id
-    target_msg = message.reply_to_message
-
-    # 2. Atasi Cache Hilang Akibat Restart: Ambil ulang pesan asli dari server Telegram
-    if (not target_msg or not target_msg.document) and message.reply_to_message_id:
-        try:
-            target_msg = await client.get_messages(message.chat.id, message.reply_to_message_id)
-            LOGGER.info("[TERABOX] Berhasil mengambil ulang pesan reply dari server Telegram.")
-        except Exception as e:
-            LOGGER.error(f"[TERABOX] Gagal fetch message reply: {e}")
-
-    # 3. Ambil Dokumen (dari reply atau dari pesan sendiri jika dikirim via caption)
-    doc = None
-    if target_msg and target_msg.document:
-        doc = target_msg.document
-    elif message.document:
-        doc = message.document
-
-    cookie_text = None
-    status_msg = None
-
-    try:
-        if doc:
-            file_name = doc.file_name or "cookies.txt"
-            if not any(file_name.lower().endswith(ext) for ext in [".txt", ".cookie", ".cookies"]):
-                return await message.reply_text("❌ File harus berupa file teks cookies (.txt atau .cookie)!")
-
-            status_msg = await message.reply_text("📥 <i>Sedang mengunduh dan membaca cookies.txt...</i>")
-
-            # Unduh langsung via objek Message agar aman dari ValueError Pyrogram
-            download_target = target_msg if (target_msg and target_msg.document) else message
-            downloaded = await download_target.download()
-
-            if not downloaded or not os.path.exists(downloaded):
-                if status_msg: await status_msg.delete()
-                return await message.reply_text("❌ Gagal mengunduh file dari Telegram.")
-
-            try:
-                with open(downloaded, "r", encoding="utf-8", errors="ignore") as f:
-                    cookie_text = f.read().strip()
-            finally:
-                if os.path.exists(downloaded):
-                    os.remove(downloaded)
-
-        else:
-            # Skenario input string langsung: /set_tb ndus=xxxx...
-            args = message.text.split(maxsplit=1) if message.text else []
-            if len(args) > 1:
-                cookie_text = args[1].strip()
-            elif target_msg and (target_msg.text or target_msg.caption):
-                cookie_text = (target_msg.text or target_msg.caption).strip()
-
-        if not cookie_text:
-            if status_msg: await status_msg.delete()
-            return await message.reply_text(
-                "❌ <b>File cookies tidak terdeteksi!</b>\n\n"
-                "Kirim ulang file <code>cookies.txt</code> yang baru lalu reply dengan <code>/set_tb</code>, "
-                "atau kirim langsung dengan teks: <code>/set_tb ndus=xxxx...</code>"
-            )
-
-        # 4. Validasi isi Cookie Terabox
-        chk = cookie_text.lower()
-        if "ndus" not in chk and "terabox" not in chk and "dubox" not in chk:
-            if status_msg: await status_msg.delete()
-            return await message.reply_text(
-                "⚠️ <b>Isi file bukan cookies Terabox yang valid.</b>\n"
-                "Pastikan Anda mengekspor cookie saat sudah login di Terabox (wajib terdapat nilai <code>ndus</code>)."
-            )
-
-        # 5. Simpan ke Memori & Database
-        bot_set.user_data.setdefault(user_id, {})['terabox_cookie'] = cookie_text
-        await database.save_user_settings(user_id, {'terabox_cookie': cookie_text})
-
-        if status_msg:
-            await status_msg.delete()
-
-        LOGGER.info(f"[TERABOX] Cookies berhasil disimpan untuk user {user_id}")
-        await message.reply_text("✅ <b>Terabox Cookies Berhasil Disimpan!</b>\nAkun Terabox Anda siap digunakan untuk upload.")
-
-    except Exception as e:
-        LOGGER.exception(f"[TERABOX FATAL ERROR]: {e}")
-        if status_msg:
-            try: await status_msg.delete()
-            except Exception: pass
-        await message.reply_text(f"❌ <b>Terjadi kesalahan:</b>\n<code>{e}</code>")
-
-@Client.on_message(filters.command(["del_terabox", "delete_terabox", "del_tb"]))
-async def del_tb_cmd(client: Client, message: Message):
-    if await check_user(msg=message):
-        await _del_token(message, 'terabox_cookie', 'Terabox')
 
 
 # --- COMMAND LOGIN KKBOX ---
