@@ -48,7 +48,7 @@ class BeatportLoginManager:
             
             # Load Global Quality
             db_quality = all_settings.get('BEATPORT_QUALITY')
-            if db_quality in ["lossless", "high", "medium"]:
+            if db_quality in ["wav", "aiff", "lossless", "high", "medium"]:
                 self.quality = db_quality
             
             # Load Tokens Cache
@@ -203,8 +203,8 @@ class BeatportLoginManager:
     # --- Quality Helpers ---
     async def setup_quality(self, user_id: int, qual: str = None):
         if user_id not in self.user_data: self.user_data[user_id] = {}
-        if qual in ["lossless", "high", "medium"]:
-            self.user_data[user_id]['beatport_qual'] = qual
+        if qual in ["wav", "aiff", "lossless", "high", "medium"]:
+            self.user_data[user_id]['beatport_qual']
 
     def get_user_quality(self, user_id: int) -> str:
         return self.user_data.get(user_id, {}).get('beatport_qual', self.quality)
