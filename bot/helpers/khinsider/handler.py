@@ -95,28 +95,19 @@ async def start_khinsider(url, user):
     cover_path = None
     if album_meta.get('images'):
         await edit_message(msg, f"🖼️ Mengunduh {len(album_meta['images'])} gambar...")
-        img_headers = khinsider_manager.headers.copy()
-        img_headers["Referer"] = url
-
         for i, img_url in enumerate(album_meta['images']):
             try:
                 ext = img_url.split('.')[-1].split('?')[0]
-                filename = f"cover.{ext}" if i == 0 else f"artwork_{i}.{ext}"
-                filepath = f"{album_folder_path}/{filename}"
-
-                # Memakai session manager (otomatis lewat proxy)
-                async with khinsider_manager.session.get(img_url, headers=img_headers) as r:
-                    if r.status == 200:
-                        async with aiofiles.open(filepath, 'wb') as f:
-                            async for chunk in r.content.iter_chunked(256 * 1024):
-                                if chunk:
-                                    await f.write(chunk)
-                        if i == 0:
-                            cover_path = filepath
-                    else:
-                        LOGGER.warning(f"Gagal unduh gambar {img_url}: HTTP {r.status}")
-            except Exception as e:
-                LOGGER.warning(f"Gagal unduh gambar {img_url}: {e}")
+                if i == 0:
+                    filename = f"cover.{ext}"
+                    filepath = f"{album_folder_path}/{filename}"
+                    cover_path = filepath 
+                else:
+                    filename = f"artwork_{i}.{ext}"
+                    filepath = f"{album_folder_path}/{filename}"
+                # Download gambar dengan menyamar (Spoofing)
+                await download_file(img_url, filepath, details={'msg': None, 'headers': {'User-Agent': khinsider_manager.headers['User-Agent']}})
+            except Exception: pass
 
     track_total = len(album_meta['tracks'])
     
@@ -146,13 +137,10 @@ async def start_khinsider(url, user):
 
     async def _process_track(track):
         try:
-            # Beri jeda acak 0.5 - 1.2 detik agar tidak terdeteksi spam
-            await asyncio.sleep(random.uniform(0.5, 1.2))
-            
+            # 1. Scrape Direct Link
             dl_url, fmt = await khinsider_manager.get_track_download_url(
                 track['url'], 
-                preferred_formats=[bot_set.user_data.get(user['user_id'], {}).get('khinsider_qual', 'flac'), 'mp3'],
-                album_url=url
+                preferred_formats=[bot_set.user_data.get(user['user_id'], {}).get('khinsider_qual', 'flac'), 'mp3']
             )
             
             if int(album_meta['totalvolumes']) > 1:
@@ -164,23 +152,25 @@ async def start_khinsider(url, user):
             filepath = f"{album_folder_path}/{filename}"
             
             # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
+            # Salin seluruh header browser dan tambahkan halaman track sebagai Referer
             headers_dict = khinsider_manager.headers.copy()
             headers_dict["Referer"] = track['url']
             
+            # [KUNCI RAHASIA] Gunakan 'msg': None.
+            # Aria2 tetap mendapat Headers penyamaran, tidak akan crash, dan UI tetap rapi!
             details_aria = {'msg': None, 'headers': headers_dict}
             
             # Coba unduh dengan Aria2 
             err = await download_file(dl_url, filepath, retries=1, details=details_aria)
             
-            # Jika Aria2 gagal / ditolak 403, fallback aiohttp akan berjalan LEWAT PROXY
             if err:
-                LOGGER.warning(f"Khinsider: Aria2 gagal/ditolak. Mengaktifkan AIOHTTP Turbo Fallback (Proxy) untuk {filename}")
-                async with khinsider_manager.session.get(dl_url, headers=headers_dict) as r:
-                    r.raise_for_status()
-                    async with aiofiles.open(filepath, 'wb') as f:
-                        async for chunk in r.content.iter_chunked(256 * 1024):
-                            if chunk:
-                                await f.write(chunk)
+                LOGGER.warning(f"Khinsider: Aria2 gagal/ditolak. Mengaktifkan AIOHTTP Turbo Fallback untuk {filename}")
+                async with aiohttp.ClientSession(headers=headers_dict) as session:
+                    async with session.get(dl_url) as r:
+                        r.raise_for_status()
+                        async with aiofiles.open(filepath, 'wb') as f:
+                            async for chunk in r.content.iter_chunked(256 * 1024):
+                                if chunk: await f.write(chunk)
             # ----------------------------------------
             
             # 3. Tanam Tags
