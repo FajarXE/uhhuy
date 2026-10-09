@@ -95,6 +95,10 @@ async def start_khinsider(url, user):
     cover_path = None
     if album_meta.get('images'):
         await edit_message(msg, f"🖼️ Mengunduh {len(album_meta['images'])} gambar...")
+        # Siapkan header lengkap beserta Referer album
+        img_headers = khinsider_manager.headers.copy()
+        img_headers["Referer"] = url
+
         for i, img_url in enumerate(album_meta['images']):
             try:
                 ext = img_url.split('.')[-1].split('?')[0]
@@ -105,9 +109,15 @@ async def start_khinsider(url, user):
                 else:
                     filename = f"artwork_{i}.{ext}"
                     filepath = f"{album_folder_path}/{filename}"
-                # Download gambar dengan menyamar (Spoofing)
-                await download_file(img_url, filepath, details={'msg': None, 'headers': {'User-Agent': khinsider_manager.headers['User-Agent']}})
-            except Exception: pass
+                
+                # Kirim header lengkap berisi Referer
+                await download_file(
+                    img_url, 
+                    filepath, 
+                    details={'msg': None, 'headers': img_headers}
+                )
+            except Exception as e:
+                LOGGER.warning(f"Gagal unduh gambar {img_url}: {e}")
 
     track_total = len(album_meta['tracks'])
     
