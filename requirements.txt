@@ -34,4 +34,3 @@ packaging
 fastapi
 uvicorn
 playwright
-brotli
