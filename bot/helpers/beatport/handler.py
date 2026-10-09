@@ -142,7 +142,6 @@ async def convert_flac_to_pcm(source_path: str, target_format: str) -> str:
         return output_path
     return source_path
 
-
 async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
     user_id = user.get('user_id')
     client = beatport_manager.get_client(user_id)
@@ -182,13 +181,22 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     track_meta['folderpath'] = filepath
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
     
+    # Ekstensi download fisik (tetap flac/m4a untuk stream API)
     download_ext = _map_qual_to_ext(target_fmt)
     filepath += f"/{sanitize_filepath(raw_filename)}.{download_ext}"
     track_meta['filepath'] = filepath
 
+    # Ekstensi visual untuk papan radar progress
+    display_ext = target_fmt if target_fmt in ['wav', 'aiff'] else download_ext
+    display_title = f"{sanitize_filepath(raw_filename)}.{display_ext}"
+
     headers_dict = {"User-Agent": APP_USER_AGENT, "Accept": "*/*", "Referer": "https://www.beatport.com/"}
     details_aria = {'msg': None, 'headers': headers_dict} if not upload else {
-        'msg': user['bot_msg'], 'title': track_meta.get('title'), 'type': 'Track', 'headers': headers_dict
+        'msg': user['bot_msg'], 
+        'title': display_title,
+        'display_title': display_title,
+        'type': 'Track', 
+        'headers': headers_dict
     }
 
     if os.path.exists(filepath): 
