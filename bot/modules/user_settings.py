@@ -1519,7 +1519,7 @@ async def uset_cb(client, query, datatype=""):
 
     # --- BEATPORT MENU ---
     if data[1] == "beatport" or datatype == "beatport":
-        text = f"Choose Beatport Audio Quality bellow:"
+        text = "Choose Beatport Audio Quality bellow:"
         quality = {
             "wav": "WAV",
             "aiff": "AIFF",
@@ -1527,22 +1527,22 @@ async def uset_cb(client, query, datatype=""):
             "high": "High (AAC 256)",
             "medium": "Medium (AAC 128)"
         }
-        # Cek apakah ada klien (Global ATAU User)
+        
         has_client = False
         if beatport_manager and (beatport_manager.global_clients or beatport_manager.has_private_session(user_id)):
-             has_client = True
+            has_client = True
              
         if not has_client:
             return await edit_message(query.message, "Layanan Beatport tidak aktif (tidak ada klien yang login).")
 
         main_user_dict = bot_set.user_data.get(user_id, {})
-        current = main_user_dict.get("beatport_qual", beatport_manager.quality) 
+        # Pastikan default mengambil beatport_manager.quality jika key belum ada
+        current = main_user_dict.get("beatport_qual") or getattr(beatport_manager, 'quality', 'lossless')
         await beatport_manager.setup_quality(user_id, current) 
         
         if current in quality:
             quality[current] = quality[current] + '✅'
             
-        # Tombol bp_button sekarang akan menyertakan tombol "PRIVATE ACCOUNT"
         return await edit_message(query.message, text, markup=bp_button(quality, user_id))
     
     # --- SOUNDCLOUD MENU ---
