@@ -132,13 +132,20 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             await asyncio.sleep(random.uniform(0.5, 1.5))
     except Exception: pass 
 
+    def _map_qual_to_ext(q: str) -> str:
+        q_l = q.lower()
+        if q_l == 'wav': return 'wav'
+        if q_l == 'aiff': return 'aiff'
+        if q_l == 'lossless': return 'flac'
+        return 'm4a'
+
     if not track_meta.get('download_url'):
         new_url, qual = await refresh_track_url(item_id, track_meta, user_id)
         if new_url:
             track_meta['download_url'] = new_url
             if qual:
-                track_meta['quality'] = qual.capitalize()
-                track_meta['extension'] = 'flac' if qual == 'lossless' else 'm4a'
+                track_meta['quality'] = qual.upper() if qual in ['wav', 'aiff'] else qual.capitalize()
+                track_meta['extension'] = _map_qual_to_ext(qual)
         else: return False
 
     track_meta['folderpath'] = filepath
@@ -161,11 +168,11 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         if new_url:
             track_meta['download_url'] = new_url
             if qual and qual != track_meta['quality'].lower():
-                 new_ext = 'flac' if qual == 'lossless' else 'm4a'
-                 if new_ext != track_meta['extension']:
-                     filepath = filepath.rsplit('.', 1)[0] + f".{new_ext}"
-                     track_meta['filepath'] = filepath
-                     track_meta['extension'] = new_ext
+                new_ext = _map_qual_to_ext(qual)
+                if new_ext != track_meta['extension']:
+                    filepath = filepath.rsplit('.', 1)[0] + f".{new_ext}"
+                    track_meta['filepath'] = filepath
+                    track_meta['extension'] = new_ext
             
             if os.path.exists(filepath): os.remove(filepath)
             err = await download_file(new_url, filepath, retries=1, details=details_aria)
