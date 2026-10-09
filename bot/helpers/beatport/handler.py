@@ -145,76 +145,74 @@ async def convert_flac_to_pcm(source_path: str, target_format: str) -> str:
 
 async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
     user_id = user.get('user_id')
-    client = beatport_manager.get_client(user_id)[span_3](start_span)[span_3](end_span)
-    target_fmt = beatport_manager.get_user_quality(user_id).lower()[span_4](start_span)[span_4](end_span)
+    client = beatport_manager.get_client(user_id)
+    target_fmt = beatport_manager.get_user_quality(user_id).lower()
     
     if not track_meta:
         try: 
-            track_meta = await process_track_metadata(item_id, user['r_id'], user, fetch_stream=True)[span_5](start_span)[span_5](end_span)
+            track_meta = await process_track_metadata(item_id, user['r_id'], user, fetch_stream=True)
         except Exception as e:
-            LOGGER.warning(f"Beatport track {item_id} error: {e}")[span_6](start_span)[span_6](end_span)
+            LOGGER.warning(f"Beatport track {item_id} error: {e}")
             return False
-        filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}[span_7](start_span)"[span_7](end_span)
-        filepath = sanitize_filepath(filepath)[span_8](start_span)[span_8](end_span)
+        filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
+        filepath = sanitize_filepath(filepath)
 
     try:
         if client and random.random() < 0.7:
-            await asyncio.sleep(random.uniform(0.5, 1.5))[span_9](start_span)[span_9](end_span)
+            await asyncio.sleep(random.uniform(0.5, 1.5))
     except Exception: 
         pass 
 
     def _map_qual_to_ext(q: str) -> str:
         q_l = q.lower()
-        # Unduh stream FLAC terlebih dahulu jika target kualitas adalah WAV, AIFF, atau Lossless
         if q_l in ['lossless', 'wav', 'aiff']: 
             return 'flac'
         return 'm4a'
 
     if not track_meta.get('download_url'):
-        new_url, qual = await refresh_track_url(item_id, track_meta, user_id)[span_10](start_span)[span_10](end_span)
+        new_url, qual = await refresh_track_url(item_id, track_meta, user_id)
         if new_url:
-            track_meta['download_url'] = new_url[span_11](start_span)[span_11](end_span)
+            track_meta['download_url'] = new_url
             if qual:
                 track_meta['extension'] = _map_qual_to_ext(qual)
                 track_meta['quality'] = target_fmt.upper() if target_fmt in ['wav', 'aiff'] else qual.capitalize()
         else: 
             return False
 
-    track_meta['folderpath'] = filepath[span_12](start_span)[span_12](end_span)
-    raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)[span_13](start_span)[span_13](end_span)
+    track_meta['folderpath'] = filepath
+    raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
     
-    # Pastikan file sementara diunduh menggunakan ekstensi stream asli (.flac / .m4a)
     download_ext = _map_qual_to_ext(target_fmt)
     filepath += f"/{sanitize_filepath(raw_filename)}.{download_ext}"
-    track_meta['filepath'] = filepath[span_14](start_span)[span_14](end_span)
+    track_meta['filepath'] = filepath
 
-    headers_dict = {"User-Agent": APP_USER_AGENT, "Accept": "*/*", "Referer": "https://www.beatport.com/"}[span_15](start_span)[span_15](end_span)
+    headers_dict = {"User-Agent": APP_USER_AGENT, "Accept": "*/*", "Referer": "https://www.beatport.com/"}
     details_aria = {'msg': None, 'headers': headers_dict} if not upload else {
         'msg': user['bot_msg'], 'title': track_meta.get('title'), 'type': 'Track', 'headers': headers_dict
-    }[span_16](start_span)[span_16](end_span)
+    }
 
     if os.path.exists(filepath): 
-        os.remove(filepath)[span_17](start_span)[span_17](end_span)
+        os.remove(filepath)
     
-    err = await download_file(track_meta['download_url'], filepath, retries=1, details=details_aria)[span_18](start_span)[span_18](end_span)
+    err = await download_file(track_meta['download_url'], filepath, retries=1, details=details_aria)
     
     if err or not os.path.exists(filepath) or os.path.getsize(filepath) < 10000:
-        LOGGER.warning(f"Beatport: Aria2 gagal/403 untuk {track_meta['title']}. Menyegarkan URL...")[span_19](start_span)[span_19](end_span)
-        new_url, qual = await refresh_track_url(item_id, track_meta, user_id)[span_20](start_span)[span_20](end_span)
+        LOGGER.warning(f"Beatport: Aria2 gagal/403 untuk {track_meta['title']}. Menyegarkan URL...")
+        new_url, qual = await refresh_track_url(item_id, track_meta, user_id)
         if new_url:
-            track_meta['download_url'] = new_url[span_21](start_span)[span_21](end_span)
+            track_meta['download_url'] = new_url
             if qual:
                 new_ext = _map_qual_to_ext(qual)
                 if not filepath.endswith(f".{new_ext}"):
-                    filepath = filepath.rsplit('.', 1)[0] + f".{new_ext}[span_22](start_span)"[span_22](end_span)
-                    track_meta['filepath'] = filepath[span_23](start_span)[span_23](end_span)
+                    filepath = filepath.rsplit('.', 1)[0] + f".{new_ext}"
+                    track_meta['filepath'] = filepath
             
             if os.path.exists(filepath): 
-                os.remove(filepath)[span_24](start_span)[span_24](end_span)
-            err = await download_file(new_url, filepath, retries=1, details=details_aria)[span_25](start_span)[span_25](end_span)
+                os.remove(filepath)
+            err = await download_file(new_url, filepath, retries=1, details=details_aria)
 
     if err or not os.path.exists(filepath) or os.path.getsize(filepath) < 10000:
-        LOGGER.error(f"Gagal mengunduh track {track_meta['title']}")[span_26](start_span)[span_26](end_span)
+        LOGGER.error(f"Gagal mengunduh track {track_meta['title']}")
         return False
 
     # Transcode FLAC ke format target PCM (WAV / AIFF) sebelum tagging
@@ -225,18 +223,18 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         track_meta['quality'] = target_fmt.upper()
 
     try:
-        await set_metadata(track_meta, user['user_id'])[span_27](start_span)[span_27](end_span)
-        await write_extended_tags(track_meta['filepath'], track_meta)[span_28](start_span)[span_28](end_span)
+        await set_metadata(track_meta, user['user_id'])
+        await write_extended_tags(track_meta['filepath'], track_meta)
     except Exception as e:
-        LOGGER.warning(f"Gagal set metadata: {e}")[span_29](start_span)[span_29](end_span)
+        LOGGER.warning(f"Gagal set metadata: {e}")
         try: 
-            os.remove(filepath)[span_30](start_span)[span_30](end_span)
+            os.remove(filepath)
         except: 
             pass
         return False
 
     if upload: 
-        await track_upload(track_meta, user, disable_link)[span_31](start_span)[span_31](end_span)
+        await track_upload(track_meta, user, disable_link)
     
     return track_meta
 
