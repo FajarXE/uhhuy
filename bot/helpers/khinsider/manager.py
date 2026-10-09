@@ -10,7 +10,7 @@ class KhinsiderManager:
         self.session = None
         self.quality = 'flac' 
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.8010.37 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US;q=1.0,en;q=0.9",
             "Connection": "keep-alive",
@@ -31,7 +31,11 @@ class KhinsiderManager:
         self.quality = quality
 
     async def get_album(self, url):
-        async with self.session.get(url) as resp:
+        # Sertakan Referer domain utama seperti pada khiscrape
+        headers = self.headers.copy()
+        headers["Referer"] = "https://downloads.khinsider.com/"
+        
+        async with self.session.get(url, headers=headers) as resp:
             if resp.status != 200:
                 raise Exception(f"Failed to fetch album page: {resp.status}")
             html = await resp.text()
@@ -142,13 +146,17 @@ class KhinsiderManager:
             'provider': 'Khinsider'
         }
 
-    async def get_track_download_url(self, track_url, preferred_formats=None):
+    async def get_track_download_url(self, track_url, preferred_formats=None, album_url=None):
         if not preferred_formats:
             preferred_formats = ['flac', 'mp3']
             if self.quality in preferred_formats:
                 preferred_formats.insert(0, preferred_formats.pop(preferred_formats.index(self.quality)))
 
-        async with self.session.get(track_url) as resp:
+        headers = self.headers.copy()
+        if album_url:
+            headers["Referer"] = album_url
+
+        async with self.session.get(track_url, headers=headers) as resp:
             html = await resp.text()
         
         soup = BeautifulSoup(html, 'html.parser')
