@@ -147,10 +147,13 @@ async def start_khinsider(url, user):
 
     async def _process_track(track):
         try:
-            # 1. Scrape Direct Link
+            # Beri jeda acak 0.5 - 1.2 detik agar tidak terdeteksi spam
+            await asyncio.sleep(random.uniform(0.5, 1.2))
+            
             dl_url, fmt = await khinsider_manager.get_track_download_url(
                 track['url'], 
-                preferred_formats=[bot_set.user_data.get(user['user_id'], {}).get('khinsider_qual', 'flac'), 'mp3']
+                preferred_formats=[bot_set.user_data.get(user['user_id'], {}).get('khinsider_qual', 'flac'), 'mp3'],
+                album_url=url
             )
             
             if int(album_meta['totalvolumes']) > 1:
