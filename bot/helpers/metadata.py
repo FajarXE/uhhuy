@@ -14,6 +14,7 @@ from typing import Union, Dict
 from mutagen import File
 from mutagen.oggvorbis import OggVorbis
 from mutagen.oggopus import OggOpus
+from mutagen.aiff import AIFF
 from mutagen.wave import WAVE
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
@@ -252,6 +253,7 @@ async def set_metadata(metadata:dict, user_id: int = None):
         import os
         from mutagen import File, MutagenError
         from mutagen.wave import WAVE
+        from mutagen.aiff import AIFF
         from mutagen.mp3 import MP3
         from mutagen.flac import FLAC
         from mutagen.oggvorbis import OggVorbis
@@ -260,21 +262,15 @@ async def set_metadata(metadata:dict, user_id: int = None):
         
         h = None
         try:
-            if codec in ['aac', 'alac', 'mp4']: h = MP4(path)
-            elif codec == 'flac': h = FLAC(path)
-            elif codec == 'mp3': h = MP3(path)
-            elif codec == 'vorbis': h = OggVorbis(path)
-            elif codec == 'opus': h = OggOpus(path)
-            elif 'pcm' in codec: h = WAVE(path)
-            else:
-                ext = os.path.splitext(path)[1].lower().strip()
-                if ext == '.flac': h = FLAC(path)
-                elif ext in ['.m4a', '.mp4', '.m4b']: h = MP4(path)
-                elif ext == '.mp3': h = MP3(path)
-                elif ext == '.ogg': h = OggVorbis(path)
-                elif ext == '.opus': h = OggOpus(path)
-                elif ext == '.wav': h = WAVE(path)
-                else: h = File(path) 
+            ext = os.path.splitext(path)[1].lower().strip()
+            if codec in ['aac', 'alac', 'mp4'] or ext in ['.m4a', '.mp4', '.m4b']: h = MP4(path)
+            elif codec == 'flac' or ext == '.flac': h = FLAC(path)
+            elif codec == 'mp3' or ext == '.mp3': h = MP3(path)
+            elif codec == 'vorbis' or ext == '.ogg': h = OggVorbis(path)
+            elif codec == 'opus' or ext == '.opus': h = OggOpus(path)
+            elif ext in ['.aif', '.aiff']: h = AIFF(path)
+            elif 'pcm' in codec or ext == '.wav': h = WAVE(path)
+            else: h = File(path) 
         except MutagenError:
             from bot.logger import LOGGER
             LOGGER.exception(f"MutagenError: File rusak, korup, atau header invalid pada {path}")
@@ -370,21 +366,21 @@ async def set_metadata(metadata:dict, user_id: int = None):
             await set_flac(metadata, handle, dur_ms)
         elif isinstance(handle, MP4): 
             await set_m4a(metadata, handle)
-        elif isinstance(handle, WAVE):
+        elif isinstance(handle, (WAVE, AIFF)):
             await set_wav(metadata, handle, dur_ms)
         elif isinstance(handle, (MP3, EasyMP3)):
             await set_mp3(metadata, handle, dur_ms)
         else:
-            # Fallback terakhir berdasarkan ekstensi
             ext = os.path.splitext(audio_path)[1].lower()
             if ext in ['.m4a', '.mp4']:
-                 await set_m4a(metadata, handle)
+                await set_m4a(metadata, handle)
             elif ext in ['.ogg', '.opus']:
-                 await set_vorbis(metadata, handle, dur_ms)
+                await set_vorbis(metadata, handle, dur_ms)
+            elif ext in ['.wav', '.aif', '.aiff']:
+                await set_wav(metadata, handle, dur_ms)
             else:
                 await set_mp3(metadata, handle, dur_ms)  
     except Exception as e:
-        # [PENGAMANAN] Menangkap jenis handle dan path file untuk melacak penyebab silent failure
         handle_type = type(handle).__name__ if handle else "Unknown/Corrupt"
         LOGGER.exception(f"Gagal menulis metadata audio pada file {audio_path} (Tipe Handle: {handle_type}):")
 
@@ -666,15 +662,16 @@ async def set_mp3(data: Dict, handle: Union[MP3, EasyMP3], dur_ms: int = 0):
 
 
 # ==========================================
-# HANDLER WAV
+# HANDLER WAV & AIFF
 # ==========================================
-async def set_wav(data: Dict, handle: WAVE, dur_ms: int = 0):
-    if not isinstance(handle, WAVE):
-        try: 
-            handle = WAVE(data['filepath'])
+async def set_wav(data: Dict, handle: Union[WAVE, AIFF], dur_ms: int = 0):
+    if not isinstance(handle, (WAVE, AIFF)):
+        try:
+            ext = os.path.splitext(data['filepath'])[1].lower()
+            handle = AIFF(data['filepath']) if ext in ['.aif', '.aiff'] else WAVE(data['filepath'])
         except Exception: 
             from bot.logger import LOGGER
-            LOGGER.exception("Mutagen gagal membaca objek WAVE:")
+            LOGGER.exception("Mutagen gagal membaca objek WAVE/AIFF:")
             return
 
     if handle.tags is None:
@@ -682,7 +679,7 @@ async def set_wav(data: Dict, handle: WAVE, dur_ms: int = 0):
             handle.add_tags()
         except Exception: 
             from bot.logger import LOGGER
-            LOGGER.exception("Mutagen gagal menambahkan TAGS ke file WAVE:")
+            LOGGER.exception("Mutagen gagal menambahkan TAGS ke file WAVE/AIFF:")
             return
     
     tags = handle.tags
@@ -695,24 +692,49 @@ async def set_wav(data: Dict, handle: WAVE, dur_ms: int = 0):
     d_tot = str(data.get('totalvolume') or '')
     disc_pos = f"{d_num}/{d_tot}" if (d_tot and d_tot != '0') else d_num
 
-    tags.add(TIT2(encoding=3, text=data['title']))
-    tags.add(TALB(encoding=3, text=data['album']))
-    tags.add(TPE2(encoding=3, text=data['albumartist']))
-    tags.add(TPE1(encoding=3, text=data['artist']))
-    tags.add(TCOP(encoding=3, text=data['copyright']))
+    tags.add(TIT2(encoding=3, text=data.get('title', '')))
+    tags.add(TALB(encoding=3, text=data.get('album', '')))
+    tags.add(TPE2(encoding=3, text=data.get('albumartist', '')))
+    tags.add(TOPE(encoding=3, text=data.get('albumartist', '')))
+    tags.add(TPE1(encoding=3, text=data.get('artist', '')))
+    tags.add(TCOP(encoding=3, text=data.get('copyright', '')))
     tags.add(TRCK(encoding=3, text=track_pos)) 
     
-    pub = data.get('publisher') or ''
-    if pub: tags.add(TPUB(encoding=3, text=pub))
+    pub = data.get('publisher') or data.get('label') or data.get('organization') or ''
+    if pub:
+        tags.add(TPUB(encoding=3, text=pub))
+        tags.add(TXXX(encoding=3, desc='LABEL', text=pub))
+        tags.add(TXXX(encoding=3, desc='ORGANIZATION', text=pub))
 
     if disc_pos: tags.add(TPOS(encoding=3, text=disc_pos)) 
     if data.get('genre'): tags.add(TCON(encoding=3, text=data['genre'])) 
+    if data.get('subgenre'): tags.add(TXXX(encoding=3, desc='SUBGENRE', text=data['subgenre']))
     if data.get('date'): tags.add(TDRC(encoding=3, text=data['date']))
     if data.get('release_date'): tags.add(TDRL(encoding=3, text=data['release_date']))
     
-    tags.add(TSRC(encoding=3, text=data['isrc']))
+    tags.add(TSRC(encoding=3, text=data.get('isrc', '')))
+
+    if data.get('producer'):
+        tags.add(TXXX(encoding=3, desc='PRODUCER', text=data['producer']))
+
+    if data.get('upc'):
+        tags.add(TXXX(encoding=3, desc='UPC', text=data['upc']))
+        tags.add(TXXX(encoding=3, desc='BARCODE', text=data['upc']))
+        tags.add(TXXX(encoding=3, desc='EAN', text=data['upc']))
+
+    if data.get('composer'): 
+        tags.add(TCOM(encoding=3, text=data['composer']))
+
+    if dur_ms > 0:
+        tags.add(TLEN(encoding=3, text=str(dur_ms)))
+
+    if data.get('bit_depth'):
+        tags.add(TXXX(encoding=3, desc='BPS', text=str(data['bit_depth'])))
+    if data.get('sample_rate'):
+        tags.add(TXXX(encoding=3, desc='SAMPLERATE', text=str(int(data['sample_rate'] * 1000))))
+
     if data.get('lyrics'):
-        tags.add(USLT(encoding=3, lang=u'eng', desc=u'desc', text=data['lyrics']))
+        tags.add(USLT(encoding=3, lang='eng', desc='desc', text=data['lyrics']))
     
     await savePic(handle, data)
     import asyncio
@@ -870,27 +892,26 @@ async def savePic(handle, metadata):
         pic = MP4Cover(data, imageformat=MP4Cover.FORMAT_JPEG)
         handle.tags['covr'] = [pic]
 
-    # --- 4. Handler MP3 / WAVE (ID3) ---
-    elif isinstance(handle, (MP3, EasyMP3, WAVE)) or hasattr(handle, 'tags'):
+    # --- 4. Handler MP3 / WAVE & AIFF (ID3) ---
+    elif isinstance(handle, (MP3, EasyMP3, WAVE, AIFF)) or hasattr(handle, 'tags'):
         try:
             handle.tags.delall("APIC")
             handle.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc=u'Cover', data=data))
         except Exception:
             from bot.logger import LOGGER
-            LOGGER.exception("Gagal memasang cover art ID3 ke file (Kemungkinan korupsi struktur ID3):")
+            LOGGER.exception("Gagal memasang cover art ID3 ke file:")
             
 async def get_audio_extension(path):
     try:
         import asyncio
-        # Memindahkan operasi disk I/O sinkron ke thread terpisah
         handle = await asyncio.to_thread(File, path)
-        
         if handle is None:
              ext = os.path.splitext(path)[1].lower()
              return ext.replace('.', '')
         if isinstance(handle, MP4): return 'm4a'
         if isinstance(handle, FLAC): return 'flac'
         if isinstance(handle, WAVE): return 'wav'
+        if isinstance(handle, AIFF): return 'aiff'
         return 'mp3'
     except:
         return 'mp3'
