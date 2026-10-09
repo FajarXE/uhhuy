@@ -39,11 +39,13 @@ from bot.logger import LOGGER
 async def refresh_track_url(item_id: str, current_meta: dict, user_id: int):
     try:
         pref_qual = current_meta.get('quality', 'High').lower()
-        if pref_qual not in ['lossless', 'high', 'medium']:
+        if pref_qual not in ['wav', 'aiff', 'lossless', 'high', 'medium']:
             pref_qual = beatport_manager.get_user_quality(user_id)
 
         quality_priority = ["medium"]
-        if pref_qual == "lossless": quality_priority = ["lossless", "high", "medium"]
+        if pref_qual == "wav": quality_priority = ["wav", "aiff", "lossless", "high", "medium"]
+        elif pref_qual == "aiff": quality_priority = ["aiff", "wav", "lossless", "high", "medium"]
+        elif pref_qual == "lossless": quality_priority = ["lossless", "high", "medium"]
         elif pref_qual == "high": quality_priority = ["high", "medium"]
 
         LOGGER.info(f"Beatport: Refreshing URL for {item_id} ({pref_qual})...")
@@ -52,7 +54,7 @@ async def refresh_track_url(item_id: str, current_meta: dict, user_id: int):
             
         for qual in quality_priority:
             try:
-                q_map = {"lossless": "lossless", "high": "high", "medium": "medium"}
+                q_map = {"wav": "wav", "aiff": "aiff", "lossless": "lossless", "high": "high", "medium": "medium"}
                 stream_data = await client.get_track_download(item_id, q_map[qual])
                 new_url = stream_data.get("location")
                 if new_url: return new_url, qual 
