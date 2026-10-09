@@ -256,27 +256,26 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
     # Stream Logic
     pref_qual = beatport_manager.get_user_quality(user_id)
     
-    if pref_qual == "wav":
-        metadata['quality'] = "WAV"
-        metadata['extension'] = "wav"
-    elif pref_qual == "aiff":
-        metadata['quality'] = "AIFF"
-        metadata['extension'] = "aiff"
-    elif pref_qual == "lossless":
-        metadata['quality'] = "FLAC"
-        metadata['extension'] = "flac"
+    # Simpan target format akhir yang diinginkan user
+    metadata['target_format'] = pref_qual  # 'wav', 'aiff', 'lossless', 'high', atau 'medium'
+    
+    if pref_qual in ["wav", "aiff", "lossless"]:
+        metadata['quality'] = pref_qual.upper() if pref_qual in ["wav", "aiff"] else "FLAC"
+        metadata['extension'] = "flac"  # Selalu download stream FLAC dari API
+        target_q_code = "lossless"
     elif pref_qual == "high":
         metadata['quality'] = "AAC 256"
         metadata['extension'] = "m4a"
+        target_q_code = "high"
     else:
         metadata['quality'] = "AAC 128"
         metadata['extension'] = "m4a"
-
-    metadata['download_url'] = None
+        target_q_code = "medium"
 
     if fetch_stream:
-        stream_loc = None
-        target_q_code = QUALITY_MAP.get(pref_qual, "medium")
+        # Request stream menggunakan parameter resmi API: lossless / high / medium
+        sd = await active_client.get_track_download(track_id, target_q_code)
+        metadata['download_url'] = sd.get('location')
 
         try:
             await asyncio.sleep(random.uniform(1.0, 2.0)) 
