@@ -95,27 +95,28 @@ async def start_khinsider(url, user):
     cover_path = None
     if album_meta.get('images'):
         await edit_message(msg, f"🖼️ Mengunduh {len(album_meta['images'])} gambar...")
-        # Siapkan header lengkap beserta Referer album
         img_headers = khinsider_manager.headers.copy()
         img_headers["Referer"] = url
 
         for i, img_url in enumerate(album_meta['images']):
             try:
                 ext = img_url.split('.')[-1].split('?')[0]
-                if i == 0:
-                    filename = f"cover.{ext}"
-                    filepath = f"{album_folder_path}/{filename}"
-                    cover_path = filepath 
-                else:
-                    filename = f"artwork_{i}.{ext}"
-                    filepath = f"{album_folder_path}/{filename}"
-                
-                # Kirim header lengkap berisi Referer
-                await download_file(
-                    img_url, 
-                    filepath, 
-                    details={'msg': None, 'headers': img_headers}
-                )
+                filename = f"cover.{ext}" if i == 0 else f"artwork_{i}.{ext}"
+                filepath = f"{album_folder_path}/{filename}"
+
+                # Unduh langsung memakai session aiohttp (membawa cookies sesi album)
+                async with khinsider_manager.session.get(img_url, headers=img_headers) as r:
+                    if r.status == 200:
+                        async with aiofiles.open(filepath, 'wb') as f:
+                            async for chunk in r.content.iter_chunked(256 * 1024):
+                                if chunk:
+                                    await f.write(chunk)
+                        
+                        # Set cover_path jika download gambar utama berhasil
+                        if i == 0:
+                            cover_path = filepath
+                    else:
+                        LOGGER.warning(f"Gagal unduh gambar {img_url}: HTTP {r.status}")
             except Exception as e:
                 LOGGER.warning(f"Gagal unduh gambar {img_url}: {e}")
 
