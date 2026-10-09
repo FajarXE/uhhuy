@@ -127,28 +127,84 @@ def _write_extended_tags_sync(filepath: str, meta: dict):
             if audio.tags is None:
                 audio.add_tags()
             tags = audio.tags
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            if meta.get('bpm'): tags.add(TBPM(encoding=3, text=str(meta['bpm'])))
+            # BPM & KEY
+            if meta.get('bpm'): 
+                tags.add(TBPM(encoding=3, text=str(meta['bpm'])))
             if meta.get('key'): 
                 tags.add(TKEY(encoding=3, text=str(meta['key'])))
+                tags.add(TXXX(encoding=3, desc='initial_key', text=str(meta['key'])))
                 tags.add(TXXX(encoding=3, desc='INITIALKEY', text=str(meta['key'])))
                 tags.add(TXXX(encoding=3, desc='KEY', text=str(meta['key'])))
+
+            # Catalog & Label
             if meta.get('catalog_number'): 
                 tags.add(TXXX(encoding=3, desc='CATALOGNUMBER', text=str(meta['catalog_number'])))
             if meta.get('label'): 
                 tags.add(TPUB(encoding=3, text=str(meta['label'])))
+                tags.add(TXXX(encoding=3, desc='Label', text=str(meta['label'])))
                 tags.add(TXXX(encoding=3, desc='LABEL', text=str(meta['label'])))
-                tags.add(TXXX(encoding=3, desc='ORGANIZATION', text=str(meta['label'])))
+                tags.add(TXXX(encoding=3, desc='pub', text=str(meta['label'])))
+
+            # Copyright
             if meta.get('copyright'): 
                 tags.add(TCOP(encoding=3, text=str(meta['copyright'])))
+                tags.add(TXXX(encoding=3, desc='Copyright', text=str(meta['copyright'])))
+                tags.add(TXXX(encoding=3, desc='COPYRIGHT', text=str(meta['copyright'])))
+                tags.add(TXXX(encoding=3, desc='cpr', text=str(meta['copyright'])))
+
+            # ISRC & UPC
             if meta.get('isrc'): 
                 tags.add(TSRC(encoding=3, text=str(meta['isrc'])))
-            if meta.get('remixer'): 
-                tags.add(TPE4(encoding=3, text=str(meta['remixer'])))
-                tags.add(TXXX(encoding=3, desc='REMIXER', text=str(meta['remixer'])))
+                tags.add(TXXX(encoding=3, desc='ISRC', text=str(meta['isrc'])))
             if meta.get('upc'): 
                 tags.add(TXXX(encoding=3, desc='UPC', text=str(meta['upc'])))
                 tags.add(TXXX(encoding=3, desc='BARCODE', text=str(meta['upc'])))
+
+            # Remixer & Producer
+            if meta.get('remixer'): 
+                tags.add(TPE4(encoding=3, text=str(meta['remixer'])))
+                tags.add(TXXX(encoding=3, desc='REMIXER', text=str(meta['remixer'])))
+            producer = meta.get('producer') or meta.get('artist') or ''
+            if producer:
+                tags.add(TXXX(encoding=3, desc='Producer', text=str(producer)))
+                tags.add(TXXX(encoding=3, desc='PRODUCER', text=str(producer)))
+
+            # Rating & Advisory
+            is_explicit = meta.get('explicit')
+            tags.add(TXXX(encoding=3, desc='Rating', text="Explicit" if is_explicit else "Clean"))
+            tags.add(TXXX(encoding=3, desc='ITUNESADVISORY', text="1" if is_explicit else "2"))
+
+            # Part / Track
+            t_num = str(meta.get('tracknumber') or '1')
+            t_tot = str(meta.get('totaltracks') or '1')
+            track_pos = f"{t_num}/{t_tot}" if (t_tot and t_tot != '0') else t_num
+            tags.add(TXXX(encoding=3, desc='Part', text=track_pos))
+
+            # Dates
+            rec_date = str(meta.get('date') or '')
+            rel_date = str(meta.get('release_date') or rec_date)
+            if rec_date:
+                tags.add(TXXX(encoding=3, desc='recording_date', text=rec_date))
+            if rel_date:
+                tags.add(TXXX(encoding=3, desc='release_time', text=rel_date))
+
+            tags.add(TXXX(encoding=3, desc='TAGGING_TIME', text=now_str))
+            tags.add(TXXX(encoding=3, desc='DATE_TAGGED', text=now_str))
+            tags.add(TXXX(encoding=3, desc='ENCODED_DATE', text=now_str))
+
+            # File Owner & Type
+            file_type = "AIFF" if ext in ['.aif', '.aiff'] else "WAV"
+            tags.add(TXXX(encoding=3, desc='fileowner', text="Beatport"))
+            tags.add(TXXX(encoding=3, desc='filetype', text=file_type))
+
+            # URLs
+            if meta.get('track_url'):
+                tags.add(TXXX(encoding=3, desc='track_url', text=str(meta['track_url'])))
+            if meta.get('label_url'):
+                tags.add(TXXX(encoding=3, desc='label_url', text=str(meta['label_url'])))
+
             audio.save()
 
         # 4. Handler MP3
@@ -220,17 +276,25 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
     metadata['album'] = album_data.get("name", "Unknown Album")
     
     metadata['date'] = track_data.get("publish_date", "")[:10]
+    metadata['release_date'] = track_data.get("publish_date", "")[:10]
     metadata['year'] = metadata['date'][:4]
     metadata['explicit'] = track_data.get("explicit", False)
     
     metadata['tracknumber'] = str(track_data.get("number", 1)).zfill(2)
     metadata['totaltracks'] = str(album_data.get("track_count", 1))
+    metadata['volume'] = "1"
+    metadata['totalvolume'] = "1"
 
     metadata['bpm'] = str(track_data.get('bpm', ''))
     
     key_data = track_data.get('key')
     if isinstance(key_data, dict): metadata['key'] = key_data.get('name')
     else: metadata['key'] = str(key_data) if key_data else ''
+
+    if track_data.get("genre"):
+        metadata['genre'] = track_data["genre"].get("name", "") if isinstance(track_data["genre"], dict) else str(track_data["genre"])
+    if track_data.get("sub_genre"):
+        metadata['subgenre'] = track_data["sub_genre"].get("name", "") if isinstance(track_data["sub_genre"], dict) else str(track_data["sub_genre"])
 
     metadata['catalog_number'] = track_data.get('release', {}).get('catalog_number') or album_data.get('catalog_number', '')
     metadata['label'] = track_data.get('release', {}).get('label', {}).get('name') or album_data.get('label', {}).get('name', '')
@@ -243,6 +307,19 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
 
     metadata['isrc'] = track_data.get('isrc', '')
     metadata['upc'] = track_data.get('release', {}).get('upc') or album_data.get('upc', '')
+
+    slug = track_data.get("slug") or "track"
+    metadata['track_url'] = f"https://www.beatport.com/track/{slug}/{track_id}"
+    
+    label_obj = track_data.get('release', {}).get('label', {}) or album_data.get('label', {})
+    if isinstance(label_obj, dict) and label_obj.get('id'):
+        label_slug = label_obj.get('slug') or 'label'
+        metadata['label_url'] = f"https://www.beatport.com/label/{label_slug}/{label_obj.get('id')}"
+    else:
+        metadata['label_url'] = ""
+
+    metadata['producer'] = artist_raw
+    metadata['fileowner'] = "Beatport"
     
     bp_cover = None
     if track_data.get("release", {}).get("image", {}).get("dynamic_uri"):
@@ -253,15 +330,12 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
     metadata['cover'] = await _process_cover(metadata, bp_cover)
     metadata['thumbnail'] = await create_cover_file(await _generate_artwork_url(bp_cover, 80), metadata, True)
 
-    # Stream Logic
     pref_qual = beatport_manager.get_user_quality(user_id)
-    
-    # Simpan target format akhir yang diinginkan user
-    metadata['target_format'] = pref_qual  # 'wav', 'aiff', 'lossless', 'high', atau 'medium'
+    metadata['target_format'] = pref_qual
     
     if pref_qual in ["wav", "aiff", "lossless"]:
         metadata['quality'] = pref_qual.upper() if pref_qual in ["wav", "aiff"] else "FLAC"
-        metadata['extension'] = "flac"  # Selalu download stream FLAC dari API
+        metadata['extension'] = "flac"
         target_q_code = "lossless"
     elif pref_qual == "high":
         metadata['quality'] = "AAC 256"
@@ -272,13 +346,12 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
         metadata['extension'] = "m4a"
         target_q_code = "medium"
 
-    if fetch_stream:
-        # Request stream menggunakan parameter resmi API: lossless / high / medium
-        sd = await active_client.get_track_download(track_id, target_q_code)
-        metadata['download_url'] = sd.get('location')
+    metadata['download_url'] = None
 
+    if fetch_stream:
+        stream_loc = None
         try:
-            await asyncio.sleep(random.uniform(1.0, 2.0)) 
+            await asyncio.sleep(random.uniform(0.5, 1.2)) 
             sd = await active_client.get_track_download(track_id, target_q_code)
             stream_loc = sd.get('location')
         except Exception:
@@ -286,31 +359,28 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
 
         if not stream_loc:
             fallback_chain = []
-            if pref_qual == "wav": fallback_chain = ["aiff", "lossless", "high"]
-            elif pref_qual == "aiff": fallback_chain = ["wav", "lossless", "high"]
-            elif pref_qual == "lossless": fallback_chain = ["high"]
+            if target_q_code == "lossless":
+                fallback_chain = ["high", "medium"]
+            elif target_q_code == "high":
+                fallback_chain = ["medium"]
             
             for fb_qual in fallback_chain:
                 try:
-                    await asyncio.sleep(random.uniform(1.0, 2.0))
-                    sd = await active_client.get_track_download(track_id, QUALITY_MAP[fb_qual])
+                    await asyncio.sleep(random.uniform(0.5, 1.2))
+                    sd = await active_client.get_track_download(track_id, fb_qual)
                     stream_loc = sd.get('location')
                     if stream_loc:
-                        if fb_qual == "wav":
-                            metadata['quality'] = "WAV"
-                            metadata['extension'] = "wav"
-                        elif fb_qual == "aiff":
-                            metadata['quality'] = "AIFF"
-                            metadata['extension'] = "aiff"
-                        elif fb_qual == "lossless":
-                            metadata['quality'] = "FLAC"
-                            metadata['extension'] = "flac"
-                        elif fb_qual == "high":
+                        if fb_qual == "high":
                             metadata['quality'] = "AAC 256"
                             metadata['extension'] = "m4a"
+                            metadata['target_format'] = "high"
+                        elif fb_qual == "medium":
+                            metadata['quality'] = "AAC 128"
+                            metadata['extension'] = "m4a"
+                            metadata['target_format'] = "medium"
                         break
                 except Exception:
-                    pass
+                    continue
 
         if not stream_loc:
             raise BeatportError(f"Gagal mendapatkan link download (Target: {pref_qual}).")
