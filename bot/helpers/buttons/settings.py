@@ -674,43 +674,33 @@ def bp_button(quality: dict, user_id: int = None):
     prefix = "bpQ" if not usetting else f"ubps"
     row = []
     
-    # Map teks bersih
     display_text_map = {
+        "wav": "WAV",
+        "aiff": "AIFF",
         "lossless": "Lossless (FLAC)",
         "high": "High (AAC 256)",
         "medium": "Medium (AAC 128)"
     }
     
     for i, (key, value) in enumerate(quality.items()):
-        # Ambil teks bersih (tanpa emoji)
         clean_text = display_text_map.get(key)
-        
-        # 1. Logic Warna: Cek apakah value asli mengandung centang
         is_selected = "✅" in value
         btn_style = ButtonStyle.SUCCESS if is_selected else ButtonStyle.DEFAULT
         
         if clean_text:
-            # 2. Buat Tombol
-            # text=clean_text : Teks tombol bersih (tanpa emoji)
-            # callback_data : Menggunakan clean_text sesuai pola kode asli Anda
             row.append(InlineKeyboardButton(
                 text=clean_text, 
                 callback_data=f"{prefix}_{clean_text}", 
                 style=btn_style
             ))
             
-        # Logic baris (maksimal 2 tombol per baris)
-        if (i + 1) % 2 == 0 or i == len(quality) - 1:
+        if len(row) == 2 or i == len(quality) - 1:
             buttons.append(row)
             row = []
             
     if usetting:
         buttons.append([InlineKeyboardButton("🔐 PRIVATE ACCOUNT", callback_data="uset_bp_auth", style=ButtonStyle.PRIMARY)])
-        buttons.append(
-            [
-                InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)
-            ]
-        )
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
         return InlineKeyboardMarkup(buttons)
         
     main_button, close_button = fetch_base_buttons()
