@@ -104,15 +104,13 @@ async def start_khinsider(url, user):
                 filename = f"cover.{ext}" if i == 0 else f"artwork_{i}.{ext}"
                 filepath = f"{album_folder_path}/{filename}"
 
-                # Unduh langsung memakai session aiohttp (membawa cookies sesi album)
+                # Memakai session manager (otomatis lewat proxy)
                 async with khinsider_manager.session.get(img_url, headers=img_headers) as r:
                     if r.status == 200:
                         async with aiofiles.open(filepath, 'wb') as f:
                             async for chunk in r.content.iter_chunked(256 * 1024):
                                 if chunk:
                                     await f.write(chunk)
-                        
-                        # Set cover_path jika download gambar utama berhasil
                         if i == 0:
                             cover_path = filepath
                     else:
@@ -166,25 +164,23 @@ async def start_khinsider(url, user):
             filepath = f"{album_folder_path}/{filename}"
             
             # --- 2. FULL ARIA2 + AIOHTTP FALLBACK ---
-            # Salin seluruh header browser dan tambahkan halaman track sebagai Referer
             headers_dict = khinsider_manager.headers.copy()
             headers_dict["Referer"] = track['url']
             
-            # [KUNCI RAHASIA] Gunakan 'msg': None.
-            # Aria2 tetap mendapat Headers penyamaran, tidak akan crash, dan UI tetap rapi!
             details_aria = {'msg': None, 'headers': headers_dict}
             
             # Coba unduh dengan Aria2 
             err = await download_file(dl_url, filepath, retries=1, details=details_aria)
             
+            # Jika Aria2 gagal / ditolak 403, fallback aiohttp akan berjalan LEWAT PROXY
             if err:
-                LOGGER.warning(f"Khinsider: Aria2 gagal/ditolak. Mengaktifkan AIOHTTP Turbo Fallback untuk {filename}")
-                async with aiohttp.ClientSession(headers=headers_dict) as session:
-                    async with session.get(dl_url) as r:
-                        r.raise_for_status()
-                        async with aiofiles.open(filepath, 'wb') as f:
-                            async for chunk in r.content.iter_chunked(256 * 1024):
-                                if chunk: await f.write(chunk)
+                LOGGER.warning(f"Khinsider: Aria2 gagal/ditolak. Mengaktifkan AIOHTTP Turbo Fallback (Proxy) untuk {filename}")
+                async with khinsider_manager.session.get(dl_url, headers=headers_dict) as r:
+                    r.raise_for_status()
+                    async with aiofiles.open(filepath, 'wb') as f:
+                        async for chunk in r.content.iter_chunked(256 * 1024):
+                            if chunk:
+                                await f.write(chunk)
             # ----------------------------------------
             
             # 3. Tanam Tags
