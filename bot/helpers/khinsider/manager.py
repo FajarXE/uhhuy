@@ -4,7 +4,14 @@ import re
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from yarl import URL
+from config import Config
 from ...logger import LOGGER
+
+try:
+    from aiohttp_socks import ProxyConnector
+    HAS_SOCKS = True
+except ImportError:
+    HAS_SOCKS = False
 
 class KhinsiderManager:
     def __init__(self):
@@ -13,12 +20,11 @@ class KhinsiderManager:
         self.base_album_url = "https://downloads.khinsider.com/game-soundtracks/album/"
         self.base_referer = "https://downloads.khinsider.com/"
         
-        # Header identik dengan khiscrape.py untuk menyamar sebagai browser asli
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US;q=1.0,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Encoding": "gzip, deflate",
             "Connection": "keep-alive",
             "DNT": "1",
             "Upgrade-Insecure-Requests": "1",
@@ -27,8 +33,20 @@ class KhinsiderManager:
             "Sec-Fetch-Site": "same-origin",
         }
 
+    def _get_connector(self):
+        """Membuat ProxyConnector jika KHINSIDER_PROXY diset di config"""
+        proxy_url = getattr(Config, "KHINSIDER_PROXY", None)
+        if proxy_url:
+            if HAS_SOCKS:
+                LOGGER.info("KhinsiderManager: Menggunakan Proxy untuk scraping.")
+                return ProxyConnector.from_url(proxy_url)
+            else:
+                LOGGER.warning("KHINSIDER_PROXY diset tetapi library 'aiohttp-socks' belum terpasang!")
+        return None
+
     async def initialize_clients(self):
-        self.session = aiohttp.ClientSession(headers=self.headers)
+        connector = self._get_connector()
+        self.session = aiohttp.ClientSession(connector=connector, headers=self.headers)
         LOGGER.info("KhinsiderManager: Session initialized.")
 
     async def shutdown(self):
@@ -39,7 +57,6 @@ class KhinsiderManager:
         self.quality = quality
 
     def normalize_album_url(self, input_str: str) -> str:
-        """Membersihkan dan menstandarkan format URL album (seperti pada khiscrape)"""
         clean_input = re.split(r"[?#]", input_str.strip())[0]
         pattern = r"(?:/game-soundtracks)?/album/([^/?#]+)"
         match = re.search(pattern, clean_input)
@@ -57,21 +74,20 @@ class KhinsiderManager:
         return str(URL(self.base_album_url) / album_id)
 
     async def get_album(self, url):
-        # 1. Pastikan session aktif
+        # Buat session baru jika belum ada atau sudah tertutup
         if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession(headers=self.headers)
+            connector = self._get_connector()
+            self.session = aiohttp.ClientSession(connector=connector, headers=self.headers)
 
-        # 2. Normalisasi URL
         clean_url = self.normalize_album_url(url)
         
-        # 3. Kirim header lengkap beserta Referer
         req_headers = self.headers.copy()
         req_headers["Referer"] = self.base_referer
 
         async with self.session.get(clean_url, headers=req_headers) as resp:
             if resp.status != 200:
                 body_sample = await resp.text()
-                LOGGER.error(f"Khinsider 403 Response Snippet: {body_sample[:300]}")
+                LOGGER.error(f"Khinsider Response Status: {resp.status} Snippet: {body_sample[:300]}")
                 raise Exception(f"Failed to fetch album page: {resp.status}")
             html = await resp.text()
 
@@ -99,7 +115,7 @@ class KhinsiderManager:
                 images.append(full_img_url)
         cover_url = images[0] if images else None
 
-        # 4. Parse Tracks & Deteksi Disc
+        # 4. Parse Tracks
         tracks = []
         table = soup.find("table", id="songlist")
         disc_numbers = set()
@@ -173,16 +189,17 @@ class KhinsiderManager:
         }
 
     async def get_track_download_url(self, track_url, preferred_formats=None, album_url=None):
+        if not self.session or self.session.closed:
+            connector = self._get_connector()
+            self.session = aiohttp.ClientSession(connector=connector, headers=self.headers)
+
         if not preferred_formats:
             preferred_formats = ['flac', 'mp3']
             if self.quality in preferred_formats:
                 preferred_formats.insert(0, preferred_formats.pop(preferred_formats.index(self.quality)))
 
         req_headers = self.headers.copy()
-        if album_url:
-            req_headers["Referer"] = album_url
-        else:
-            req_headers["Referer"] = self.base_referer
+        req_headers["Referer"] = album_url if album_url else self.base_referer
 
         async with self.session.get(track_url, headers=req_headers) as resp:
             if resp.status != 200:
