@@ -14,14 +14,17 @@ from typing import Union, Dict
 from mutagen import File
 from mutagen.oggvorbis import OggVorbis
 from mutagen.oggopus import OggOpus
-from mutagen.aiff import AIFF
 from mutagen.wave import WAVE
+from mutagen.aiff import AIFF
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.mp3 import MP3, EasyMP3
-from mutagen.id3 import TALB, TCOP, TDRC, TIT2, TPE1, TRCK, APIC, \
-    TCON, TOPE, TSRC, USLT, TPOS, TXXX, \
-    TCOM, TDRL, TLEN, TPE2, TPUB
+from mutagen.id3 import (
+    TALB, TCOP, TDRC, TIT2, TPE1, TRCK, APIC,
+    TCON, TOPE, TSRC, USLT, TPOS, TXXX,
+    TCOM, TDRL, TLEN, TPE2, TPUB, TBPM,
+    TKEY, TOWN, TFLT, TDTG, WXXX, WOAS, WPUB
+)
 
 from config import Config
 from bot.logger import LOGGER
@@ -665,10 +668,12 @@ async def set_mp3(data: Dict, handle: Union[MP3, EasyMP3], dur_ms: int = 0):
 # HANDLER WAV & AIFF
 # ==========================================
 async def set_wav(data: Dict, handle: Union[WAVE, AIFF], dur_ms: int = 0):
+    audio_path = data['filepath']
+    ext = os.path.splitext(audio_path)[1].lower()
+
     if not isinstance(handle, (WAVE, AIFF)):
         try:
-            ext = os.path.splitext(data['filepath'])[1].lower()
-            handle = AIFF(data['filepath']) if ext in ['.aif', '.aiff'] else WAVE(data['filepath'])
+            handle = AIFF(audio_path) if ext in ['.aif', '.aiff'] else WAVE(audio_path)
         except Exception: 
             from bot.logger import LOGGER
             LOGGER.exception("Mutagen gagal membaca objek WAVE/AIFF:")
@@ -683,13 +688,15 @@ async def set_wav(data: Dict, handle: Union[WAVE, AIFF], dur_ms: int = 0):
             return
     
     tags = handle.tags
-    
-    t_num = str(data.get('tracknumber', ''))
-    t_tot = str(data.get('totaltracks', ''))
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # 1. Part & Track Position
+    t_num = str(data.get('tracknumber') or '1')
+    t_tot = str(data.get('totaltracks') or '1')
     track_pos = f"{t_num}/{t_tot}" if (t_tot and t_tot != '0') else t_num
     
-    d_num = str(data.get('volume') or '')
-    d_tot = str(data.get('totalvolume') or '')
+    d_num = str(data.get('volume') or '1')
+    d_tot = str(data.get('totalvolume') or '1')
     disc_pos = f"{d_num}/{d_tot}" if (d_tot and d_tot != '0') else d_num
 
     tags.add(TIT2(encoding=3, text=data.get('title', '')))
@@ -697,47 +704,120 @@ async def set_wav(data: Dict, handle: Union[WAVE, AIFF], dur_ms: int = 0):
     tags.add(TPE2(encoding=3, text=data.get('albumartist', '')))
     tags.add(TOPE(encoding=3, text=data.get('albumartist', '')))
     tags.add(TPE1(encoding=3, text=data.get('artist', '')))
-    tags.add(TCOP(encoding=3, text=data.get('copyright', '')))
-    tags.add(TRCK(encoding=3, text=track_pos)) 
-    
-    pub = data.get('publisher') or data.get('label') or data.get('organization') or ''
-    if pub:
-        tags.add(TPUB(encoding=3, text=pub))
-        tags.add(TXXX(encoding=3, desc='LABEL', text=pub))
-        tags.add(TXXX(encoding=3, desc='ORGANIZATION', text=pub))
+    tags.add(TRCK(encoding=3, text=track_pos))
+    if disc_pos: 
+        tags.add(TPOS(encoding=3, text=disc_pos))
 
-    if disc_pos: tags.add(TPOS(encoding=3, text=disc_pos)) 
-    if data.get('genre'): tags.add(TCON(encoding=3, text=data['genre'])) 
-    if data.get('subgenre'): tags.add(TXXX(encoding=3, desc='SUBGENRE', text=data['subgenre']))
-    if data.get('date'): tags.add(TDRC(encoding=3, text=data['date']))
-    if data.get('release_date'): tags.add(TDRL(encoding=3, text=data['release_date']))
-    
-    tags.add(TSRC(encoding=3, text=data.get('isrc', '')))
+    # MediaInfo Field: Part
+    tags.add(TXXX(encoding=3, desc='Part', text=track_pos))
+    tags.add(TXXX(encoding=3, desc='PART', text=track_pos))
 
-    if data.get('producer'):
-        tags.add(TXXX(encoding=3, desc='PRODUCER', text=data['producer']))
+    # 2. Copyright & cpr
+    cpr = data.get('copyright') or ''
+    if cpr:
+        tags.add(TCOP(encoding=3, text=cpr))
+        tags.add(TXXX(encoding=3, desc='Copyright', text=cpr))
+        tags.add(TXXX(encoding=3, desc='COPYRIGHT', text=cpr))
+        tags.add(TXXX(encoding=3, desc='cpr', text=cpr))
 
-    if data.get('upc'):
-        tags.add(TXXX(encoding=3, desc='UPC', text=data['upc']))
-        tags.add(TXXX(encoding=3, desc='BARCODE', text=data['upc']))
-        tags.add(TXXX(encoding=3, desc='EAN', text=data['upc']))
+    # 3. Label & pub
+    label = data.get('label') or data.get('publisher') or data.get('organization') or ''
+    if label:
+        tags.add(TPUB(encoding=3, text=label))
+        tags.add(TXXX(encoding=3, desc='Label', text=label))
+        tags.add(TXXX(encoding=3, desc='LABEL', text=label))
+        tags.add(TXXX(encoding=3, desc='pub', text=label))
+        tags.add(TXXX(encoding=3, desc='ORGANIZATION', text=label))
 
+    # 4. Producer
+    producer = data.get('producer') or data.get('artist') or ''
+    if producer:
+        tags.add(TXXX(encoding=3, desc='Producer', text=producer))
+        tags.add(TXXX(encoding=3, desc='PRODUCER', text=producer))
+
+    # 5. ISRC
+    isrc = data.get('isrc') or ''
+    if isrc:
+        tags.add(TSRC(encoding=3, text=isrc))
+        tags.add(TXXX(encoding=3, desc='ISRC', text=isrc))
+
+    # 6. Rating & ITUNESADVISORY
+    is_explicit = data.get('explicit')
+    if is_explicit is True:
+        rating_str = "Explicit"
+        advisory_str = "1"
+    elif is_explicit is False:
+        rating_str = "Clean"
+        advisory_str = "2"
+    else:
+        rating_str = "None"
+        advisory_str = "0"
+
+    tags.add(TXXX(encoding=3, desc='Rating', text=rating_str))
+    tags.add(TXXX(encoding=3, desc='RATING', text=rating_str))
+    tags.add(TXXX(encoding=3, desc='ITUNESADVISORY', text=advisory_str))
+
+    # 7. Initial Key
+    key = str(data.get('key') or '')
+    if key:
+        tags.add(TKEY(encoding=3, text=key))
+        tags.add(TXXX(encoding=3, desc='initial_key', text=key))
+        tags.add(TXXX(encoding=3, desc='INITIALKEY', text=key))
+        tags.add(TXXX(encoding=3, desc='KEY', text=key))
+
+    # 8. Dates: recording_date, release_time, TAGGING_TIME, etc.
+    rec_date = str(data.get('date') or '')
+    rel_date = str(data.get('release_date') or rec_date)
+
+    if rec_date:
+        tags.add(TDRC(encoding=3, text=rec_date))
+        tags.add(TXXX(encoding=3, desc='recording_date', text=rec_date))
+        tags.add(TXXX(encoding=3, desc='RECORDING_DATE', text=rec_date))
+
+    if rel_date:
+        tags.add(TDRL(encoding=3, text=rel_date))
+        tags.add(TXXX(encoding=3, desc='release_time', text=rel_date))
+        tags.add(TXXX(encoding=3, desc='RELEASETIME', text=rel_date))
+
+    tags.add(TDTG(encoding=3, text=now_str))
+    tags.add(TXXX(encoding=3, desc='TAGGING_TIME', text=now_str))
+    tags.add(TXXX(encoding=3, desc='DATE_TAGGED', text=now_str))
+    tags.add(TXXX(encoding=3, desc='ENCODED_DATE', text=now_str))
+
+    # 9. File Owner
+    owner = data.get('fileowner') or 'Beatport'
+    tags.add(TOWN(encoding=3, text=owner))
+    tags.add(TXXX(encoding=3, desc='fileowner', text=owner))
+    tags.add(TXXX(encoding=3, desc='FILEOWNER', text=owner))
+
+    # 10. File Type
+    file_type = "AIFF" if ext in ['.aif', '.aiff'] else "WAV"
+    tags.add(TFLT(encoding=3, text=file_type))
+    tags.add(TXXX(encoding=3, desc='filetype', text=file_type))
+    tags.add(TXXX(encoding=3, desc='FILETYPE', text=file_type))
+
+    # 11. URLs: track_url & label_url
+    track_url = data.get('track_url') or ''
+    if track_url:
+        tags.add(WOAS(url=track_url))
+        tags.add(TXXX(encoding=3, desc='track_url', text=track_url))
+
+    label_url = data.get('label_url') or ''
+    if label_url:
+        tags.add(WPUB(url=label_url))
+        tags.add(TXXX(encoding=3, desc='label_url', text=label_url))
+
+    # 12. Genre, Composer, Durasi, Lirik
+    if data.get('genre'): 
+        tags.add(TCON(encoding=3, text=data['genre'])) 
     if data.get('composer'): 
         tags.add(TCOM(encoding=3, text=data['composer']))
-
     if dur_ms > 0:
         tags.add(TLEN(encoding=3, text=str(dur_ms)))
-
-    if data.get('bit_depth'):
-        tags.add(TXXX(encoding=3, desc='BPS', text=str(data['bit_depth'])))
-    if data.get('sample_rate'):
-        tags.add(TXXX(encoding=3, desc='SAMPLERATE', text=str(int(data['sample_rate'] * 1000))))
-
     if data.get('lyrics'):
         tags.add(USLT(encoding=3, lang='eng', desc='desc', text=data['lyrics']))
     
     await savePic(handle, data)
-    import asyncio
     await asyncio.to_thread(handle.save)
     return True
 
