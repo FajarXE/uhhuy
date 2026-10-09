@@ -133,7 +133,10 @@ async def process_track(link: str, user: dict, track_data=None, album_meta=None,
     if metadata['cover'] and os.path.exists(metadata['cover']):
         metadata['cover'] = await asyncio.to_thread(_convert_to_jpeg, metadata['cover'])
     
-    details = {'msg': user.get('bot_msg'), 'title': title, 'type': 'Track', 'action': 'Download'}
+    details = None
+    if not album_meta:
+        details = {'msg': user.get('bot_msg'), 'title': title, 'type': 'Track', 'action': 'Download'}
+
     err = await download_file(stream_url, filepath, details=details)
     if err:
         raise Exception(f"Gagal mengunduh stream Aria2: {err}")
