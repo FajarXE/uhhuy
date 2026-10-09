@@ -113,7 +113,8 @@ async def aria2_download(url, filepath, details=None):
         
         if details:
             details['task_id'] = gid
-            details['title'] = file_name
+            # Prioritaskan display_title kustom agar ekstensi target (WAV/AIFF) yang muncul di radar
+            details['title'] = details.get('display_title') or file_name
             details['type'] = 'Download'
 
         # --- [PERBAIKAN] Tambahkan ARIA2_SECRET ke params TellStatus ---
