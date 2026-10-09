@@ -1521,6 +1521,8 @@ async def uset_cb(client, query, datatype=""):
     if data[1] == "beatport" or datatype == "beatport":
         text = f"Choose Beatport Audio Quality bellow:"
         quality = {
+            "wav": "WAV",
+            "aiff": "AIFF",
             "lossless": "Lossless (FLAC)",
             "high": "High (AAC 256)",
             "medium": "Medium (AAC 128)"
@@ -1983,6 +1985,8 @@ async def uset_beatport(client, query):
     if not await check_user(msg=m):
         return
     qual_map_display = {
+        "WAV": "wav",
+        "AIFF": "aiff",
         "Lossless (FLAC)": "lossless",
         "High (AAC 256)": "high",
         "Medium (AAC 128)": "medium"
