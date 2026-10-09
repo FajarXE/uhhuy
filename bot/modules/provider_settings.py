@@ -391,6 +391,8 @@ async def td_global_auth_cmd(client, message):
 async def beatport_cb(c, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
         quality = {
+            "wav": "WAV",
+            "aiff": "AIFF",
             "lossless": "Lossless (FLAC)",
             "high": "High (AAC 256)",
             "medium": "Medium (AAC 128)"
@@ -406,6 +408,8 @@ async def beatport_cb(c, cb:CallbackQuery):
 async def beatport_quality_cb(c, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
         qual_map_display = {
+            "WAV": "wav",
+            "AIFF": "aiff",
             "Lossless (FLAC)": "lossless",
             "High (AAC 256)": "high",
             "Medium (AAC 128)": "medium"
