@@ -202,12 +202,24 @@ class BeatportLoginManager:
 
     # --- Quality Helpers ---
     async def setup_quality(self, user_id: int, qual: str = None):
-        if user_id not in self.user_data: self.user_data[user_id] = {}
-        if qual in ["wav", "aiff", "lossless", "high", "medium"]:
-            self.user_data[user_id]['beatport_qual']
+        if user_id not in self.user_data:
+            self.user_data[user_id] = {}
+
+        valid_qualities = ["wav", "aiff", "lossless", "high", "medium"]
+
+        # Validasi dan simpan jika nilai qual valid
+        if qual and str(qual).lower() in valid_qualities:
+            self.user_data[user_id]['beatport_qual'] = str(qual).lower()
+
+        # Fallback aman jika key belum pernah diisi
+        if 'beatport_qual' not in self.user_data[user_id]:
+            self.user_data[user_id]['beatport_qual'] = getattr(self, 'quality', 'lossless')
+
+        return self.user_data[user_id]['beatport_qual']
 
     def get_user_quality(self, user_id: int) -> str:
-        return self.user_data.get(user_id, {}).get('beatport_qual', self.quality)
+        # Gunakan .get() berantai agar tidak KeyError jika user_id belum terdaftar
+        return self.user_data.get(user_id, {}).get('beatport_qual', getattr(self, 'quality', 'lossless'))
 
     async def shutdown(self):
         """Menutup semua sesi klien Beatport (Global & User) dengan aman saat bot dimatikan."""
