@@ -88,6 +88,11 @@ try:
 except ImportError:
     logging.warning("UserSettings: Gagal mengimpor audiomack_manager.")
     audiomack_manager = None
+try:
+    from ..helpers.nhaccuatui.manager import nhaccuatui_manager
+except ImportError:
+    logging.warning("UserSettings: Gagal mengimpor nhaccuatui_manager.")
+    nhaccuatui_manager = None
 
 # --- IMPORT BUTTONS ---
 # Pastikan Anda sudah menambahkan 'beatport_user_auth_buttons' di bot/helpers/buttons/settings.py
@@ -95,7 +100,7 @@ from ..helpers.buttons.settings import (
     usetting_button, tidal_quality_button,
     qb_button, bp_button, dz_button, kk_button,
     sc_button, id_button, bugs_button, lyrics_button, mv_button,
-    lp_button, khi_button, beatport_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button, amack_button
+    lp_button, khi_button, beatport_user_auth_buttons, highresaudio_user_auth_buttons, hra_button, qb_user_auth_buttons, deezer_user_auth_buttons, amz_button, amazon_user_auth_buttons, gn_button, amack_button, nct_button
 )
 from ..helpers.database.mongo_async import database
 from ..helpers.utils import fetch_zip_settings
@@ -1412,7 +1417,7 @@ async def uset_upload_mode_handler(client, query):
 
 
 # --- HANDLER UTAMA TOMBOL MENU (PROVIDER SETTINGS) ---
-@Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider|amazon|genie|audiomack)"))
+@Client.on_callback_query(filters.regex("^uset_(tidal|back|qobuz|close|beatport|deezer|kkbox|beatsource|soundcloud|napster|idagio|bugs|moov|livephish|highresaudio|khinsider|amazon|genie|audiomack|nhaccuatui)"))
 async def uset_cb(client, query, datatype=""):
     if not await check_user(msg=query.message):
         return
@@ -1803,6 +1808,26 @@ async def uset_cb(client, query, datatype=""):
             quality[current] = quality[current] + '✅'
             
         return await edit_message(query.message, text, markup=amack_button(quality, user_id))
+
+    # --- NHACCUATUI MENU ---
+    if data[1] == "nhaccuatui" or datatype == "nhaccuatui":
+        text = "Choose NhacCuaTui Audio Quality bellow:"
+        quality = {
+            "320": "MP3 320kbps",
+            "128": "MP3 128kbps"
+        }
+        
+        if not nhaccuatui_manager:
+            return await edit_message(query.message, "Layanan NhacCuaTui tidak aktif.")
+
+        current = bot_set.user_data.get(user_id, {}).get("nhaccuatui_qual", getattr(nhaccuatui_manager, 'quality', '320'))
+        if hasattr(nhaccuatui_manager, 'setup_quality'):
+            await nhaccuatui_manager.setup_quality(user_id, current)
+        
+        if current in quality:
+            quality[current] = quality[current] + '✅'
+            
+        return await edit_message(query.message, text, markup=nct_button(quality, user_id))
 
 
 # --- HANDLER SETTING TIDAL SPECIFIC ---
@@ -2343,6 +2368,26 @@ async def uset_audiomack_handler(client, query):
     await uset_cb(client, query, "audiomack")
 
 
+@Client.on_callback_query(filters.regex("^uncts_"))
+async def uset_nhaccuatui_handler(client, query):
+    if not await check_user(msg=query.message):
+        return
+    
+    to_set = query.data.split('_')[1]
+    user_id = query.from_user.id
+    
+    if not nhaccuatui_manager:
+        return await query.answer("Layanan NhacCuaTui tidak aktif!", show_alert=True)
+    
+    if hasattr(nhaccuatui_manager, 'setup_quality'):
+        await nhaccuatui_manager.setup_quality(user_id, to_set)
+        
+    bot_set.user_data.setdefault(user_id, {})['nhaccuatui_qual'] = to_set 
+    await database.save_user_settings(user_id, {'nhaccuatui_qual': to_set})
+    
+    await uset_cb(client, query, "nhaccuatui")
+
+
 # --- HANDLER CALLBACK BARU UNTUK LIRIK ---
 # Ubah filter regex untuk menyertakan 'uset_sendly'
 @Client.on_callback_query(filters.regex("^uset_ly|^uset_sendly"))
@@ -2648,11 +2693,23 @@ async def debug(c, m):
         dt_amack += "Tidak ada klien Audiomack yang aktif."
     # =========================================
 
+    # =========================================
+    # TAMBAHKAN NHACCUATUI DEBUG DI SINI
+    # =========================================
+    dt_nct = "\n\nNHACCUATUI:\n"
+    if nhaccuatui_manager:
+        dt_nct += f"Klien NhacCuaTui aktif (Playwright Scraper).\n"
+        dt_nct += f"Kualitas Default: {getattr(nhaccuatui_manager, 'quality', '320')}kbps\n"
+        dt_nct += f"Cache User (Global): {len([u for u in bot_set.user_data if 'nhaccuatui_qual' in bot_set.user_data[u]])} pengguna"
+    else:
+        dt_nct += "Tidak ada klien NhacCuaTui yang aktif."
+    # =========================================
+
     # ZIP SETTINGS DEBUG
     zips = f"\n\nAlbum Zip (Global): {bot_set.album_zip}"
     
     # Combine all debug texts (Pastikan dt_amz dan dt_amack ditambahkan ke dalam final_debug_text)
-    final_debug_text = dt_qb + dt_bp + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + dt_amack + zips
+    final_debug_text = dt_qb + dt_bp + dt_sc + dt_dz + dt_td + dt_kk + dt_id + dt_bg + dt_mv + dt_lp + dt_hra + dt_khi + dt_amz + dt_gn + dt_amack + dt_nct + zips
     
     # Reply safely
     await m.reply(final_debug_text, True)
