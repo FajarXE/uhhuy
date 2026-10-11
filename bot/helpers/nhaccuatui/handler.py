@@ -67,7 +67,7 @@ def extract_url_key(url: str) -> str:
 
 
 def parse_nct_date(raw_val) -> tuple[str, str]:
-    """Mengonversi Epoch timestamp (milidetik) menjadi YYYY-MM-DD dan YYYY."""
+    """Mengonversi Epoch timestamp (milidetik) menjadi tanggal YYYY-MM-DD dan tahun YYYY."""
     if not raw_val:
         return "", ""
     s = str(raw_val).strip()
@@ -94,21 +94,27 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
 
 
 async def upgrade_cover_url(url: str) -> str:
-    """Mencari cover resolusi tinggi (_1000, _800, _600, atau original) dari CDN NhacCuaTui."""
+    """
+    Mengambil resolusi gambar maksimal dari CDN NhacCuaTui.
+    Memprioritaskan gambar asli (tanpa suffix resize), lalu bertingkat dari 2000px hingga 600px.
+    """
     if not url or not isinstance(url, str):
         return ""
     if not any(sub in url for sub in ("_130.", "_150.", "_300.", "_500.")):
         return url
 
     candidates = []
-    for sz in ("_1000.", "_800.", "_600.", "_500."):
-        new_url = re.sub(r'_(?:130|150|300|500)\.', sz, url)
-        if new_url != url:
-            candidates.append(new_url)
 
+    # 1. Prioritas Tertinggi: File Asli tanpa crop/resize suffix
     orig_url = re.sub(r'_(?:130|150|300|500)\.', '.', url)
     if orig_url != url:
         candidates.append(orig_url)
+
+    # 2. Resolusi bertingkat dari paling tinggi ke terendah
+    for sz in ("_2000.", "_1500.", "_1200.", "_1000.", "_800.", "_600."):
+        cand = re.sub(r'_(?:130|150|300|500)\.', sz, url)
+        if cand not in candidates and cand != url:
+            candidates.append(cand)
 
     timeout = aiohttp.ClientTimeout(total=4)
     try:
@@ -126,13 +132,17 @@ async def upgrade_cover_url(url: str) -> str:
     return url
 
 
-async def save_optimized_cover(url: str, dest_folder: str) -> str:
-    """Mengunduh dan memastikan cover berformat JPEG RGB untuk Telegram thumbnail & tag audio."""
+async def save_optimized_cover(url: str, dest_folder: str) -> tuple[str, str]:
+    """
+    Mengunduh gambar beresolusi penuh untuk tag lagu & poster,
+    serta menghasilkan thumbnail terkompresi (<=800x800) untuk ZIP Telegram.
+    """
     if not url:
-        return ""
+        return "", ""
     os.makedirs(dest_folder, exist_ok=True)
     raw_path = os.path.join(dest_folder, "cover_raw.tmp")
-    final_path = os.path.join(dest_folder, "cover.jpg")
+    full_path = os.path.join(dest_folder, "cover.jpg")
+    thumb_path = os.path.join(dest_folder, "cover_thumb.jpg")
 
     try:
         timeout = aiohttp.ClientTimeout(total=30)
@@ -143,27 +153,34 @@ async def save_optimized_cover(url: str, dest_folder: str) -> str:
                         async for chunk in resp.content.iter_chunked(65536):
                             await f.write(chunk)
                 else:
-                    return ""
+                    return "", ""
 
-        def _convert():
+        def _process():
             with Image.open(raw_path) as img:
-                img = img.convert("RGB")
-                img.save(final_path, "JPEG", quality=95, optimize=True)
+                img_rgb = img.convert("RGB")
+                # Simpan resolusi penuh
+                img_rgb.save(full_path, "JPEG", quality=95, optimize=True)
+
+                # Simpan thumbnail yang aman untuk Telegram API (maks 800x800)
+                thumb = img_rgb.copy()
+                thumb.thumbnail((800, 800), Image.Resampling.LANCZOS)
+                thumb.save(thumb_path, "JPEG", quality=85, optimize=True)
+
             if os.path.exists(raw_path):
                 os.remove(raw_path)
 
-        await asyncio.to_thread(_convert)
-        if os.path.exists(final_path) and os.path.getsize(final_path) > 0:
-            return final_path
+        await asyncio.to_thread(_process)
+        if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
+            return full_path, thumb_path
     except Exception as e:
-        LOGGER.warning(f"NhacCuaTui: Gagal memproses cover image: {e}")
+        LOGGER.warning(f"NhacCuaTui: Gagal memproses cover art: {e}")
         if os.path.exists(raw_path):
             try:
-                os.rename(raw_path, final_path)
-                return final_path
+                os.rename(raw_path, full_path)
+                return full_path, full_path
             except Exception:
                 pass
-    return ""
+    return "", ""
 
 
 def best_stream(streams: list, quality_pref: str) -> dict | None:
@@ -228,159 +245,158 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
     }
 
 
-def _collect_candidate_dicts(data: dict) -> list[tuple[str, dict]]:
-    candidates = []
-    for k, v in data.items():
-        if not isinstance(v, dict):
-            continue
-        candidates.append((str(k), v))
-        for sub_k, sub_v in v.items():
-            if isinstance(sub_v, dict) and ("listSong" in sub_v or "songs" in sub_v or "streamURL" in sub_v):
-                candidates.append((f"{k}.{sub_k}", sub_v))
-    return candidates
-
-
-def score_candidate_dict(val: dict, url_key: str, page_title: str) -> int:
-    """Memberikan skor kecocokan agar bot memilih playlist utama dan membuang rekomendasi."""
-    score = 0
-    songs_list = val.get("listSong") or val.get("songs") or []
-    if not isinstance(songs_list, list) or len(songs_list) == 0:
-        return -999
-
-    title_val = str(val.get("name") or val.get("title") or "").lower()
-    negative_words = ("recommend", "suggest", "chart", "ranking", "top", "hot", "gợi ý", "đề xuất", "maybe")
-    for neg in negative_words:
-        if neg in title_val:
-            score -= 150
-
-    url_key_lower = url_key.lower() if url_key else ""
-    if url_key_lower:
-        for k in ("key", "id", "playlistKey", "code", "link", "url", "shortURL"):
-            if url_key_lower in str(val.get(k, "")).lower():
-                score += 250
-        for sub_k in ("playlist", "info", "data", "detail"):
-            sub_dict = val.get(sub_k)
-            if isinstance(sub_dict, dict):
-                for k in ("key", "id", "playlistKey", "code"):
-                    if url_key_lower in str(sub_dict.get(k, "")).lower():
-                        score += 250
-
-    if page_title:
-        clean_page_title = page_title.lower()
-        if title_val and (title_val in clean_page_title or clean_page_title in title_val):
-            score += 100
-
-    expected = val.get("numOfItems") or val.get("total") or val.get("totalSong")
-    if isinstance(expected, int) and expected == len(songs_list):
-        score += 50
-
-    return score
-
-
 async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[list[dict], dict]:
+    """
+    Mengekstrak data lagu dari state Nuxt menggunakan browser evaluation rekursif.
+    Secara tepat mengisolasi playlist target dan membuang blok rekomendasi.
+    """
     url_key = extract_url_key(url)
     url_type = get_url_type(url)
+
+    extracted_payload = await page.evaluate(r"""(args) => {
+        const { urlKey, urlType } = args;
+        const nuxt = window.__NUXT__ || {};
+
+        const getMeta = (prop) => {
+            const el = document.querySelector(`meta[property="${prop}"], meta[name="${prop}"]`);
+            return el ? el.getAttribute('content') : '';
+        };
+
+        const pageTitle = (getMeta('og:title') || document.title || '').replace(/\s*[-|]\s*NhacCuaTui.*$/i, '').trim();
+        const pageImage = getMeta('og:image') || '';
+
+        const collections = [];
+        const singleSongs = [];
+        const seen = new Set();
+
+        function search(obj, depth = 0, path = "") {
+            if (!obj || typeof obj !== "object" || depth > 9 || seen.has(obj)) return;
+            seen.add(obj);
+
+            if (Array.isArray(obj)) {
+                obj.forEach((item, idx) => search(item, depth + 1, `${path}[${idx}]`));
+                return;
+            }
+
+            if (obj.streamURL && (obj.name || obj.title)) {
+                singleSongs.push(obj);
+            }
+
+            const list = obj.listSong || obj.songs;
+            if (Array.isArray(list) && list.length > 0) {
+                collections.push({
+                    key: String(obj.key || obj.id || obj.playlistKey || ''),
+                    name: String(obj.name || obj.title || ''),
+                    artistName: String(obj.artistName || ''),
+                    image: obj.image || obj.avatar || obj.thumbURL || obj.bgImage || '',
+                    date: obj.dateCreate || obj.dateRelease || obj.publishDate || '',
+                    total: obj.numOfItems || obj.total || obj.totalSong || list.length,
+                    listSong: list,
+                    path: path
+                });
+            }
+
+            for (const k of Object.keys(obj)) {
+                if (k !== 'listSong' && k !== 'songs') {
+                    search(obj[k], depth + 1, `${path}.${k}`);
+                }
+            }
+        }
+
+        search(nuxt);
+
+        let bestCol = null;
+        if (collections.length > 0) {
+            let bestScore = -9999;
+            const negWords = ['recommend', 'suggest', 'chart', 'ranking', 'gợi ý', 'đề xuất', 'maybe', 'top 50', 'bxh'];
+
+            for (const col of collections) {
+                let score = 0;
+                const colName = col.name.toLowerCase();
+                const colPath = col.path.toLowerCase();
+
+                for (const neg of negWords) {
+                    if (colName.includes(neg) || colPath.includes(neg)) score -= 200;
+                }
+
+                if (urlKey) {
+                    const uKey = urlKey.toLowerCase();
+                    if (col.key.toLowerCase() === uKey) score += 500;
+                    if (colPath.includes(uKey)) score += 300;
+                }
+
+                if (pageTitle && col.name) {
+                    const cTitle = pageTitle.toLowerCase();
+                    if (cTitle.includes(colName) || colName.includes(cTitle)) score += 150;
+                }
+
+                if (col.total === col.listSong.length && col.total < 40) {
+                    score += 50;
+                }
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestCol = col;
+                }
+            }
+        }
+
+        return {
+            pageTitle,
+            pageImage,
+            bestCol,
+            singleSongs
+        };
+    }""", {"urlKey": url_key, "urlType": url_type})
+
     page_info = {
-        "title": "",
+        "title": extracted_payload.get("pageTitle", ""),
         "artist": "",
-        "cover": "",
+        "cover": extracted_payload.get("pageImage", ""),
         "release_date": "",
         "date": "",
-        "expected_total": 0,
-        "explicit": "No",
+        "explicit": False,
     }
 
-    try:
-        meta_tags = await page.evaluate("""() => {
-            const getMeta = (prop) => {
-                const el = document.querySelector(`meta[property="${prop}"], meta[name="${prop}"]`);
-                return el ? el.getAttribute('content') : '';
-            };
-            return {
-                title: getMeta('og:title') || document.title || '',
-                image: getMeta('og:image') || ''
-            };
-        }""")
-        if meta_tags.get("title"):
-            clean_t = re.sub(r"\s*[-|]\s*NhacCuaTui.*$", "", meta_tags["title"], flags=re.I).strip()
-            page_info["title"] = clean_t
-        if meta_tags.get("image"):
-            page_info["cover"] = meta_tags["image"]
-    except Exception:
-        pass
-
-    try:
-        nuxt = await page.evaluate("() => JSON.parse(JSON.stringify(window.__NUXT__ || {}))")
-    except Exception as e:
-        LOGGER.warning(f"NhacCuaTui: Gagal membaca __NUXT__: {e}")
-        return [], page_info
-
-    raw_data = nuxt.get("data", {})
-    if isinstance(raw_data, list):
-        data = {str(i): item for i, item in enumerate(raw_data) if isinstance(item, dict)}
-    elif isinstance(raw_data, dict):
-        data = raw_data
-    else:
-        return [], page_info
-
-    candidates = _collect_candidate_dicts(data)
-
-    best_dict = None
-    best_score = -999
-
-    for _, val in candidates:
-        if url_type == "song" and "streamURL" in val and ("name" in val or "title" in val):
-            best_dict = val
-            break
-        sc = score_candidate_dict(val, url_key, page_info["title"])
-        if sc > best_score:
-            best_score = sc
-            best_dict = val
-
-    if not best_dict and candidates:
-        best_dict = candidates[0][1]
-
+    best_col = extracted_payload.get("bestCol")
     songs = []
-    if best_dict:
-        if best_dict.get("name") or best_dict.get("title"):
-            page_info["title"] = (best_dict.get("name") or best_dict.get("title") or "").strip()
-        if best_dict.get("artistName"):
-            page_info["artist"] = best_dict.get("artistName", "").strip()
 
-        raw_cover = (
-            best_dict.get("image")
-            or best_dict.get("avatar")
-            or best_dict.get("thumbURL")
-            or best_dict.get("bgImage")
-            or page_info.get("cover")
-            or ""
-        )
-        page_info["cover"] = await upgrade_cover_url(raw_cover)
+    # Single song
+    if url_type == "song" or (not best_col and extracted_payload.get("singleSongs")):
+        for raw_s in extracted_payload.get("singleSongs", []):
+            s = parse_song(raw_s, quality_pref)
+            if s:
+                songs.append(s)
+                if not page_info["title"]:
+                    page_info["title"] = s["title"]
+                if not page_info["artist"]:
+                    page_info["artist"] = s["artist"]
+                if not page_info["cover"] and s.get("cover"):
+                    page_info["cover"] = s["cover"]
+                break
 
-        raw_date = best_dict.get("dateCreate") or best_dict.get("dateRelease") or best_dict.get("publishDate")
-        rel_date, year_date = parse_nct_date(raw_date)
+    # Playlist / Album / Artist
+    elif best_col:
+        if best_col.get("name"):
+            page_info["title"] = best_col["name"].strip()
+        if best_col.get("artistName"):
+            page_info["artist"] = best_col["artistName"].strip()
+
+        raw_cov = best_col.get("image") or page_info.get("cover") or ""
+        page_info["cover"] = await upgrade_cover_url(raw_cov)
+
+        rel_date, year_date = parse_nct_date(best_col.get("date"))
         page_info["release_date"] = rel_date
         page_info["date"] = year_date
 
-        total_items = best_dict.get("numOfItems") or best_dict.get("total") or best_dict.get("totalSong") or 0
-        if isinstance(total_items, int) and total_items > 0:
-            page_info["expected_total"] = total_items
-
-        if "streamURL" in best_dict and ("name" in best_dict or "title" in best_dict):
-            s = parse_song(best_dict, quality_pref)
+        for raw_s in best_col.get("listSong", []):
+            s = parse_song(raw_s, quality_pref)
             if s:
                 songs.append(s)
 
-        song_list = best_dict.get("listSong") or best_dict.get("songs") or []
-        if isinstance(song_list, list):
-            for song_data in song_list:
-                if isinstance(song_data, dict):
-                    s = parse_song(song_data, quality_pref)
-                    if s:
-                        songs.append(s)
-
-    if page_info["expected_total"] > 0 and url_type in ("playlist", "album"):
-        songs = songs[:page_info["expected_total"]]
+        expected_total = best_col.get("total")
+        if isinstance(expected_total, int) and expected_total > 0 and url_type in ("playlist", "album"):
+            songs = songs[:expected_total]
 
     return songs, page_info
 
@@ -471,7 +487,7 @@ async def collect_songs(url: str, quality_pref: str) -> tuple[list[dict], dict]:
         await page.goto(url, wait_until="networkidle", timeout=60_000)
         songs, page_info = await extract_nuxt_data(page, url, quality_pref)
 
-        # Halaman artist saja yang membutuhkan scroll lanjutan jika daftar lagu terpotong
+        # Hanya lakukan scroll jika URL adalah artist dan lagunya belum lengkap
         if url_type == "artist" and len(songs) < 50:
             for _ in range(8):
                 prev = len(songs)
@@ -561,15 +577,17 @@ async def download_single_nct_track(
     track_meta["explicit"] = False
     track_meta["tempfolder"] = collection_meta.get("tempfolder", f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
 
+    # Pasang cover resolusi tinggi ke tag file lagu
     if collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
         track_meta["cover"] = collection_meta["cover"]
-        track_meta["thumbnail"] = collection_meta["cover"]
+        track_meta["thumbnail"] = collection_meta.get("thumbnail") or collection_meta["cover"]
     else:
         raw_song_cover = song.get("cover") or collection_meta.get("raw_cover") or ""
         if raw_song_cover:
             upgraded = await upgrade_cover_url(raw_song_cover)
-            track_meta["cover"] = await save_optimized_cover(upgraded, track_meta["tempfolder"])
-            track_meta["thumbnail"] = track_meta["cover"]
+            f_cov, t_cov = await save_optimized_cover(upgraded, track_meta["tempfolder"])
+            track_meta["cover"] = f_cov
+            track_meta["thumbnail"] = t_cov
 
     safe_title = sanitize_filename(song["title"])
     safe_artist = sanitize_filename(track_meta["artist"])
@@ -619,12 +637,13 @@ async def start_nhaccuatui(link: str, user: dict):
     temp_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     os.makedirs(temp_folder, exist_ok=True)
 
-    # Unduh cover resolusi tinggi berformat JPEG untuk poster, tag audio, dan thumbnail ZIP
-    cover_file = ""
+    # Unduh cover resolusi maksimal (full_cover untuk poster/audio tag, thumb_cover untuk ZIP Telegram)
+    full_cover = ""
+    thumb_cover = ""
     raw_cover = page_info.get("cover") or songs[0].get("cover") or ""
     if raw_cover:
-        high_res_cover = await upgrade_cover_url(raw_cover)
-        cover_file = await save_optimized_cover(high_res_cover, temp_folder)
+        high_res_url = await upgrade_cover_url(raw_cover)
+        full_cover, thumb_cover = await save_optimized_cover(high_res_url, temp_folder)
 
     # --- 1. SINGLE SONG ---
     if url_type == "song" or (len(songs) == 1 and url_type == "unknown"):
@@ -635,7 +654,8 @@ async def start_nhaccuatui(link: str, user: dict):
         col_meta = {
             "title": song["title"],
             "artist": song.get("artist") or page_info.get("artist") or "Unknown Artist",
-            "cover": cover_file,
+            "cover": full_cover,
+            "thumbnail": thumb_cover or full_cover,
             "raw_cover": raw_cover,
             "date": page_info.get("date", ""),
             "release_date": page_info.get("release_date", ""),
@@ -674,13 +694,13 @@ async def start_nhaccuatui(link: str, user: dict):
     collection_meta["folderpath"] = folderpath
     collection_meta["tempfolder"] = temp_folder
     collection_meta["raw_cover"] = raw_cover
-    collection_meta["cover"] = cover_file
-    collection_meta["thumbnail"] = cover_file
+    collection_meta["cover"] = full_cover
+    collection_meta["thumbnail"] = thumb_cover or full_cover
     collection_meta["release_date"] = page_info.get("release_date", "")
     collection_meta["date"] = page_info.get("date", "")
     collection_meta["explicit"] = False
 
-    if cover_file:
+    if full_cover:
         collection_meta["poster_msg"] = await post_art_poster(user, collection_meta)
 
     tasks = [
