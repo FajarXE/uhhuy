@@ -85,21 +85,33 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
 
 
 async def upgrade_cover_url(url: str) -> str:
-    """Mengambil master cover resolusi penuh (tanpa suffix resize), lalu bertingkat turun dari 2000px."""
+    """
+    Mengambil resolusi gambar maksimal dari CDN NhacCuaTui.
+    Mendeteksi semua suffix ukuran (_152, _300, _500, dll.) dan mencoba file master asli
+    serta opsi resolusi bertingkat dari 2000px hingga 600px.
+    """
     if not url or not isinstance(url, str):
         return ""
-    if not any(sub in url for sub in ("_130.", "_150.", "_300.", "_500.")):
-        return url
+
+    # Hapus query string seperti ?source=app atau ?v=...
+    clean_url = url.split("?")[0].strip()
+
+    # Regex mencakup semua variasi suffix angka (_152, _300, _500) maupun kata (_thumb, _small)
+    pattern = r'_(?:\d+|thumb|small|medium|large)\.(jpg|jpeg|png|webp)$'
+    if not re.search(pattern, clean_url, flags=re.I):
+        return clean_url
 
     candidates = []
 
-    orig_url = re.sub(r'_(?:130|150|300|500)\.', '.', url)
-    if orig_url != url:
+    # 1. Prioritas Utama: Master file tanpa suffix ukuran sama sekali (resolusi penuh asli)
+    orig_url = re.sub(pattern, r'.\1', clean_url, flags=re.I)
+    if orig_url != clean_url:
         candidates.append(orig_url)
 
-    for sz in ("_2000.", "_1500.", "_1200.", "_1000.", "_800.", "_600."):
-        cand = re.sub(r'_(?:130|150|300|500)\.', sz, url)
-        if cand not in candidates and cand != url:
+    # 2. Resolusi tinggi bertingkat jika file master tanpa suffix tidak dibuka publik oleh CDN
+    for sz in ("_2000.", "_1500.", "_1200.", "_1000.", "_800.", "_600.", "_500.", "_300."):
+        cand = re.sub(r'_(?:\d+|thumb|small|medium|large)\.', sz, clean_url, flags=re.I)
+        if cand not in candidates and cand != clean_url:
             candidates.append(cand)
 
     timeout = aiohttp.ClientTimeout(total=4)
@@ -110,12 +122,18 @@ async def upgrade_cover_url(url: str) -> str:
                     async with session.head(cand, allow_redirects=True) as resp:
                         if resp.status == 200:
                             return cand
+                        # Fallback jika CDN menolak request HEAD
+                        if resp.status in (403, 405):
+                            range_headers = {**HEADERS, "Range": "bytes=0-0"}
+                            async with session.get(cand, headers=range_headers, allow_redirects=True) as get_resp:
+                                if get_resp.status in (200, 206):
+                                    return cand
                 except Exception:
                     continue
     except Exception:
         pass
 
-    return url
+    return clean_url
 
 
 async def save_optimized_cover(url: str, dest_folder: str) -> tuple[str, str]:
@@ -206,9 +224,10 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
         )
 
     cover_url = (
-        song_data.get("image")
-        or song_data.get("thumbURL")
+        song_data.get("coverImage")
+        or song_data.get("image")
         or song_data.get("avatar")
+        or song_data.get("thumbURL")
         or song_data.get("bgImage")
         or ""
     )
@@ -266,7 +285,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
                         key: String(obj.key || obj.id || obj.albumKey || ''),
                         name: String(obj.name || obj.title || ''),
                         artistName: String(obj.artistName || ''),
-                        image: obj.image || obj.avatar || obj.thumbURL || obj.bgImage || '',
+                        image: obj.coverImage || obj.image || obj.avatar || obj.thumbURL || obj.bgImage || '',
                         date: obj.dateCreate || obj.dateRelease || obj.publishDate || '',
                         total: obj.numOfItems || obj.total || obj.totalSong || list.length,
                         listSong: list,
@@ -580,7 +599,7 @@ async def start_nhaccuatui(link: str, user: dict):
     url_type = get_url_type(link)
 
     if url_type == "unsupported":
-        raise Exception("NhacCuaTui saat ini hanya mendukung tautan Lagu Tunggal (/bai-hat/) dan Album (/album/). Link Playlist, Chart, dan Artist tidak didukung.")
+        raise Exception("NhacCuaTui saat ini hanya mendukung tautan Lagu Tunggal (/bai-hat/ atau /song/) dan Album (/album/). Link Playlist, Chart, dan Artist tidak didukung.")
 
     if "bot_msg" in user:
         await edit_message(user["bot_msg"], "🔍 Memuat halaman NhacCuaTui & mengekstrak stream...")
