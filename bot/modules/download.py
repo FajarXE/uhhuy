@@ -164,6 +164,12 @@ try:
 except ImportError:
     audiomack_manager = None
 
+# 20. NhacCuaTui
+try:
+    from bot.helpers.nhaccuatui.manager import nhaccuatui_manager
+except ImportError:
+    nhaccuatui_manager = None
+
 
 # --- IMPOR HANDLER LAYANAN ---
 
@@ -294,6 +300,14 @@ except ImportError as e:
     LOGGER.error(f"Gagal memuat modul Audiomack Handler: {e}")
     async def start_audiomack(*args, **kwargs):
         raise NotImplementedError("Modul Audiomack gagal dimuat.")
+
+# NhacCuaTui
+try:
+    from ..helpers.nhaccuatui.handler import start_nhaccuatui
+except ImportError as e:
+    LOGGER.error(f"Gagal memuat modul NhacCuaTui Handler: {e}")
+    async def start_nhaccuatui(*args, **kwargs):
+        raise NotImplementedError("Modul NhacCuaTui gagal dimuat.")
 
 
 from ..helpers.message import send_message, check_user, fetch_user_details, edit_message
@@ -448,13 +462,13 @@ async def run_download_task(link: str, user: dict):
                     link_type = "track" # Default ke track (Tanpa Limit)
                     if re.search(r'/(album|release|ep|master|albuminfo|sets|albums)(/|\?|$)', link_lower):
                         link_type = "album"
-                    elif re.search(r'/(playlist|mix|chart|playlists)(/|\?|$)', link_lower) or "playlist" in link_lower:
+                    elif re.search(r'/(playlist|mix|chart|playlists|danh-sach)(/|\?|$)', link_lower) or "playlist" in link_lower:
                         link_type = "playlist"
                     elif re.search(r'/(artist|creator|user|artistinfo)(/|\?|$)', link_lower):
                         link_type = "artist"
                     elif re.search(r'/(video|mv)(/|\?|$)', link_lower):
                         link_type = "video"
-                    elif re.search(r'/(track|tracks|song)(/|\?|$)', link_lower):
+                    elif re.search(r'/(track|tracks|song|bai-hat)(/|\?|$)', link_lower):
                         link_type = "track"
                     
                     # 4. Bersihkan riwayat lama yang sudah melewati batas tunggu dinamis
@@ -730,6 +744,8 @@ async def start_link(link: str, user: dict) -> None:
     genie = ["https://www.genie.co.kr", "genie.co.kr", "https://app.genie.co.kr"]
 
     audiomack = ["https://audiomack.com", "audiomack.com"]
+
+    nhaccuatui = ["https://www.nhaccuatui.com", "https://nhaccuatui.com", "http://www.nhaccuatui.com", "nhaccuatui.com", "www.nhaccuatui.com"]
     
     # Blok TIDAL
     if link.startswith(tuple(tidal)):
@@ -1219,6 +1235,20 @@ async def start_link(link: str, user: dict) -> None:
             return
         except Exception as e:
             LOGGER.error(f"Audiomack Gagal: {e}")
+            raise e
+
+    # Blok NHACCUATUI
+    elif any(d in link for d in nhaccuatui):
+        user['provider'] = 'NhacCuaTui'
+        if not nhaccuatui_manager:
+            raise Exception("Maaf, modul NhacCuaTui tidak berhasil dimuat di sistem.")
+        
+        try:
+            await start_nhaccuatui(link, user)
+            LOGGER.info("NhacCuaTui: Unduhan berhasil.")
+            return
+        except Exception as e:
+            LOGGER.error(f"NhacCuaTui Gagal: {e}")
             raise e
 
     else:
