@@ -1,4 +1,4 @@
-# [FILE BARU: bot/helpers/nhaccuatui/handler.py]
+# [GANTI ISI FILE: bot/helpers/nhaccuatui/handler.py]
 
 import os
 import re
@@ -31,6 +31,7 @@ from bot.helpers.uploder import (
 from .manager import nhaccuatui_manager, HEADERS
 
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".flac")
+IGNORE_DATA_KEYS = ("recommend", "suggest", "related", "chart", "ranking", "top", "hot", "maybe")
 
 
 def sanitize_filename(name: str) -> str:
@@ -50,6 +51,24 @@ def get_url_type(url: str) -> str:
     if "/bai-hat/" in path or "/song/" in path:
         return "song"
     return "unknown"
+
+
+def extract_url_key(url: str) -> str:
+    """
+    Mengekstrak ID/Key unik dari URL NhacCuaTui.
+    Contoh:
+    - https://www.nhaccuatui.com/playlist/TJaxsFXM11xj -> TJaxsFXM11xj
+    - https://www.nhaccuatui.com/playlist/ten-playlist.TJaxsFXM11xj.html -> TJaxsFXM11xj
+    """
+    path = urlparse(url).path.strip("/")
+    if not path:
+        return ""
+    last_part = path.split("/")[-1]
+    if last_part.endswith(".html"):
+        last_part = last_part[:-5]
+    if "." in last_part:
+        return last_part.split(".")[-1].strip()
+    return last_part.strip()
 
 
 def best_stream(streams: list, quality_pref: str) -> dict | None:
@@ -113,9 +132,28 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
     }
 
 
-async def extract_nuxt_data(page: Page, quality_pref: str) -> tuple[list[dict], dict]:
-    """Mengekstrak daftar lagu dan informasi halaman dari window.__NUXT__ dan tag meta."""
-    page_info = {"title": "", "artist": "", "cover": "", "release_date": ""}
+def _collect_candidate_dicts(data: dict) -> list[tuple[str, dict]]:
+    """Mengumpulkan dictionary kandidat dari window.__NUXT__.data (termasuk 1 level nested)."""
+    candidates = []
+    for k, v in data.items():
+        if not isinstance(v, dict):
+            continue
+        candidates.append((str(k), v))
+        for sub_k, sub_v in v.items():
+            if isinstance(sub_v, dict) and ("listSong" in sub_v or "songs" in sub_v or "streamURL" in sub_v):
+                candidates.append((f"{k}.{sub_k}", sub_v))
+    return candidates
+
+
+async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[list[dict], dict]:
+    """
+    Mengekstrak daftar lagu hanya dari objek utama yang sesuai dengan URL,
+    mencegah ikut terambilnya 50 lagu rekomendasi/chart di halaman yang sama.
+    """
+    url_key = extract_url_key(url)
+    url_type = get_url_type(url)
+    page_info = {"title": "", "artist": "", "cover": "", "release_date": "", "expected_total": 0}
+
     try:
         meta_tags = await page.evaluate("""() => {
             const getMeta = (prop) => {
@@ -141,28 +179,69 @@ async def extract_nuxt_data(page: Page, quality_pref: str) -> tuple[list[dict], 
         LOGGER.warning(f"NhacCuaTui: Gagal membaca __NUXT__: {e}")
         return [], page_info
 
-    data = nuxt.get("data", {})
-    if not isinstance(data, dict):
+    raw_data = nuxt.get("data", {})
+    if isinstance(raw_data, list):
+        data = {str(i): item for i, item in enumerate(raw_data) if isinstance(item, dict)}
+    elif isinstance(raw_data, dict):
+        data = raw_data
+    else:
         return [], page_info
+
+    candidates = _collect_candidate_dicts(data)
+    target_dicts = []
+
+    # 1. Prioritas Utama: Cocokkan berdasarkan key/id dari URL (misal: TJaxsFXM11xj)
+    if url_key:
+        for d_key, val in candidates:
+            val_key = str(val.get("key") or val.get("id") or "")
+            has_tracks = bool(val.get("listSong") or val.get("songs") or "streamURL" in val)
+            if has_tracks and (val_key == url_key or url_key in d_key):
+                target_dicts.append(val)
+                break
+
+    # 2. Prioritas Kedua: Jika tidak cocok dengan key URL, ambil komponen utama pertama (bukan rekomendasi)
+    if not target_dicts:
+        for d_key, val in candidates:
+            d_key_lower = d_key.lower()
+            if any(ignored in d_key_lower for ignored in IGNORE_DATA_KEYS):
+                continue
+
+            if url_type == "song" and "streamURL" in val and ("name" in val or "title" in val):
+                target_dicts.append(val)
+                break
+            elif url_type != "song" and (val.get("listSong") or val.get("songs")):
+                target_dicts.append(val)
+                # Untuk playlist/album, cukup ambil 1 objek koleksi utama agar tidak tercampur rekomendasi
+                if url_type in ("playlist", "album"):
+                    break
+
+    # 3. Fallback Terakhir: Jika masih kosong, baru cek semua kandidat
+    if not target_dicts:
+        target_dicts = [val for _, val in candidates]
 
     songs: dict[str, dict] = {}
 
-    for val in data.values():
-        if not isinstance(val, dict):
-            continue
-
-        # Ambil info koleksi (Album / Playlist / Artist) jika ada
-        if not page_info["title"] and (val.get("name") or val.get("title")):
+    for val in target_dicts:
+        if (val.get("name") or val.get("title")):
             page_info["title"] = (val.get("name") or val.get("title") or "").strip()
-        if not page_info["artist"] and val.get("artistName"):
+        if val.get("artistName"):
             page_info["artist"] = val.get("artistName", "").strip()
-        if not page_info["cover"]:
-            page_info["cover"] = (
-                val.get("image") or val.get("avatar") or val.get("thumbURL") or ""
-            )
-        if not page_info["release_date"] and val.get("dateCreate"):
-            page_info["release_date"] = str(val.get("dateCreate"))
+        if val.get("image") or val.get("avatar") or val.get("thumbURL"):
+            page_info["cover"] = val.get("image") or val.get("avatar") or val.get("thumbURL")
+        if val.get("dateCreate") or val.get("dateRelease"):
+            page_info["release_date"] = str(val.get("dateCreate") or val.get("dateRelease"))
 
+        total_items = val.get("numOfItems") or val.get("total") or val.get("totalSong") or 0
+        if isinstance(total_items, int) and total_items > 0:
+            page_info["expected_total"] = total_items
+
+        # Single song
+        if "streamURL" in val and ("name" in val or "title" in val):
+            s = parse_song(val, quality_pref)
+            if s and s["key"] not in songs:
+                songs[s["key"]] = s
+
+        # Daftar lagu dalam playlist / album / artist
         song_list = val.get("listSong") or val.get("songs") or []
         if isinstance(song_list, list):
             for song_data in song_list:
@@ -172,12 +251,11 @@ async def extract_nuxt_data(page: Page, quality_pref: str) -> tuple[list[dict], 
                 if s and s["key"] not in songs:
                     songs[s["key"]] = s
 
-        if "streamURL" in val and ("name" in val or "title" in val):
-            s = parse_song(val, quality_pref)
-            if s and s["key"] not in songs:
-                songs[s["key"]] = s
+    result_list = list(songs.values())
+    if page_info["expected_total"] > 0 and url_type in ("playlist", "album"):
+        result_list = result_list[:page_info["expected_total"]]
 
-    return list(songs.values()), page_info
+    return result_list, page_info
 
 
 async def capture_via_click(context: BrowserContext, song_url: str) -> dict | None:
@@ -259,14 +337,15 @@ async def collect_songs(url: str, quality_pref: str) -> tuple[list[dict], dict]:
 
     page = await context.new_page()
     songs: dict[str, dict] = {}
-    page_info = {"title": "", "artist": "", "cover": "", "release_date": ""}
+    page_info = {"title": "", "artist": "", "cover": "", "release_date": "", "expected_total": 0}
+    url_type = get_url_type(url)
 
     try:
         await page.goto(url, wait_until="networkidle", timeout=60_000)
 
         async def harvest():
             nonlocal page_info
-            extracted, p_info = await extract_nuxt_data(page, quality_pref)
+            extracted, p_info = await extract_nuxt_data(page, url, quality_pref)
             for k, v in p_info.items():
                 if v and not page_info.get(k):
                     page_info[k] = v
@@ -276,9 +355,17 @@ async def collect_songs(url: str, quality_pref: str) -> tuple[list[dict], dict]:
 
         await harvest()
 
-        # Scroll halaman jika tipe koleksi (artist/playlist/album) untuk memicu lazy-load
-        if get_url_type(url) in ("artist", "playlist", "album"):
+        # Lakukan scroll HANYA untuk halaman artist (atau jika lagu belum memenuhi expected_total)
+        should_scroll = (
+            url_type == "artist"
+            or (page_info["expected_total"] > len(songs))
+        )
+
+        if should_scroll:
             for _ in range(15):
+                if page_info["expected_total"] > 0 and len(songs) >= page_info["expected_total"]:
+                    break
+
                 prev = len(songs)
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 await asyncio.sleep(1.2)
@@ -299,7 +386,7 @@ async def collect_songs(url: str, quality_pref: str) -> tuple[list[dict], dict]:
                 if len(songs) == prev:
                     break
 
-        if not songs and get_url_type(url) in ("song", "unknown"):
+        if not songs and url_type in ("song", "unknown"):
             info = await capture_via_click(context, url)
             if info:
                 songs[info["key"]] = info
@@ -313,7 +400,11 @@ async def collect_songs(url: str, quality_pref: str) -> tuple[list[dict], dict]:
         except Exception:
             pass
 
-    return list(songs.values()), page_info
+    final_songs = list(songs.values())
+    if page_info["expected_total"] > 0 and url_type in ("playlist", "album"):
+        final_songs = final_songs[:page_info["expected_total"]]
+
+    return final_songs, page_info
 
 
 async def direct_http_download(url: str, filepath: str) -> bool:
