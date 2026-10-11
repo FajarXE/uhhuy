@@ -86,73 +86,72 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
 
 async def upgrade_cover_url(url: str) -> str:
     """
-    Mengambil resolusi gambar maksimal dari CDN NhacCuaTui.
-    Mendeteksi semua format suffix ukuran (_152, _152x152, _300, dll.)
-    dan menguji ketersediaan file master resolusi penuh secara paralel.
+    Mengekstrak master cover beresolusi penuh dari NixCDN.
+    Mencoba file asli tanpa suffix serta variasi /playlist/ resolusi tinggi.
     """
     if not url or not isinstance(url, str):
         return ""
 
-    # Hapus query string seperti ?source=app
     clean_url = url.split("?")[0].strip()
 
-    # Regex untuk mendeteksi variasi suffix ukuran sebelum ekstensi
-    pattern = r'^(.*?)(?:[_-](?:\d+x\d+|\d+_\d+|\d+|thumb|small|medium|large|avatar))\.([a-zA-Z0-9]+)$'
-    m = re.search(pattern, clean_url, flags=re.I)
+    # Buang suffix ukuran (_152x152, _500, _300, dsb.)
+    clean_base = re.sub(r'_(?:\d+x\d+|\d+|thumb|small|medium|large)\.([a-zA-Z0-9]+)$', r'.\1', clean_url, flags=re.I)
+    m = re.search(r'^(.*?)\.([a-zA-Z0-9]+)$', clean_base)
+    if not m:
+        return clean_url
 
-    if m:
-        base = m.group(1)
-        ext = m.group(2)
-    else:
-        m2 = re.search(r'^(.*?)\.([a-zA-Z0-9]+)$', clean_url)
-        if m2:
-            base = m2.group(1)
-            ext = m2.group(2)
-        else:
-            return clean_url
+    raw_base = m.group(1)
+    ext = m.group(2)
 
-    # Susun variasi dari resolusi master/tertinggi hingga standar
-    candidates = [
-        f"{base}.{ext}",          # Master file tanpa resize (resolusi penuh dari uploader)
-        f"{base}_org.{ext}",      # Master original varian CDN
-        f"{base}_2000.{ext}",
-        f"{base}_1500.{ext}",
-        f"{base}_1200.{ext}",
-        f"{base}_1000.{ext}",
-        f"{base}_800.{ext}",
-        f"{base}_600.{ext}",
-        f"{base}_500.{ext}",
-        f"{base}_600x600.{ext}",
-        f"{base}_500x500.{ext}",
-        f"{base}_300.{ext}",
-        f"{base}_300x300.{ext}",
-    ]
+    # Sinkronisasi folder /song/ ke /playlist/ karena cover master album disimpan di /playlist/
+    base_variants = [raw_base]
+    if "/song/" in raw_base:
+        base_variants.append(raw_base.replace("/song/", "/playlist/"))
+    if "/playlist/" in raw_base:
+        base_variants.append(raw_base.replace("/playlist/", "/song/"))
 
-    async def check_cand(session, cand_url):
+    candidates = []
+    for b in base_variants:
+        candidates.extend([
+            f"{b}.{ext}",          # Master resolusi asli uploader (1000x1000 - 2000x2000+)
+            f"{b}_org.{ext}",
+            f"{b}_1000.{ext}",
+            f"{b}_800.{ext}",
+            f"{b}_600.{ext}",
+            f"{b}_500.{ext}",
+            f"{b}_600x600.{ext}",
+            f"{b}_500x500.{ext}",
+            f"{b}_300.{ext}",
+        ])
+
+    async def verify_candidate(session, cand_url):
         try:
-            # Gunakan GET dengan Range 0-10 byte untuk menghindari blokir method HEAD oleh CDN
-            headers = {**HEADERS, "Range": "bytes=0-10"}
-            timeout = aiohttp.ClientTimeout(total=3)
-            async with session.get(cand_url, headers=headers, timeout=timeout, allow_redirects=True) as resp:
-                if resp.status in (200, 206):
-                    return cand_url
+            timeout = aiohttp.ClientTimeout(total=3.5)
+            # Menggunakan stream ringan untuk memvalidasi tanpa mengunduh seluruh file
+            async with session.get(cand_url, timeout=timeout, allow_redirects=True) as resp:
+                if resp.status == 200:
+                    ct = resp.headers.get("content-type", "").lower()
+                    if "image" in ct or "octet-stream" in ct:
+                        await resp.content.read(64)
+                        return cand_url
         except Exception:
             pass
         return None
 
     try:
+        connector = aiohttp.TCPConnector(ssl=False)
         timeout_session = aiohttp.ClientTimeout(total=8)
-        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout_session) as session:
-            # Uji seluruh variasi resolusi secara paralel
-            tasks = [check_cand(session, c) for c in candidates]
+        async with aiohttp.ClientSession(headers=HEADERS, connector=connector, timeout=timeout_session) as session:
+            tasks = [verify_candidate(session, c) for c in candidates]
             results = await asyncio.gather(*tasks)
-            valid_set = set(r for r in results if r)
+            valid_urls = set(r for r in results if r)
 
             for c in candidates:
-                if c in valid_set:
+                if c in valid_urls:
+                    LOGGER.info(f"NhacCuaTui: Cover berhasil di-upgrade ke resolusi tinggi -> {c}")
                     return c
     except Exception as e:
-        LOGGER.warning(f"NhacCuaTui: Gagal mengecek variasi cover resolusi tinggi: {e}")
+        LOGGER.warning(f"NhacCuaTui: Gagal mengecek varian cover: {e}")
 
     return clean_url
 
@@ -166,8 +165,9 @@ async def save_optimized_cover(url: str, dest_folder: str) -> tuple[str, str]:
     thumb_path = os.path.join(dest_folder, "cover_thumb.jpg")
 
     try:
+        connector = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout) as session:
+        async with aiohttp.ClientSession(headers=HEADERS, connector=connector, timeout=timeout) as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
                     async with aiofiles.open(raw_path, "wb") as f:
@@ -179,13 +179,13 @@ async def save_optimized_cover(url: str, dest_folder: str) -> tuple[str, str]:
         def _process():
             with Image.open(raw_path) as img:
                 img_rgb = img.convert("RGB")
-                width, height = img_rgb.size
-                LOGGER.info(f"NhacCuaTui: Cover berhasil diunduh dengan resolusi {width}x{height}")
+                w, h = img_rgb.size
+                LOGGER.info(f"NhacCuaTui: Cover diunduh pada resolusi {w}x{h}")
 
-                # 1. Simpan resolusi penuh asli untuk poster dan tag metadata audio
+                # 1. Simpan gambar resolusi master untuk poster dan metadata audio
                 img_rgb.save(full_path, "JPEG", quality=95, optimize=True)
 
-                # 2. Simpan thumbnail khusus dokumen/ZIP sesuai standar Telegram (maksimal 320x320)
+                # 2. Simpan thumbnail khusus ZIP/dokumen (maks 320x320)
                 thumb = img_rgb.copy()
                 thumb.thumbnail((320, 320), Image.Resampling.LANCZOS)
                 thumb.save(thumb_path, "JPEG", quality=85, optimize=True)
@@ -284,7 +284,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         };
 
         const pageTitle = (getMeta('og:title') || document.title || '').replace(/\s*[-|]\s*NhacCuaTui.*$/i, '').trim();
-        const pageImage = getMeta('og:image') || '';
+        const pageImage = getMeta('og:image') || getMeta('twitter:image') || '';
 
         const albums = [];
         const singleSongs = [];
@@ -390,6 +390,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
                     page_info["title"] = s["title"]
                 if not page_info["artist"]:
                     page_info["artist"] = s["artist"]
+                # Utamakan og:image yang memiliki resolusi tinggi dibanding thumbURL
                 if not page_info["cover"] and s.get("cover"):
                     page_info["cover"] = s["cover"]
                 break
@@ -400,8 +401,9 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         if best_album.get("artistName"):
             page_info["artist"] = best_album["artistName"].strip()
 
-        raw_cov = best_album.get("image") or page_info.get("cover") or ""
-        page_info["cover"] = await upgrade_cover_url(raw_cov)
+        # Prioritaskan og:image jika tersedia, lalu avatar objek
+        raw_cov = page_info.get("cover") or best_album.get("image") or ""
+        page_info["cover"] = raw_cov
 
         rel_date, year_date = parse_nct_date(best_album.get("date"))
         page_info["release_date"] = rel_date
@@ -575,6 +577,7 @@ async def download_single_nct_track(
     track_meta["explicit"] = False
     track_meta["tempfolder"] = collection_meta.get("tempfolder", f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
 
+    # Pasang cover master resolusi penuh ke tag audio
     if collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
         track_meta["cover"] = collection_meta["cover"]
         track_meta["thumbnail"] = collection_meta.get("thumbnail") or collection_meta["cover"]
@@ -637,7 +640,7 @@ async def start_nhaccuatui(link: str, user: dict):
     temp_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     os.makedirs(temp_folder, exist_ok=True)
 
-    # Unduh variasi gambar resolusi tertinggi (full_cover untuk poster/audio, thumb_cover untuk ZIP)
+    # Dapatkan cover resolusi penuh (full_cover untuk poster/audio, thumb_cover untuk ZIP dokumen)
     full_cover = ""
     thumb_cover = ""
     raw_cover = page_info.get("cover") or songs[0].get("cover") or ""
@@ -699,7 +702,7 @@ async def start_nhaccuatui(link: str, user: dict):
     album_meta["date"] = page_info.get("date", "")
     album_meta["explicit"] = False
 
-    # Kirim Art Poster dalam resolusi penuh
+    # Kirim Art Poster menggunakan resolusi tinggi asli
     if full_cover:
         album_meta["poster_msg"] = await post_art_poster(user, album_meta)
 
@@ -726,7 +729,7 @@ async def start_nhaccuatui(link: str, user: dict):
     album_meta["tracks"] = valid_tracks
     album_meta["albums"] = [{"tracks": valid_tracks}]
 
-    # Alihkan cover ke thumbnail khusus 320x320 agar Telegram Bot API merender ikon dokumen ZIP
+    # Alihkan ke thumbnail 320x320 khusus untuk berkas arsip ZIP Telegram
     if thumb_cover and os.path.exists(thumb_cover):
         album_meta["cover"] = thumb_cover
 
