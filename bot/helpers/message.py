@@ -115,6 +115,8 @@ async def sync_single_user_managers(user_id, data):
             'khinsider_qual': safe_import_mgr('bot.helpers.khinsider.manager', 'khinsider_manager'),
             'amazon_qual': safe_import_mgr('bot.helpers.amazon.manager', 'amazon_manager'),
             'genie_qual': safe_import_mgr('bot.helpers.genie.manager', 'genie_manager'),
+            'audiomack_qual' : safe_import_mgr('bot.helpers.audiomack.manager', 'audiomack_manager'),
+            'nhaccuatui_qual': safe_import_mgr('bot.helpers.nhaccuatui.manager', 'nhaccuatui_manager'),
         }
         
         for key, manager in settings_map.items():
