@@ -21,14 +21,10 @@ from bot.helpers.utils import (
     download_file,
     run_concurrent_tasks,
     post_art_poster,
-    fetch_zip_settings,
 )
 from bot.helpers.uploder import (
     track_upload,
     album_upload,
-    playlist_upload,
-    artist_upload,
-    batch_telegram_upload,
 )
 from .manager import nhaccuatui_manager, HEADERS
 
@@ -42,16 +38,12 @@ def sanitize_filename(name: str) -> str:
 
 
 def get_url_type(url: str) -> str:
-    path = urlparse(url).path
-    if "/artist/" in path:
-        return "artist"
-    if "/playlist/" in path or "/danh-sach/" in path:
-        return "playlist"
+    path = urlparse(url).path.lower()
     if "/album/" in path:
         return "album"
     if "/bai-hat/" in path or "/song/" in path:
         return "song"
-    return "unknown"
+    return "unsupported"
 
 
 def extract_url_key(url: str) -> str:
@@ -67,7 +59,6 @@ def extract_url_key(url: str) -> str:
 
 
 def parse_nct_date(raw_val) -> tuple[str, str]:
-    """Mengonversi Epoch timestamp (milidetik) menjadi tanggal YYYY-MM-DD dan tahun YYYY."""
     if not raw_val:
         return "", ""
     s = str(raw_val).strip()
@@ -94,10 +85,7 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
 
 
 async def upgrade_cover_url(url: str) -> str:
-    """
-    Mengambil resolusi gambar maksimal dari CDN NhacCuaTui.
-    Memprioritaskan gambar asli (tanpa suffix resize), lalu bertingkat dari 2000px hingga 600px.
-    """
+    """Mengambil master cover resolusi penuh (tanpa suffix resize), lalu bertingkat turun dari 2000px."""
     if not url or not isinstance(url, str):
         return ""
     if not any(sub in url for sub in ("_130.", "_150.", "_300.", "_500.")):
@@ -105,12 +93,10 @@ async def upgrade_cover_url(url: str) -> str:
 
     candidates = []
 
-    # 1. Prioritas Tertinggi: File Asli tanpa crop/resize suffix
     orig_url = re.sub(r'_(?:130|150|300|500)\.', '.', url)
     if orig_url != url:
         candidates.append(orig_url)
 
-    # 2. Resolusi bertingkat dari paling tinggi ke terendah
     for sz in ("_2000.", "_1500.", "_1200.", "_1000.", "_800.", "_600."):
         cand = re.sub(r'_(?:130|150|300|500)\.', sz, url)
         if cand not in candidates and cand != url:
@@ -133,10 +119,6 @@ async def upgrade_cover_url(url: str) -> str:
 
 
 async def save_optimized_cover(url: str, dest_folder: str) -> tuple[str, str]:
-    """
-    Mengunduh gambar beresolusi penuh untuk tag lagu & poster,
-    serta menghasilkan thumbnail terkompresi (<=800x800) untuk ZIP Telegram.
-    """
     if not url:
         return "", ""
     os.makedirs(dest_folder, exist_ok=True)
@@ -158,10 +140,8 @@ async def save_optimized_cover(url: str, dest_folder: str) -> tuple[str, str]:
         def _process():
             with Image.open(raw_path) as img:
                 img_rgb = img.convert("RGB")
-                # Simpan resolusi penuh
                 img_rgb.save(full_path, "JPEG", quality=95, optimize=True)
 
-                # Simpan thumbnail yang aman untuk Telegram API (maks 800x800)
                 thumb = img_rgb.copy()
                 thumb.thumbnail((800, 800), Image.Resampling.LANCZOS)
                 thumb.save(thumb_path, "JPEG", quality=85, optimize=True)
@@ -246,10 +226,6 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
 
 
 async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[list[dict], dict]:
-    """
-    Mengekstrak data lagu dari state Nuxt menggunakan browser evaluation rekursif.
-    Secara tepat mengisolasi playlist target dan membuang blok rekomendasi.
-    """
     url_key = extract_url_key(url)
     url_type = get_url_type(url)
 
@@ -265,12 +241,12 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         const pageTitle = (getMeta('og:title') || document.title || '').replace(/\s*[-|]\s*NhacCuaTui.*$/i, '').trim();
         const pageImage = getMeta('og:image') || '';
 
-        const collections = [];
+        const albums = [];
         const singleSongs = [];
         const seen = new Set();
 
         function search(obj, depth = 0, path = "") {
-            if (!obj || typeof obj !== "object" || depth > 9 || seen.has(obj)) return;
+            if (!obj || typeof obj !== "object" || depth > 8 || seen.has(obj)) return;
             seen.add(obj);
 
             if (Array.isArray(obj)) {
@@ -284,16 +260,19 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
 
             const list = obj.listSong || obj.songs;
             if (Array.isArray(list) && list.length > 0) {
-                collections.push({
-                    key: String(obj.key || obj.id || obj.playlistKey || ''),
-                    name: String(obj.name || obj.title || ''),
-                    artistName: String(obj.artistName || ''),
-                    image: obj.image || obj.avatar || obj.thumbURL || obj.bgImage || '',
-                    date: obj.dateCreate || obj.dateRelease || obj.publishDate || '',
-                    total: obj.numOfItems || obj.total || obj.totalSong || list.length,
-                    listSong: list,
-                    path: path
-                });
+                const isExplicitlyPlaylist = (obj.type === 'playlist') || path.toLowerCase().includes('playlist');
+                if (!isExplicitlyPlaylist) {
+                    albums.push({
+                        key: String(obj.key || obj.id || obj.albumKey || ''),
+                        name: String(obj.name || obj.title || ''),
+                        artistName: String(obj.artistName || ''),
+                        image: obj.image || obj.avatar || obj.thumbURL || obj.bgImage || '',
+                        date: obj.dateCreate || obj.dateRelease || obj.publishDate || '',
+                        total: obj.numOfItems || obj.total || obj.totalSong || list.length,
+                        listSong: list,
+                        path: path
+                    });
+                }
             }
 
             for (const k of Object.keys(obj)) {
@@ -305,38 +284,34 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
 
         search(nuxt);
 
-        let bestCol = null;
-        if (collections.length > 0) {
+        let bestAlbum = null;
+        if (urlType === 'album' && albums.length > 0) {
             let bestScore = -9999;
             const negWords = ['recommend', 'suggest', 'chart', 'ranking', 'gợi ý', 'đề xuất', 'maybe', 'top 50', 'bxh'];
 
-            for (const col of collections) {
+            for (const alb of albums) {
                 let score = 0;
-                const colName = col.name.toLowerCase();
-                const colPath = col.path.toLowerCase();
+                const albName = alb.name.toLowerCase();
+                const albPath = alb.path.toLowerCase();
 
                 for (const neg of negWords) {
-                    if (colName.includes(neg) || colPath.includes(neg)) score -= 200;
+                    if (albName.includes(neg) || albPath.includes(neg)) score -= 200;
                 }
 
                 if (urlKey) {
                     const uKey = urlKey.toLowerCase();
-                    if (col.key.toLowerCase() === uKey) score += 500;
-                    if (colPath.includes(uKey)) score += 300;
+                    if (alb.key.toLowerCase() === uKey) score += 500;
+                    if (albPath.includes(uKey)) score += 300;
                 }
 
-                if (pageTitle && col.name) {
+                if (pageTitle && alb.name) {
                     const cTitle = pageTitle.toLowerCase();
-                    if (cTitle.includes(colName) || colName.includes(cTitle)) score += 150;
-                }
-
-                if (col.total === col.listSong.length && col.total < 40) {
-                    score += 50;
+                    if (cTitle.includes(albName) || albName.includes(cTitle)) score += 150;
                 }
 
                 if (score > bestScore) {
                     bestScore = score;
-                    bestCol = col;
+                    bestAlbum = alb;
                 }
             }
         }
@@ -344,7 +319,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         return {
             pageTitle,
             pageImage,
-            bestCol,
+            bestAlbum,
             singleSongs
         };
     }""", {"urlKey": url_key, "urlType": url_type})
@@ -358,11 +333,10 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         "explicit": False,
     }
 
-    best_col = extracted_payload.get("bestCol")
+    best_album = extracted_payload.get("bestAlbum")
     songs = []
 
-    # Single song
-    if url_type == "song" or (not best_col and extracted_payload.get("singleSongs")):
+    if url_type == "song":
         for raw_s in extracted_payload.get("singleSongs", []):
             s = parse_song(raw_s, quality_pref)
             if s:
@@ -375,27 +349,26 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
                     page_info["cover"] = s["cover"]
                 break
 
-    # Playlist / Album / Artist
-    elif best_col:
-        if best_col.get("name"):
-            page_info["title"] = best_col["name"].strip()
-        if best_col.get("artistName"):
-            page_info["artist"] = best_col["artistName"].strip()
+    elif url_type == "album" and best_album:
+        if best_album.get("name"):
+            page_info["title"] = best_album["name"].strip()
+        if best_album.get("artistName"):
+            page_info["artist"] = best_album["artistName"].strip()
 
-        raw_cov = best_col.get("image") or page_info.get("cover") or ""
+        raw_cov = best_album.get("image") or page_info.get("cover") or ""
         page_info["cover"] = await upgrade_cover_url(raw_cov)
 
-        rel_date, year_date = parse_nct_date(best_col.get("date"))
+        rel_date, year_date = parse_nct_date(best_album.get("date"))
         page_info["release_date"] = rel_date
         page_info["date"] = year_date
 
-        for raw_s in best_col.get("listSong", []):
+        for raw_s in best_album.get("listSong", []):
             s = parse_song(raw_s, quality_pref)
             if s:
                 songs.append(s)
 
-        expected_total = best_col.get("total")
-        if isinstance(expected_total, int) and expected_total > 0 and url_type in ("playlist", "album"):
+        expected_total = best_album.get("total")
+        if isinstance(expected_total, int) and expected_total > 0:
             songs = songs[:expected_total]
 
     return songs, page_info
@@ -487,27 +460,7 @@ async def collect_songs(url: str, quality_pref: str) -> tuple[list[dict], dict]:
         await page.goto(url, wait_until="networkidle", timeout=60_000)
         songs, page_info = await extract_nuxt_data(page, url, quality_pref)
 
-        # Hanya lakukan scroll jika URL adalah artist dan lagunya belum lengkap
-        if url_type == "artist" and len(songs) < 50:
-            for _ in range(8):
-                prev = len(songs)
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await asyncio.sleep(1.2)
-                for selector in [".btn-more", ".btn-loadmore", '[class*="load-more"]']:
-                    try:
-                        btn = page.locator(selector).first
-                        if await btn.is_visible(timeout=300):
-                            await btn.click()
-                            await asyncio.sleep(1.2)
-                    except Exception:
-                        pass
-                new_songs, _ = await extract_nuxt_data(page, url, quality_pref)
-                if len(new_songs) > prev:
-                    songs = new_songs
-                else:
-                    break
-
-        if not songs and url_type in ("song", "unknown"):
+        if not songs and url_type == "song":
             info = await capture_via_click(context, url)
             if info:
                 songs.append(info)
@@ -577,7 +530,6 @@ async def download_single_nct_track(
     track_meta["explicit"] = False
     track_meta["tempfolder"] = collection_meta.get("tempfolder", f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
 
-    # Pasang cover resolusi tinggi ke tag file lagu
     if collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
         track_meta["cover"] = collection_meta["cover"]
         track_meta["thumbnail"] = collection_meta.get("thumbnail") or collection_meta["cover"]
@@ -627,17 +579,19 @@ async def start_nhaccuatui(link: str, user: dict):
     qual_pref = nhaccuatui_manager.get_user_quality(user_id)
     url_type = get_url_type(link)
 
+    if url_type == "unsupported":
+        raise Exception("NhacCuaTui saat ini hanya mendukung tautan Lagu Tunggal (/bai-hat/) dan Album (/album/). Link Playlist, Chart, dan Artist tidak didukung.")
+
     if "bot_msg" in user:
         await edit_message(user["bot_msg"], "🔍 Memuat halaman NhacCuaTui & mengekstrak stream...")
 
     songs, page_info = await collect_songs(link, qual_pref)
     if not songs:
-        raise Exception("Tidak ditemukan lagu yang dapat diunduh dari link NhacCuaTui tersebut (Mungkin khusus VIP atau link tidak valid).")
+        raise Exception("Tidak ditemukan lagu yang dapat diunduh dari link NhacCuaTui tersebut (Khusus VIP atau link tidak valid).")
 
     temp_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     os.makedirs(temp_folder, exist_ok=True)
 
-    # Unduh cover resolusi maksimal (full_cover untuk poster/audio tag, thumb_cover untuk ZIP Telegram)
     full_cover = ""
     thumb_cover = ""
     raw_cover = page_info.get("cover") or songs[0].get("cover") or ""
@@ -646,7 +600,7 @@ async def start_nhaccuatui(link: str, user: dict):
         full_cover, thumb_cover = await save_optimized_cover(high_res_url, temp_folder)
 
     # --- 1. SINGLE SONG ---
-    if url_type == "song" or (len(songs) == 1 and url_type == "unknown"):
+    if url_type == "song":
         song = songs[0]
         folderpath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/NhacCuaTui/"
         os.makedirs(folderpath, exist_ok=True)
@@ -670,9 +624,8 @@ async def start_nhaccuatui(link: str, user: dict):
         await track_upload(track_meta, user)
         return
 
-    # --- 2. ALBUM / PLAYLIST / ARTIST ---
-    col_type = url_type if url_type in ("album", "playlist", "artist") else "playlist"
-    col_title = page_info.get("title") or songs[0].get("artist") or "NhacCuaTui Collection"
+    # --- 2. ALBUM ONLY ---
+    col_title = page_info.get("title") or songs[0].get("artist") or "NhacCuaTui Album"
     col_artist = page_info.get("artist") or songs[0].get("artist") or "Various Artists"
 
     folderpath = os.path.join(
@@ -681,31 +634,31 @@ async def start_nhaccuatui(link: str, user: dict):
     )
     os.makedirs(folderpath, exist_ok=True)
 
-    collection_meta = copy.deepcopy(base_metadata)
-    collection_meta["title"] = col_title
-    collection_meta["album"] = col_title
-    collection_meta["artist"] = col_artist
-    collection_meta["albumartist"] = col_artist
-    collection_meta["totaltracks"] = str(len(songs))
-    collection_meta["totalvolume"] = "1"
-    collection_meta["quality"] = songs[0].get("quality") or f"{qual_pref}kbps"
-    collection_meta["provider"] = "NhacCuaTui"
-    collection_meta["type"] = col_type
-    collection_meta["folderpath"] = folderpath
-    collection_meta["tempfolder"] = temp_folder
-    collection_meta["raw_cover"] = raw_cover
-    collection_meta["cover"] = full_cover
-    collection_meta["thumbnail"] = thumb_cover or full_cover
-    collection_meta["release_date"] = page_info.get("release_date", "")
-    collection_meta["date"] = page_info.get("date", "")
-    collection_meta["explicit"] = False
+    album_meta = copy.deepcopy(base_metadata)
+    album_meta["title"] = col_title
+    album_meta["album"] = col_title
+    album_meta["artist"] = col_artist
+    album_meta["albumartist"] = col_artist
+    album_meta["totaltracks"] = str(len(songs))
+    album_meta["totalvolume"] = "1"
+    album_meta["quality"] = songs[0].get("quality") or f"{qual_pref}kbps"
+    album_meta["provider"] = "NhacCuaTui"
+    album_meta["type"] = "album"
+    album_meta["folderpath"] = folderpath
+    album_meta["tempfolder"] = temp_folder
+    album_meta["raw_cover"] = raw_cover
+    album_meta["cover"] = full_cover
+    album_meta["thumbnail"] = thumb_cover or full_cover
+    album_meta["release_date"] = page_info.get("release_date", "")
+    album_meta["date"] = page_info.get("date", "")
+    album_meta["explicit"] = False
 
     if full_cover:
-        collection_meta["poster_msg"] = await post_art_poster(user, collection_meta)
+        album_meta["poster_msg"] = await post_art_poster(user, album_meta)
 
     tasks = [
         download_single_nct_track(
-            song, idx, len(songs), folderpath, collection_meta, user, is_single=False
+            song, idx, len(songs), folderpath, album_meta, user, is_single=False
         )
         for idx, song in enumerate(songs, 1)
     ]
@@ -713,7 +666,7 @@ async def start_nhaccuatui(link: str, user: dict):
     update_details = {
         "msg": user.get("bot_msg"),
         "title": col_title,
-        "type": col_type.capitalize(),
+        "type": "Album",
         "action": "Download",
     }
 
@@ -721,18 +674,9 @@ async def start_nhaccuatui(link: str, user: dict):
     valid_tracks = [r for r in results if isinstance(r, dict) and r.get("filepath")]
 
     if not valid_tracks:
-        raise Exception("Semua lagu dalam koleksi gagal diunduh.")
+        raise Exception("Semua lagu dalam album gagal diunduh.")
 
-    collection_meta["tracks"] = valid_tracks
-    collection_meta["albums"] = [{"tracks": valid_tracks}]
+    album_meta["tracks"] = valid_tracks
+    album_meta["albums"] = [{"tracks": valid_tracks}]
 
-    if col_type == "album":
-        await album_upload(collection_meta, user)
-    elif col_type == "artist":
-        _, _, artist_zip, _ = fetch_zip_settings(user)
-        user_mode = bot_set.user_data.get(user_id, {}).get("upload_mode", bot_set.upload_mode)
-        if not artist_zip and user_mode == "Telegram" and bot_set.upload_mode == "Telegram":
-            await batch_telegram_upload(collection_meta, user)
-        await artist_upload(collection_meta, user)
-    else:
-        await playlist_upload(collection_meta, user)
+    await album_upload(album_meta, user)
