@@ -115,6 +115,12 @@ try:
 except ImportError:
     audiomack_manager = _DummyManager()
 
+# Impor Manajer NhacCuaTui
+try:
+    from bot.helpers.nhaccuatui.manager import nhaccuatui_manager
+except ImportError:
+    nhaccuatui_manager = _DummyManager()
+
 
 def fetch_base_buttons():
     # Style: PRIMARY (Biru) untuk Main Menu
@@ -296,6 +302,16 @@ def providers_button():
                 InlineKeyboardButton(
                     text="AUDIOMACK", 
                     callback_data='amackP'
+                )
+            ]
+        )
+
+    if nhaccuatui_manager and nhaccuatui_manager.clients:
+        inline_keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="NHACCUATUI", 
+                    callback_data='nctP'
                 )
             ]
         )
@@ -1283,6 +1299,28 @@ def amack_button(quality: dict, user_id: int = None):
     buttons += main_button + close_button
     return InlineKeyboardMarkup(buttons)
 
+def nct_button(quality: dict, user_id: int = None):
+    buttons = []
+    prefix = "nctQ" if user_id is None else "uncts"
+    row = []
+    
+    for i, (key, value) in enumerate(quality.items()):
+        btn_style = ButtonStyle.SUCCESS if "✅" in value else ButtonStyle.DEFAULT
+        clean_text = value.replace("✅", "").strip()
+        
+        row.append(InlineKeyboardButton(text=clean_text, callback_data=f"{prefix}_{key}", style=btn_style))
+        if (i + 1) % 2 == 0 or i == len(quality) - 1:
+            buttons.append(row)
+            row = []
+            
+    if user_id is not None:
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
+        return InlineKeyboardMarkup(buttons)
+        
+    main_button, close_button = fetch_base_buttons()
+    buttons += main_button + close_button
+    return InlineKeyboardMarkup(buttons)
+
 
 def lyrics_button(user_settings: dict, user_id):
     buttons = []
@@ -1431,6 +1469,9 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
 
     if audiomack_manager and audiomack_manager.clients:
         buttons.append([InlineKeyboardButton(text="Audiomack Quality", callback_data="uset_audiomack")])
+
+    if nhaccuatui_manager and nhaccuatui_manager.clients:
+        buttons.append([InlineKeyboardButton(text="NhacCuaTui Quality", callback_data="uset_nhaccuatui")])
 
     buttons.append([InlineKeyboardButton(text="🔁 Switch Upload Mode", callback_data="uset_upload_mode", style=ButtonStyle.PRIMARY)])
 
