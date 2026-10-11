@@ -87,51 +87,72 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
 async def upgrade_cover_url(url: str) -> str:
     """
     Mengambil resolusi gambar maksimal dari CDN NhacCuaTui.
-    Mendeteksi semua suffix ukuran (_152, _300, _500, dll.) dan mencoba file master asli
-    serta opsi resolusi bertingkat dari 2000px hingga 600px.
+    Mendeteksi semua format suffix ukuran (_152, _152x152, _300, dll.)
+    dan menguji ketersediaan file master resolusi penuh secara paralel.
     """
     if not url or not isinstance(url, str):
         return ""
 
-    # Hapus query string seperti ?source=app atau ?v=...
+    # Hapus query string seperti ?source=app
     clean_url = url.split("?")[0].strip()
 
-    # Regex mencakup semua variasi suffix angka (_152, _300, _500) maupun kata (_thumb, _small)
-    pattern = r'_(?:\d+|thumb|small|medium|large)\.(jpg|jpeg|png|webp)$'
-    if not re.search(pattern, clean_url, flags=re.I):
-        return clean_url
+    # Regex untuk mendeteksi variasi suffix ukuran sebelum ekstensi
+    pattern = r'^(.*?)(?:[_-](?:\d+x\d+|\d+_\d+|\d+|thumb|small|medium|large|avatar))\.([a-zA-Z0-9]+)$'
+    m = re.search(pattern, clean_url, flags=re.I)
 
-    candidates = []
+    if m:
+        base = m.group(1)
+        ext = m.group(2)
+    else:
+        m2 = re.search(r'^(.*?)\.([a-zA-Z0-9]+)$', clean_url)
+        if m2:
+            base = m2.group(1)
+            ext = m2.group(2)
+        else:
+            return clean_url
 
-    # 1. Prioritas Utama: Master file tanpa suffix ukuran sama sekali (resolusi penuh asli)
-    orig_url = re.sub(pattern, r'.\1', clean_url, flags=re.I)
-    if orig_url != clean_url:
-        candidates.append(orig_url)
+    # Susun variasi dari resolusi master/tertinggi hingga standar
+    candidates = [
+        f"{base}.{ext}",          # Master file tanpa resize (resolusi penuh dari uploader)
+        f"{base}_org.{ext}",      # Master original varian CDN
+        f"{base}_2000.{ext}",
+        f"{base}_1500.{ext}",
+        f"{base}_1200.{ext}",
+        f"{base}_1000.{ext}",
+        f"{base}_800.{ext}",
+        f"{base}_600.{ext}",
+        f"{base}_500.{ext}",
+        f"{base}_600x600.{ext}",
+        f"{base}_500x500.{ext}",
+        f"{base}_300.{ext}",
+        f"{base}_300x300.{ext}",
+    ]
 
-    # 2. Resolusi tinggi bertingkat jika file master tanpa suffix tidak dibuka publik oleh CDN
-    for sz in ("_2000.", "_1500.", "_1200.", "_1000.", "_800.", "_600.", "_500.", "_300."):
-        cand = re.sub(r'_(?:\d+|thumb|small|medium|large)\.', sz, clean_url, flags=re.I)
-        if cand not in candidates and cand != clean_url:
-            candidates.append(cand)
+    async def check_cand(session, cand_url):
+        try:
+            # Gunakan GET dengan Range 0-10 byte untuk menghindari blokir method HEAD oleh CDN
+            headers = {**HEADERS, "Range": "bytes=0-10"}
+            timeout = aiohttp.ClientTimeout(total=3)
+            async with session.get(cand_url, headers=headers, timeout=timeout, allow_redirects=True) as resp:
+                if resp.status in (200, 206):
+                    return cand_url
+        except Exception:
+            pass
+        return None
 
-    timeout = aiohttp.ClientTimeout(total=4)
     try:
-        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout) as session:
-            for cand in candidates:
-                try:
-                    async with session.head(cand, allow_redirects=True) as resp:
-                        if resp.status == 200:
-                            return cand
-                        # Fallback jika CDN menolak request HEAD
-                        if resp.status in (403, 405):
-                            range_headers = {**HEADERS, "Range": "bytes=0-0"}
-                            async with session.get(cand, headers=range_headers, allow_redirects=True) as get_resp:
-                                if get_resp.status in (200, 206):
-                                    return cand
-                except Exception:
-                    continue
-    except Exception:
-        pass
+        timeout_session = aiohttp.ClientTimeout(total=8)
+        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout_session) as session:
+            # Uji seluruh variasi resolusi secara paralel
+            tasks = [check_cand(session, c) for c in candidates]
+            results = await asyncio.gather(*tasks)
+            valid_set = set(r for r in results if r)
+
+            for c in candidates:
+                if c in valid_set:
+                    return c
+    except Exception as e:
+        LOGGER.warning(f"NhacCuaTui: Gagal mengecek variasi cover resolusi tinggi: {e}")
 
     return clean_url
 
@@ -158,10 +179,15 @@ async def save_optimized_cover(url: str, dest_folder: str) -> tuple[str, str]:
         def _process():
             with Image.open(raw_path) as img:
                 img_rgb = img.convert("RGB")
+                width, height = img_rgb.size
+                LOGGER.info(f"NhacCuaTui: Cover berhasil diunduh dengan resolusi {width}x{height}")
+
+                # 1. Simpan resolusi penuh asli untuk poster dan tag metadata audio
                 img_rgb.save(full_path, "JPEG", quality=95, optimize=True)
 
+                # 2. Simpan thumbnail khusus dokumen/ZIP sesuai standar Telegram (maksimal 320x320)
                 thumb = img_rgb.copy()
-                thumb.thumbnail((800, 800), Image.Resampling.LANCZOS)
+                thumb.thumbnail((320, 320), Image.Resampling.LANCZOS)
                 thumb.save(thumb_path, "JPEG", quality=85, optimize=True)
 
             if os.path.exists(raw_path):
@@ -611,6 +637,7 @@ async def start_nhaccuatui(link: str, user: dict):
     temp_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     os.makedirs(temp_folder, exist_ok=True)
 
+    # Unduh variasi gambar resolusi tertinggi (full_cover untuk poster/audio, thumb_cover untuk ZIP)
     full_cover = ""
     thumb_cover = ""
     raw_cover = page_info.get("cover") or songs[0].get("cover") or ""
@@ -672,6 +699,7 @@ async def start_nhaccuatui(link: str, user: dict):
     album_meta["date"] = page_info.get("date", "")
     album_meta["explicit"] = False
 
+    # Kirim Art Poster dalam resolusi penuh
     if full_cover:
         album_meta["poster_msg"] = await post_art_poster(user, album_meta)
 
@@ -697,5 +725,9 @@ async def start_nhaccuatui(link: str, user: dict):
 
     album_meta["tracks"] = valid_tracks
     album_meta["albums"] = [{"tracks": valid_tracks}]
+
+    # Alihkan cover ke thumbnail khusus 320x320 agar Telegram Bot API merender ikon dokumen ZIP
+    if thumb_cover and os.path.exists(thumb_cover):
+        album_meta["cover"] = thumb_cover
 
     await album_upload(album_meta, user)
