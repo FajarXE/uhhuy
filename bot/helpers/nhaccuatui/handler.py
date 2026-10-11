@@ -1,4 +1,4 @@
-# [GANTI ISI FILE: bot/helpers/nhaccuatui/handler.py]
+# [GANTI TOTAL ISI FILE: bot/helpers/nhaccuatui/handler.py]
 
 import os
 import re
@@ -8,13 +8,15 @@ import aiohttp
 import aiofiles
 from pathlib import Path
 from urllib.parse import urlparse
+from datetime import datetime
+from PIL import Image
 from playwright.async_api import Page, BrowserContext
 
 from config import Config
 from bot.logger import LOGGER
 from bot.settings import bot_set
 from bot.helpers.message import edit_message
-from bot.helpers.metadata import metadata as base_metadata, set_metadata, create_cover_file
+from bot.helpers.metadata import metadata as base_metadata, set_metadata
 from bot.helpers.utils import (
     download_file,
     run_concurrent_tasks,
@@ -31,7 +33,6 @@ from bot.helpers.uploder import (
 from .manager import nhaccuatui_manager, HEADERS
 
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".flac")
-IGNORE_DATA_KEYS = ("recommend", "suggest", "related", "chart", "ranking", "top", "hot", "maybe")
 
 
 def sanitize_filename(name: str) -> str:
@@ -54,12 +55,6 @@ def get_url_type(url: str) -> str:
 
 
 def extract_url_key(url: str) -> str:
-    """
-    Mengekstrak ID/Key unik dari URL NhacCuaTui.
-    Contoh:
-    - https://www.nhaccuatui.com/playlist/TJaxsFXM11xj -> TJaxsFXM11xj
-    - https://www.nhaccuatui.com/playlist/ten-playlist.TJaxsFXM11xj.html -> TJaxsFXM11xj
-    """
     path = urlparse(url).path.strip("/")
     if not path:
         return ""
@@ -69,6 +64,106 @@ def extract_url_key(url: str) -> str:
     if "." in last_part:
         return last_part.split(".")[-1].strip()
     return last_part.strip()
+
+
+def parse_nct_date(raw_val) -> tuple[str, str]:
+    """Mengonversi Epoch timestamp (milidetik) menjadi YYYY-MM-DD dan YYYY."""
+    if not raw_val:
+        return "", ""
+    s = str(raw_val).strip()
+
+    if s.isdigit():
+        ts = int(s)
+        if ts > 10_000_000_000:
+            ts = ts / 1000
+        try:
+            dt = datetime.fromtimestamp(ts)
+            return dt.strftime("%Y-%m-%d"), str(dt.year)
+        except Exception:
+            pass
+
+    m = re.search(r'(\d{4})[-/](\d{2})[-/](\d{2})', s)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}", m.group(1)
+
+    m_year = re.search(r'\b(19\d{2}|20\d{2})\b', s)
+    if m_year:
+        return m_year.group(1), m_year.group(1)
+
+    return s, s[:4] if len(s) >= 4 else ""
+
+
+async def upgrade_cover_url(url: str) -> str:
+    """Mencari cover resolusi tinggi (_1000, _800, _600, atau original) dari CDN NhacCuaTui."""
+    if not url or not isinstance(url, str):
+        return ""
+    if not any(sub in url for sub in ("_130.", "_150.", "_300.", "_500.")):
+        return url
+
+    candidates = []
+    for sz in ("_1000.", "_800.", "_600.", "_500."):
+        new_url = re.sub(r'_(?:130|150|300|500)\.', sz, url)
+        if new_url != url:
+            candidates.append(new_url)
+
+    orig_url = re.sub(r'_(?:130|150|300|500)\.', '.', url)
+    if orig_url != url:
+        candidates.append(orig_url)
+
+    timeout = aiohttp.ClientTimeout(total=4)
+    try:
+        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout) as session:
+            for cand in candidates:
+                try:
+                    async with session.head(cand, allow_redirects=True) as resp:
+                        if resp.status == 200:
+                            return cand
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    return url
+
+
+async def save_optimized_cover(url: str, dest_folder: str) -> str:
+    """Mengunduh dan memastikan cover berformat JPEG RGB untuk Telegram thumbnail & tag audio."""
+    if not url:
+        return ""
+    os.makedirs(dest_folder, exist_ok=True)
+    raw_path = os.path.join(dest_folder, "cover_raw.tmp")
+    final_path = os.path.join(dest_folder, "cover.jpg")
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    async with aiofiles.open(raw_path, "wb") as f:
+                        async for chunk in resp.content.iter_chunked(65536):
+                            await f.write(chunk)
+                else:
+                    return ""
+
+        def _convert():
+            with Image.open(raw_path) as img:
+                img = img.convert("RGB")
+                img.save(final_path, "JPEG", quality=95, optimize=True)
+            if os.path.exists(raw_path):
+                os.remove(raw_path)
+
+        await asyncio.to_thread(_convert)
+        if os.path.exists(final_path) and os.path.getsize(final_path) > 0:
+            return final_path
+    except Exception as e:
+        LOGGER.warning(f"NhacCuaTui: Gagal memproses cover image: {e}")
+        if os.path.exists(raw_path):
+            try:
+                os.rename(raw_path, final_path)
+                return final_path
+            except Exception:
+                pass
+    return ""
 
 
 def best_stream(streams: list, quality_pref: str) -> dict | None:
@@ -129,11 +224,11 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
         "quality": stream.get("typeUI") or f"{stream.get('type', quality_pref)}kbps",
         "cover": cover_url,
         "duration": song_data.get("duration") or 0,
+        "explicit": False,
     }
 
 
 def _collect_candidate_dicts(data: dict) -> list[tuple[str, dict]]:
-    """Mengumpulkan dictionary kandidat dari window.__NUXT__.data (termasuk 1 level nested)."""
     candidates = []
     for k, v in data.items():
         if not isinstance(v, dict):
@@ -145,14 +240,55 @@ def _collect_candidate_dicts(data: dict) -> list[tuple[str, dict]]:
     return candidates
 
 
+def score_candidate_dict(val: dict, url_key: str, page_title: str) -> int:
+    """Memberikan skor kecocokan agar bot memilih playlist utama dan membuang rekomendasi."""
+    score = 0
+    songs_list = val.get("listSong") or val.get("songs") or []
+    if not isinstance(songs_list, list) or len(songs_list) == 0:
+        return -999
+
+    title_val = str(val.get("name") or val.get("title") or "").lower()
+    negative_words = ("recommend", "suggest", "chart", "ranking", "top", "hot", "gợi ý", "đề xuất", "maybe")
+    for neg in negative_words:
+        if neg in title_val:
+            score -= 150
+
+    url_key_lower = url_key.lower() if url_key else ""
+    if url_key_lower:
+        for k in ("key", "id", "playlistKey", "code", "link", "url", "shortURL"):
+            if url_key_lower in str(val.get(k, "")).lower():
+                score += 250
+        for sub_k in ("playlist", "info", "data", "detail"):
+            sub_dict = val.get(sub_k)
+            if isinstance(sub_dict, dict):
+                for k in ("key", "id", "playlistKey", "code"):
+                    if url_key_lower in str(sub_dict.get(k, "")).lower():
+                        score += 250
+
+    if page_title:
+        clean_page_title = page_title.lower()
+        if title_val and (title_val in clean_page_title or clean_page_title in title_val):
+            score += 100
+
+    expected = val.get("numOfItems") or val.get("total") or val.get("totalSong")
+    if isinstance(expected, int) and expected == len(songs_list):
+        score += 50
+
+    return score
+
+
 async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[list[dict], dict]:
-    """
-    Mengekstrak daftar lagu hanya dari objek utama yang sesuai dengan URL,
-    mencegah ikut terambilnya 50 lagu rekomendasi/chart di halaman yang sama.
-    """
     url_key = extract_url_key(url)
     url_type = get_url_type(url)
-    page_info = {"title": "", "artist": "", "cover": "", "release_date": "", "expected_total": 0}
+    page_info = {
+        "title": "",
+        "artist": "",
+        "cover": "",
+        "release_date": "",
+        "date": "",
+        "expected_total": 0,
+        "explicit": "No",
+    }
 
     try:
         meta_tags = await page.evaluate("""() => {
@@ -188,78 +324,68 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         return [], page_info
 
     candidates = _collect_candidate_dicts(data)
-    target_dicts = []
 
-    # 1. Prioritas Utama: Cocokkan berdasarkan key/id dari URL (misal: TJaxsFXM11xj)
-    if url_key:
-        for d_key, val in candidates:
-            val_key = str(val.get("key") or val.get("id") or "")
-            has_tracks = bool(val.get("listSong") or val.get("songs") or "streamURL" in val)
-            if has_tracks and (val_key == url_key or url_key in d_key):
-                target_dicts.append(val)
-                break
+    best_dict = None
+    best_score = -999
 
-    # 2. Prioritas Kedua: Jika tidak cocok dengan key URL, ambil komponen utama pertama (bukan rekomendasi)
-    if not target_dicts:
-        for d_key, val in candidates:
-            d_key_lower = d_key.lower()
-            if any(ignored in d_key_lower for ignored in IGNORE_DATA_KEYS):
-                continue
+    for _, val in candidates:
+        if url_type == "song" and "streamURL" in val and ("name" in val or "title" in val):
+            best_dict = val
+            break
+        sc = score_candidate_dict(val, url_key, page_info["title"])
+        if sc > best_score:
+            best_score = sc
+            best_dict = val
 
-            if url_type == "song" and "streamURL" in val and ("name" in val or "title" in val):
-                target_dicts.append(val)
-                break
-            elif url_type != "song" and (val.get("listSong") or val.get("songs")):
-                target_dicts.append(val)
-                # Untuk playlist/album, cukup ambil 1 objek koleksi utama agar tidak tercampur rekomendasi
-                if url_type in ("playlist", "album"):
-                    break
+    if not best_dict and candidates:
+        best_dict = candidates[0][1]
 
-    # 3. Fallback Terakhir: Jika masih kosong, baru cek semua kandidat
-    if not target_dicts:
-        target_dicts = [val for _, val in candidates]
+    songs = []
+    if best_dict:
+        if best_dict.get("name") or best_dict.get("title"):
+            page_info["title"] = (best_dict.get("name") or best_dict.get("title") or "").strip()
+        if best_dict.get("artistName"):
+            page_info["artist"] = best_dict.get("artistName", "").strip()
 
-    songs: dict[str, dict] = {}
+        raw_cover = (
+            best_dict.get("image")
+            or best_dict.get("avatar")
+            or best_dict.get("thumbURL")
+            or best_dict.get("bgImage")
+            or page_info.get("cover")
+            or ""
+        )
+        page_info["cover"] = await upgrade_cover_url(raw_cover)
 
-    for val in target_dicts:
-        if (val.get("name") or val.get("title")):
-            page_info["title"] = (val.get("name") or val.get("title") or "").strip()
-        if val.get("artistName"):
-            page_info["artist"] = val.get("artistName", "").strip()
-        if val.get("image") or val.get("avatar") or val.get("thumbURL"):
-            page_info["cover"] = val.get("image") or val.get("avatar") or val.get("thumbURL")
-        if val.get("dateCreate") or val.get("dateRelease"):
-            page_info["release_date"] = str(val.get("dateCreate") or val.get("dateRelease"))
+        raw_date = best_dict.get("dateCreate") or best_dict.get("dateRelease") or best_dict.get("publishDate")
+        rel_date, year_date = parse_nct_date(raw_date)
+        page_info["release_date"] = rel_date
+        page_info["date"] = year_date
 
-        total_items = val.get("numOfItems") or val.get("total") or val.get("totalSong") or 0
+        total_items = best_dict.get("numOfItems") or best_dict.get("total") or best_dict.get("totalSong") or 0
         if isinstance(total_items, int) and total_items > 0:
             page_info["expected_total"] = total_items
 
-        # Single song
-        if "streamURL" in val and ("name" in val or "title" in val):
-            s = parse_song(val, quality_pref)
-            if s and s["key"] not in songs:
-                songs[s["key"]] = s
+        if "streamURL" in best_dict and ("name" in best_dict or "title" in best_dict):
+            s = parse_song(best_dict, quality_pref)
+            if s:
+                songs.append(s)
 
-        # Daftar lagu dalam playlist / album / artist
-        song_list = val.get("listSong") or val.get("songs") or []
+        song_list = best_dict.get("listSong") or best_dict.get("songs") or []
         if isinstance(song_list, list):
             for song_data in song_list:
-                if not isinstance(song_data, dict):
-                    continue
-                s = parse_song(song_data, quality_pref)
-                if s and s["key"] not in songs:
-                    songs[s["key"]] = s
+                if isinstance(song_data, dict):
+                    s = parse_song(song_data, quality_pref)
+                    if s:
+                        songs.append(s)
 
-    result_list = list(songs.values())
     if page_info["expected_total"] > 0 and url_type in ("playlist", "album"):
-        result_list = result_list[:page_info["expected_total"]]
+        songs = songs[:page_info["expected_total"]]
 
-    return result_list, page_info
+    return songs, page_info
 
 
 async def capture_via_click(context: BrowserContext, song_url: str) -> dict | None:
-    """Fallback untuk halaman lagu tunggal jika __NUXT__ tidak memuat streamURL."""
     loop = asyncio.get_running_loop()
     found_url: asyncio.Future = loop.create_future()
     page = await context.new_page()
@@ -313,6 +439,7 @@ async def capture_via_click(context: BrowserContext, song_url: str) -> dict | No
             result["quality"] = "Stream"
             result["cover"] = ""
             result["duration"] = 0
+            result["explicit"] = False
         except asyncio.TimeoutError:
             pass
     except Exception as e:
@@ -336,60 +463,38 @@ async def collect_songs(url: str, quality_pref: str) -> tuple[list[dict], dict]:
     )
 
     page = await context.new_page()
-    songs: dict[str, dict] = {}
-    page_info = {"title": "", "artist": "", "cover": "", "release_date": "", "expected_total": 0}
+    songs = []
+    page_info = {}
     url_type = get_url_type(url)
 
     try:
         await page.goto(url, wait_until="networkidle", timeout=60_000)
+        songs, page_info = await extract_nuxt_data(page, url, quality_pref)
 
-        async def harvest():
-            nonlocal page_info
-            extracted, p_info = await extract_nuxt_data(page, url, quality_pref)
-            for k, v in p_info.items():
-                if v and not page_info.get(k):
-                    page_info[k] = v
-            for s in extracted:
-                if s["key"] not in songs:
-                    songs[s["key"]] = s
-
-        await harvest()
-
-        # Lakukan scroll HANYA untuk halaman artist (atau jika lagu belum memenuhi expected_total)
-        should_scroll = (
-            url_type == "artist"
-            or (page_info["expected_total"] > len(songs))
-        )
-
-        if should_scroll:
-            for _ in range(15):
-                if page_info["expected_total"] > 0 and len(songs) >= page_info["expected_total"]:
-                    break
-
+        # Halaman artist saja yang membutuhkan scroll lanjutan jika daftar lagu terpotong
+        if url_type == "artist" and len(songs) < 50:
+            for _ in range(8):
                 prev = len(songs)
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 await asyncio.sleep(1.2)
-
-                for selector in [
-                    ".btn-more", ".btn-loadmore", ".btn-xem-them",
-                    '[class*="load-more"]', '[class*="loadmore"]',
-                ]:
+                for selector in [".btn-more", ".btn-loadmore", '[class*="load-more"]']:
                     try:
                         btn = page.locator(selector).first
-                        if await btn.is_visible(timeout=400):
+                        if await btn.is_visible(timeout=300):
                             await btn.click()
-                            await asyncio.sleep(1.5)
+                            await asyncio.sleep(1.2)
                     except Exception:
                         pass
-
-                await harvest()
-                if len(songs) == prev:
+                new_songs, _ = await extract_nuxt_data(page, url, quality_pref)
+                if len(new_songs) > prev:
+                    songs = new_songs
+                else:
                     break
 
         if not songs and url_type in ("song", "unknown"):
             info = await capture_via_click(context, url)
             if info:
-                songs[info["key"]] = info
+                songs.append(info)
     finally:
         try:
             await page.close()
@@ -400,15 +505,10 @@ async def collect_songs(url: str, quality_pref: str) -> tuple[list[dict], dict]:
         except Exception:
             pass
 
-    final_songs = list(songs.values())
-    if page_info["expected_total"] > 0 and url_type in ("playlist", "album"):
-        final_songs = final_songs[:page_info["expected_total"]]
-
-    return final_songs, page_info
+    return songs, page_info
 
 
 async def direct_http_download(url: str, filepath: str) -> bool:
-    """Fallback pengunduhan langsung via aiohttp jika Aria2 gagal."""
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         timeout = aiohttp.ClientTimeout(total=600)
@@ -458,15 +558,18 @@ async def download_single_nct_track(
     track_meta["extension"] = ext_clean
     track_meta["provider"] = "NhacCuaTui"
     track_meta["type"] = "track"
-    track_meta["tempfolder"] = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+    track_meta["explicit"] = False
+    track_meta["tempfolder"] = collection_meta.get("tempfolder", f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
 
-    cover_url = song.get("cover") or collection_meta.get("raw_cover") or ""
     if collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
         track_meta["cover"] = collection_meta["cover"]
         track_meta["thumbnail"] = collection_meta["cover"]
-    elif cover_url:
-        track_meta["cover"] = await create_cover_file(cover_url, track_meta)
-        track_meta["thumbnail"] = track_meta["cover"]
+    else:
+        raw_song_cover = song.get("cover") or collection_meta.get("raw_cover") or ""
+        if raw_song_cover:
+            upgraded = await upgrade_cover_url(raw_song_cover)
+            track_meta["cover"] = await save_optimized_cover(upgraded, track_meta["tempfolder"])
+            track_meta["thumbnail"] = track_meta["cover"]
 
     safe_title = sanitize_filename(song["title"])
     safe_artist = sanitize_filename(track_meta["artist"])
@@ -513,6 +616,16 @@ async def start_nhaccuatui(link: str, user: dict):
     if not songs:
         raise Exception("Tidak ditemukan lagu yang dapat diunduh dari link NhacCuaTui tersebut (Mungkin khusus VIP atau link tidak valid).")
 
+    temp_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+    os.makedirs(temp_folder, exist_ok=True)
+
+    # Unduh cover resolusi tinggi berformat JPEG untuk poster, tag audio, dan thumbnail ZIP
+    cover_file = ""
+    raw_cover = page_info.get("cover") or songs[0].get("cover") or ""
+    if raw_cover:
+        high_res_cover = await upgrade_cover_url(raw_cover)
+        cover_file = await save_optimized_cover(high_res_cover, temp_folder)
+
     # --- 1. SINGLE SONG ---
     if url_type == "song" or (len(songs) == 1 and url_type == "unknown"):
         song = songs[0]
@@ -522,7 +635,11 @@ async def start_nhaccuatui(link: str, user: dict):
         col_meta = {
             "title": song["title"],
             "artist": song.get("artist") or page_info.get("artist") or "Unknown Artist",
-            "raw_cover": song.get("cover") or page_info.get("cover") or "",
+            "cover": cover_file,
+            "raw_cover": raw_cover,
+            "date": page_info.get("date", ""),
+            "release_date": page_info.get("release_date", ""),
+            "tempfolder": temp_folder,
         }
         track_meta = await download_single_nct_track(
             song, 1, 1, folderpath, col_meta, user, is_single=True
@@ -537,7 +654,6 @@ async def start_nhaccuatui(link: str, user: dict):
     col_type = url_type if url_type in ("album", "playlist", "artist") else "playlist"
     col_title = page_info.get("title") or songs[0].get("artist") or "NhacCuaTui Collection"
     col_artist = page_info.get("artist") or songs[0].get("artist") or "Various Artists"
-    raw_cover = page_info.get("cover") or songs[0].get("cover") or ""
 
     folderpath = os.path.join(
         f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/NhacCuaTui",
@@ -556,16 +672,16 @@ async def start_nhaccuatui(link: str, user: dict):
     collection_meta["provider"] = "NhacCuaTui"
     collection_meta["type"] = col_type
     collection_meta["folderpath"] = folderpath
-    collection_meta["tempfolder"] = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
+    collection_meta["tempfolder"] = temp_folder
     collection_meta["raw_cover"] = raw_cover
+    collection_meta["cover"] = cover_file
+    collection_meta["thumbnail"] = cover_file
     collection_meta["release_date"] = page_info.get("release_date", "")
-    collection_meta["date"] = page_info.get("release_date", "")[:4] if page_info.get("release_date") else ""
+    collection_meta["date"] = page_info.get("date", "")
+    collection_meta["explicit"] = False
 
-    if raw_cover:
-        collection_meta["cover"] = await create_cover_file(raw_cover, collection_meta)
-        collection_meta["thumbnail"] = collection_meta["cover"]
-
-    collection_meta["poster_msg"] = await post_art_poster(user, collection_meta)
+    if cover_file:
+        collection_meta["poster_msg"] = await post_art_poster(user, collection_meta)
 
     tasks = [
         download_single_nct_track(
