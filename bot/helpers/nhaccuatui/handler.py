@@ -764,6 +764,12 @@ async def start_nhaccuatui(link: str, user: dict):
     )
     os.makedirs(folderpath, exist_ok=True)
 
+    # Masukkan file cover ke dalam folder album agar terbungkus ke dalam ZIP
+    if full_cover and os.path.exists(full_cover):
+        import shutil
+        album_cover_dest = os.path.join(folderpath, "cover.jpg")
+        shutil.copy2(full_cover, album_cover_dest)
+
     album_meta = copy.deepcopy(base_metadata)
     album_meta["title"] = col_title
     album_meta["album"] = col_title
@@ -810,6 +816,7 @@ async def start_nhaccuatui(link: str, user: dict):
     album_meta["tracks"] = valid_tracks
     album_meta["albums"] = [{"tracks": valid_tracks}]
 
+    # Thumbnail dokumen Telegram tetap menggunakan ukuran 320x320 agar icon ZIP muncul
     if thumb_cover and os.path.exists(thumb_cover):
         album_meta["cover"] = thumb_cover
 
