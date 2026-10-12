@@ -693,6 +693,8 @@ async def set_mp3(data: Dict, handle: Union[MP3, EasyMP3], dur_ms: int = 0):
     # 10. Genre & Subgenre
     if data.get('genre'):
         handle.tags.add(TCON(encoding=3, text=str(data['genre'])))
+        handle.tags.add(TXXX(encoding=3, desc='Genre', text=str(data['genre'])))
+        handle.tags.add(TXXX(encoding=3, desc='GENRE', text=str(data['genre'])))
     if data.get('subgenre'):
         handle.tags.add(TXXX(encoding=3, desc='SUBGENRE', text=str(data['subgenre'])))
 
