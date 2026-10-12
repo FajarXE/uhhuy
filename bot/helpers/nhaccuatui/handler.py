@@ -303,7 +303,12 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
     if not audio_url:
         return None
 
-    artist_name = song_data.get("artistName", "")
+    # Tangkap singerName di samping artistName
+    artist_name = (
+        song_data.get("artistName")
+        or song_data.get("singerName")
+        or ""
+    )
     if not artist_name and isinstance(song_data.get("artists"), list):
         artist_name = ", ".join(
             a.get("name", "") for a in song_data["artists"] if isinstance(a, dict) and a.get("name")
@@ -327,13 +332,16 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
         or ""
     )
 
-    # Ambil album dan tanggal rilis asli milik lagu
+    # Validasi album: abaikan tipe boolean True/False
+    raw_album = song_data.get("album")
     album_name = (
         song_data.get("albumName")
         or song_data.get("albumTitle")
-        or (song_data.get("album", {}).get("name") if isinstance(song_data.get("album"), dict) else song_data.get("album"))
+        or (raw_album.get("name") if isinstance(raw_album, dict) else (raw_album if isinstance(raw_album, str) else ""))
         or ""
     )
+    if str(album_name).strip().lower() in ("true", "false", ""):
+        album_name = ""
 
     raw_song_date = song_data.get("dateCreate") or song_data.get("dateRelease") or song_data.get("publishDate")
     rel_date, year_val = parse_nct_date(raw_song_date)
@@ -674,14 +682,21 @@ async def download_single_nct_track(
     track_meta["artist"] = song.get("artist") or collection_meta.get("artist") or "Unknown Artist"
     track_meta["albumartist"] = collection_meta.get("artist") or track_meta["artist"]
     
-    # Pengaturan Album: jika chart, utamakan album asli lagu atau jadikan judul lagu itu sendiri (bukan tanggal chart)
+    # Pengaturan Album: jika chart atau album kosong/boolean, gunakan judul lagu (Single)
     is_chart = collection_meta.get("type") == "playlist"
+    song_album = song.get("album")
+    if not song_album or str(song_album).strip().lower() in ("true", "false"):
+        song_album = song.get("title")
+
     if is_chart:
-        track_meta["album"] = song.get("album") or song["title"]
+        track_meta["album"] = song_album
         track_meta["date"] = song.get("date") or ""
         track_meta["release_date"] = song.get("release_date") or ""
     else:
-        track_meta["album"] = collection_meta.get("title") or song["title"]
+        col_title = collection_meta.get("title")
+        if not col_title or str(col_title).strip().lower() in ("true", "false"):
+            col_title = song_album
+        track_meta["album"] = col_title
         track_meta["date"] = song.get("date") or collection_meta.get("date", "")
         track_meta["release_date"] = song.get("release_date") or collection_meta.get("release_date", "")
 
