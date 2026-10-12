@@ -1,75 +1,113 @@
+# [GANTI TOTAL ISI FILE: bot/helpers/khinsider/manager.py]
+
 import aiohttp
 import asyncio
 import re
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+from yarl import URL
 from ...logger import LOGGER
 
 class KhinsiderManager:
     def __init__(self):
         self.session = None
-        self.quality = 'flac' 
+        self.quality = 'flac'
+        self.base_album_url = "https://downloads.khinsider.com/game-soundtracks/album/"
+        self.base_referer = "https://downloads.khinsider.com/"
+        
+        # Header lengkap yang identik dengan khiscrape.py
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/153.0.8010.37 Safari/537.36"
+            ),
+            "Accept": "text/html;q=1.0,*/*;q=0.9",
             "Accept-Language": "en-US;q=1.0,en;q=0.9",
+            "Accept-Encoding": "identity;q=1.0,gzip;q=0.9,deflate;q=0.8,br;q=0.7",
             "Connection": "keep-alive",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "same-origin",
         }
 
     async def initialize_clients(self):
-        self.session = aiohttp.ClientSession(headers=self.headers)
+        connector = aiohttp.TCPConnector(ssl=False)
+        self.session = aiohttp.ClientSession(connector=connector, headers=self.headers)
         LOGGER.info("KhinsiderManager: Session initialized.")
 
     async def shutdown(self):
-        if self.session:
+        if self.session and not self.session.closed:
             await self.session.close()
 
     async def setup_quality(self, user_id, quality):
         self.quality = quality
 
+    def normalize_album_url(self, input_str: str) -> str:
+        """Menghapus query/fragment dan memastikan format kanonikal album Khinsider."""
+        clean_input = re.split(r"[?#]", input_str)[0]
+        pattern = r"(?:/game-soundtracks)?/album/([^/?#]+)"
+        match = re.search(pattern, clean_input)
+        if match:
+            album_id = match.group(1)
+        else:
+            album_id = clean_input.strip("/")
+            if "/" in album_id:
+                album_id = album_id.split("/")[-1]
+                
+        if not album_id:
+            return input_str
+        return str(URL(self.base_album_url) / album_id)
+
     async def get_album(self, url):
-        async with self.session.get(url) as resp:
+        album_url = self.normalize_album_url(url)
+        
+        if self.session is None or self.session.closed:
+            await self.initialize_clients()
+
+        # Wajib menyertakan Referer agar tidak dicegat 403 Forbidden
+        req_headers = self.headers.copy()
+        req_headers["Referer"] = self.base_referer
+
+        async with self.session.get(album_url, headers=req_headers) as resp:
             if resp.status != 200:
                 raise Exception(f"Failed to fetch album page: {resp.status}")
             html = await resp.text()
 
         soup = BeautifulSoup(html, 'html.parser')
         
-        # 1. Metadata Dasar
-        title = soup.select_one("#pageContent h2")
-        title = title.get_text(strip=True) if title else "Unknown Album"
-        
-        # 2. Ambil Year & Metadata Teks Lainnya
+        # 1. Judul Album
+        title_elem = soup.select_one("#pageContent h2")
+        title = title_elem.get_text(strip=True) if title_elem else "Unknown Album"
+        title = re.sub(r"\s+", " ", title)
+        title = re.sub(r"MP3 - Download.*", "", title).strip()
+
+        # 2. Tanggal / Tahun Rilis
         date = "N/A"
-        # Cari di paragraf info (biasanya ada <p><b>Year:</b> 2012</p>)
         page_content = soup.select_one("#pageContent")
         if page_content:
             text_content = page_content.get_text()
-            # Regex untuk mencari tahun (4 digit setelah 'Year:')
             match_year = re.search(r"Year:\s*(\d{4})", text_content)
             if match_year:
                 date = match_year.group(1)
 
-        # 3. Ambil Gambar
+        # 3. Ekstraksi Gambar
         images = []
         for img in soup.select("div.albumImage a"):
             href = img.get('href')
             if href:
-                full_img_url = href if href.startswith('http') else urljoin(url, href)
-                images.append(full_img_url)
+                full_img_url = href if href.startswith('http') else urljoin(album_url, href)
+                if "/thumbs/" not in full_img_url:
+                    images.append(full_img_url)
         cover_url = images[0] if images else None
 
-        # 4. Parse Tracks & Deteksi Disc
+        # 4. Ekstraksi Daftar Track
         tracks = []
         table = soup.find("table", id="songlist")
-        
         disc_numbers = set()
         
         if table:
-            # Cek Header untuk kolom Disc
             headers = []
             header_row = table.find("tr", id="songlist_header")
             if header_row:
@@ -77,7 +115,7 @@ class KhinsiderManager:
             
             disc_col_idx = -1
             for i, h in enumerate(headers):
-                if "disc" in h:
+                if "cd" in h or "disc" in h:
                     disc_col_idx = i
                     break
 
@@ -94,23 +132,18 @@ class KhinsiderManager:
                 if not link:
                     continue
                 
-                track_url = urljoin(url, link['href'])
+                track_url = urljoin(album_url, link['href'])
                 track_name = link.get_text(strip=True)
                 
-                # Ambil Nomor Track
                 track_num = None
-                # Biasanya kolom setelah disc atau kolom ke-1/ke-2
-                # Kita cari cell yang isinya angka dan ada titik (misal 1.)
                 for cell in cells:
                     txt = cell.get_text(strip=True).replace('.', '')
-                    if txt.isdigit() and len(txt) < 4: # Asumsi nomor track < 1000
-                        # Cek apakah ini kolom disc?
+                    if txt.isdigit() and len(txt) < 4:
                         if disc_col_idx != -1 and cells.index(cell) == disc_col_idx:
                             continue
                         track_num = txt
                         break
                 
-                # Ambil Nomor Disc (Jika ada kolomnya)
                 disc_num = 1
                 if disc_col_idx != -1 and len(cells) > disc_col_idx:
                     try:
@@ -133,22 +166,31 @@ class KhinsiderManager:
 
         return {
             'title': title,
+            'album_url': album_url,
             'cover': cover_url,
             'images': images,
             'tracks': tracks,
-            'date': date,               # <-- Baru
-            'totalvolumes': str(total_volumes), # <-- Baru
-            'explicit': False,          # Khinsider mayoritas Game OST (Clean)
+            'date': date,
+            'totalvolumes': str(total_volumes),
+            'explicit': False,
             'provider': 'Khinsider'
         }
 
-    async def get_track_download_url(self, track_url, preferred_formats=None):
+    async def get_track_download_url(self, track_url, preferred_formats=None, album_url=None):
         if not preferred_formats:
             preferred_formats = ['flac', 'mp3']
             if self.quality in preferred_formats:
                 preferred_formats.insert(0, preferred_formats.pop(preferred_formats.index(self.quality)))
 
-        async with self.session.get(track_url) as resp:
+        if self.session is None or self.session.closed:
+            await self.initialize_clients()
+
+        req_headers = self.headers.copy()
+        req_headers["Referer"] = album_url or self.base_referer
+
+        async with self.session.get(track_url, headers=req_headers) as resp:
+            if resp.status != 200:
+                raise Exception(f"Failed to fetch track page: {resp.status}")
             html = await resp.text()
         
         soup = BeautifulSoup(html, 'html.parser')
@@ -156,9 +198,11 @@ class KhinsiderManager:
         found_links = {}
         for a in soup.find_all('a', href=True):
             href = a['href']
-            for fmt in ['flac', 'mp3', 'm4a', 'ogg']:
-                if href.lower().endswith(f".{fmt}"):
-                    found_links[fmt] = href
+            text = a.get_text().strip().lower()
+            for fmt in ['flac', 'mp3', 'm4a', 'ogg', 'wav']:
+                if f"download as {fmt}" in text or href.lower().endswith(f".{fmt}"):
+                    full_link = href if href.startswith('http') else urljoin(track_url, href)
+                    found_links[fmt] = full_link
         
         final_url = None
         final_fmt = 'mp3'
