@@ -601,109 +601,110 @@ async def set_mp3(data: Dict, handle: Union[MP3, EasyMP3], dur_ms: int = 0):
     if handle.tags is None:
         handle.add_tags()
     
-    t_num = str(data.get('tracknumber', '') or '1')
-    t_tot = str(data.get('totaltracks', '') or '1')
+    # 1. Posisi Track & Part (MediaInfo: Part / Track)
+    t_num = str(data.get('tracknumber') or '')
+    t_tot = str(data.get('totaltracks') or '')
     track_pos = f"{t_num}/{t_tot}" if (t_tot and t_tot != '0') else t_num
         
-    d_num = str(data.get('volume') or '1')
-    d_tot = str(data.get('totalvolume') or '1')
+    d_num = str(data.get('volume') or '')
+    d_tot = str(data.get('totalvolume') or '')
     disc_pos = f"{d_num}/{d_tot}" if (d_tot and d_tot != '0') else d_num
     
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    # --- 1. Info Dasar & Posisi Track/Part ---
-    handle.tags.add(TIT2(encoding=3, text=data.get('title', '')))
-    handle.tags.add(TALB(encoding=3, text=data.get('album', '')))
-    handle.tags.add(TPE2(encoding=3, text=data.get('albumartist', '')))
-    handle.tags.add(TOPE(encoding=3, text=data.get('albumartist', ''))) 
-    handle.tags.add(TPE1(encoding=3, text=data.get('artist', '')))
-    handle.tags.add(TRCK(encoding=3, text=track_pos)) 
-    if disc_pos: 
-        handle.tags.add(TPOS(encoding=3, text=disc_pos))
+    if data.get('title'):
+        handle.tags.add(TIT2(encoding=3, text=str(data['title'])))
+    if data.get('album'):
+        handle.tags.add(TALB(encoding=3, text=str(data['album'])))
+    if data.get('albumartist'):
+        handle.tags.add(TPE2(encoding=3, text=str(data['albumartist'])))
+        handle.tags.add(TOPE(encoding=3, text=str(data['albumartist'])))
+    if data.get('artist'):
+        handle.tags.add(TPE1(encoding=3, text=str(data['artist'])))
         
-    handle.tags.add(TXXX(encoding=3, desc='Part', text=track_pos))
-    handle.tags.add(TXXX(encoding=3, desc='PART', text=track_pos))
+    if track_pos:
+        handle.tags.add(TRCK(encoding=3, text=track_pos))
+        handle.tags.add(TXXX(encoding=3, desc='Part', text=track_pos))
+        handle.tags.add(TXXX(encoding=3, desc='PART', text=track_pos))
+        
+    if disc_pos:
+        handle.tags.add(TPOS(encoding=3, text=disc_pos))
 
-    # --- 2. Copyright & cpr ---
+    # 2. Copyright & cpr (MediaInfo: Copyright / cpr)
     cpr = data.get('copyright') or data.get('cpr') or ''
     if cpr:
-        handle.tags.add(TCOP(encoding=3, text=cpr))
-        handle.tags.add(TXXX(encoding=3, desc='Copyright', text=cpr))
-        handle.tags.add(TXXX(encoding=3, desc='COPYRIGHT', text=cpr))
-        handle.tags.add(TXXX(encoding=3, desc='cpr', text=cpr))
+        handle.tags.add(TCOP(encoding=3, text=str(cpr)))
+        handle.tags.add(TXXX(encoding=3, desc='Copyright', text=str(cpr)))
+        handle.tags.add(TXXX(encoding=3, desc='COPYRIGHT', text=str(cpr)))
+        handle.tags.add(TXXX(encoding=3, desc='cpr', text=str(cpr)))
 
-    # --- 3. Label, Publisher & pub ---
+    # 3. Label, Publisher & pub (MediaInfo: Publisher / Label / pub)
     pub = data.get('publisher') or data.get('label') or data.get('organization') or data.get('pub') or ''
     if pub:
-        handle.tags.add(TPUB(encoding=3, text=pub))
-        handle.tags.add(TXXX(encoding=3, desc='Label', text=pub))
-        handle.tags.add(TXXX(encoding=3, desc='LABEL', text=pub))
-        handle.tags.add(TXXX(encoding=3, desc='pub', text=pub))
-        handle.tags.add(TXXX(encoding=3, desc='ORGANIZATION', text=pub))
+        handle.tags.add(TPUB(encoding=3, text=str(pub)))
+        handle.tags.add(TXXX(encoding=3, desc='Label', text=str(pub)))
+        handle.tags.add(TXXX(encoding=3, desc='LABEL', text=str(pub)))
+        handle.tags.add(TXXX(encoding=3, desc='pub', text=str(pub)))
+        handle.tags.add(TXXX(encoding=3, desc='ORGANIZATION', text=str(pub)))
 
-    # --- 4. Producer ---
-    producer = data.get('producer') or data.get('artist') or ''
+    # 4. Producer (MediaInfo: Producer)
+    producer = data.get('producer') or ''
     if producer:
-        handle.tags.add(TXXX(encoding=3, desc='Producer', text=producer))
-        handle.tags.add(TXXX(encoding=3, desc='PRODUCER', text=producer))
+        handle.tags.add(TXXX(encoding=3, desc='Producer', text=str(producer)))
+        handle.tags.add(TXXX(encoding=3, desc='PRODUCER', text=str(producer)))
 
-    # --- 5. Composer ---
-    composer = data.get('composer') or data.get('artist') or ''
+    # 5. Composer (MediaInfo: Composer)
+    composer = data.get('composer') or ''
     if composer:
-        handle.tags.add(TCOM(encoding=3, text=composer))
-        handle.tags.add(TXXX(encoding=3, desc='Composer', text=composer))
-        handle.tags.add(TXXX(encoding=3, desc='COMPOSER', text=composer))
+        handle.tags.add(TCOM(encoding=3, text=str(composer)))
+        handle.tags.add(TXXX(encoding=3, desc='Composer', text=str(composer)))
+        handle.tags.add(TXXX(encoding=3, desc='COMPOSER', text=str(composer)))
 
-    # --- 6. ISRC ---
+    # 6. ISRC (MediaInfo: ISRC)
     isrc = data.get('isrc') or ''
     if isrc:
-        handle.tags.add(TSRC(encoding=3, text=isrc))
-        handle.tags.add(TXXX(encoding=3, desc='ISRC', text=isrc))
+        handle.tags.add(TSRC(encoding=3, text=str(isrc)))
+        handle.tags.add(TXXX(encoding=3, desc='ISRC', text=str(isrc)))
 
-    # --- 7. Rating & ITUNESADVISORY ---
+    # 7. Rating & Explicit Advisory (MediaInfo: Rating)
     is_explicit = data.get('explicit')
     if is_explicit is True:
-        rating_str = "Explicit"
-        advisory_str = "1"
+        handle.tags.add(TXXX(encoding=3, desc='Rating', text='Explicit'))
+        handle.tags.add(TXXX(encoding=3, desc='RATING', text='Explicit'))
+        handle.tags.add(TXXX(encoding=3, desc='ITUNESADVISORY', text='1'))
     elif is_explicit is False:
-        rating_str = "Clean"
-        advisory_str = "2"
-    else:
-        rating_str = "None"
-        advisory_str = "0"
-    handle.tags.add(TXXX(encoding=3, desc='Rating', text=rating_str))
-    handle.tags.add(TXXX(encoding=3, desc='RATING', text=rating_str))
-    handle.tags.add(TXXX(encoding=3, desc='ITUNESADVISORY', text=advisory_str))
+        handle.tags.add(TXXX(encoding=3, desc='Rating', text='Clean'))
+        handle.tags.add(TXXX(encoding=3, desc='RATING', text='Clean'))
+        handle.tags.add(TXXX(encoding=3, desc='ITUNESADVISORY', text='2'))
 
-    # --- 8. Waktu Tagging & Encode (MediaInfo) ---
+    # 8. Tanggal & Waktu Tagging (MediaInfo: TAGGING_TIME, DATE_TAGGED, ENCODED_DATE)
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     handle.tags.add(TDTG(encoding=3, text=now_str))
     handle.tags.add(TXXX(encoding=3, desc='TAGGING_TIME', text=now_str))
     handle.tags.add(TXXX(encoding=3, desc='DATE_TAGGED', text=now_str))
     handle.tags.add(TXXX(encoding=3, desc='ENCODED_DATE', text=now_str))
 
-    # --- 9. Tanggal Rilis ---
-    if data.get('date'): 
+    # 9. Tanggal Rilis
+    if data.get('date'):
         handle.tags.add(TDRC(encoding=3, text=str(data['date'])))
-    if data.get('release_date'): 
+    if data.get('release_date'):
         handle.tags.add(TDRL(encoding=3, text=str(data['release_date'])))
         handle.tags.add(TXXX(encoding=3, desc='RELEASETIME', text=str(data['release_date'])))
         handle.tags.add(TXXX(encoding=3, desc='release_time', text=str(data['release_date'])))
 
-    # --- 10. Genre & Subgenre ---
-    if data.get('genre'): 
-        handle.tags.add(TCON(encoding=3, text=data['genre'])) 
-    if data.get('subgenre'): 
-        handle.tags.add(TXXX(encoding=3, desc='SUBGENRE', text=data['subgenre']))
+    # 10. Genre & Subgenre
+    if data.get('genre'):
+        handle.tags.add(TCON(encoding=3, text=str(data['genre'])))
+    if data.get('subgenre'):
+        handle.tags.add(TXXX(encoding=3, desc='SUBGENRE', text=str(data['subgenre'])))
 
-    # --- 11. UPC / Barcode / EAN ---
+    # 11. UPC / Barcode / EAN
     if data.get('upc'):
-        handle.tags.add(TXXX(encoding=3, desc='UPC', text=data['upc']))
-        handle.tags.add(TXXX(encoding=3, desc='BARCODE', text=data['upc']))
-        handle.tags.add(TXXX(encoding=3, desc='EAN', text=data['upc']))
+        handle.tags.add(TXXX(encoding=3, desc='UPC', text=str(data['upc'])))
+        handle.tags.add(TXXX(encoding=3, desc='BARCODE', text=str(data['upc'])))
+        handle.tags.add(TXXX(encoding=3, desc='EAN', text=str(data['upc'])))
 
-    # --- 12. Lirik & Durasi ---
+    # 12. Lirik & Durasi
     if data.get('lyrics'):
-        handle.tags.add(USLT(encoding=3, lang=u'eng', desc=u'desc', text=data['lyrics']))
+        handle.tags.add(USLT(encoding=3, lang='eng', desc='desc', text=str(data['lyrics'])))
     if dur_ms > 0:
         handle.tags.add(TLEN(encoding=3, text=str(dur_ms)))
 
