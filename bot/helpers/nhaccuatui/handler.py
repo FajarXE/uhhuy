@@ -76,9 +76,18 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
         except Exception:
             pass
 
-    m = re.search(r'(\d{4})[-/](\d{2})[-/](\d{2})', s)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}", m.group(1)
+    # Format DD/MM/YYYY atau DD-MM-YYYY
+    m_dmy = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', s)
+    if m_dmy:
+        day = m_dmy.group(1).zfill(2)
+        month = m_dmy.group(2).zfill(2)
+        year = m_dmy.group(3)
+        return f"{year}-{month}-{day}", year
+
+    # Format YYYY-MM-DD atau YYYY/MM/DD
+    m_ymd = re.search(r'(\d{4})[-/](\d{2})[-/](\d{2})', s)
+    if m_ymd:
+        return f"{m_ymd.group(1)}-{m_ymd.group(2)}-{m_ymd.group(3)}", m_ymd.group(1)
 
     m_year = re.search(r'\b(19\d{2}|20\d{2})\b', s)
     if m_year:
@@ -318,10 +327,24 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
         or ""
     )
 
+    # Ambil album dan tanggal rilis asli milik lagu
+    album_name = (
+        song_data.get("albumName")
+        or song_data.get("albumTitle")
+        or (song_data.get("album", {}).get("name") if isinstance(song_data.get("album"), dict) else song_data.get("album"))
+        or ""
+    )
+
+    raw_song_date = song_data.get("dateCreate") or song_data.get("dateRelease") or song_data.get("publishDate")
+    rel_date, year_val = parse_nct_date(raw_song_date)
+
     return {
         "key": song_data.get("key") or name,
         "title": name,
         "artist": artist_name or "Unknown Artist",
+        "album": str(album_name).strip(),
+        "date": year_val,
+        "release_date": rel_date,
         "audio_url": audio_url,
         "quality": stream.get("typeUI") or f"{stream.get('type', quality_pref)}kbps",
         "cover": cover_url,
@@ -473,8 +496,15 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
                 break
 
     elif url_type in ("album", "chart") and best_col:
-        if best_col.get("name"):
-            page_info["title"] = best_col["name"].strip()
+        col_name = best_col.get("name", "").strip()
+
+        # Jangan gunakan nama koleksi jika hanya berupa tanggal (misal 12/10/2026)
+        is_just_date = bool(re.match(r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$', col_name))
+        if col_name and not is_just_date:
+            page_info["title"] = col_name
+        elif not page_info["title"]:
+            page_info["title"] = "BXH NhacCuaTui" if url_type == "chart" else "NhacCuaTui Album"
+
         if best_col.get("artistName"):
             page_info["artist"] = best_col["artistName"].strip()
         if best_col.get("genre"):
@@ -643,14 +673,23 @@ async def download_single_nct_track(
     track_meta["title"] = song["title"]
     track_meta["artist"] = song.get("artist") or collection_meta.get("artist") or "Unknown Artist"
     track_meta["albumartist"] = collection_meta.get("artist") or track_meta["artist"]
-    track_meta["album"] = collection_meta.get("title") or song["title"]
+    
+    # Pengaturan Album: jika chart, utamakan album asli lagu atau jadikan judul lagu itu sendiri (bukan tanggal chart)
+    is_chart = collection_meta.get("type") == "playlist"
+    if is_chart:
+        track_meta["album"] = song.get("album") or song["title"]
+        track_meta["date"] = song.get("date") or ""
+        track_meta["release_date"] = song.get("release_date") or ""
+    else:
+        track_meta["album"] = collection_meta.get("title") or song["title"]
+        track_meta["date"] = song.get("date") or collection_meta.get("date", "")
+        track_meta["release_date"] = song.get("release_date") or collection_meta.get("release_date", "")
+
     track_meta["tracknumber"] = str(index)
     track_meta["totaltracks"] = str(total_tracks)
     track_meta["volume"] = "1"
     track_meta["totalvolume"] = "1"
     track_meta["duration"] = song.get("duration") or 0
-    track_meta["date"] = collection_meta.get("date", "")
-    track_meta["release_date"] = collection_meta.get("release_date", "")
     track_meta["quality"] = song.get("quality") or f"{nhaccuatui_manager.get_user_quality(user['user_id'])}kbps"
     track_meta["extension"] = ext_clean
     track_meta["provider"] = "NhacCuaTui"
@@ -672,9 +711,7 @@ async def download_single_nct_track(
     track_meta["cpr"] = track_meta["copyright"]
     track_meta["isrc"] = song.get("isrc") or collection_meta.get("isrc") or ""
 
-    # --- PENANGANAN COVER MASING-MASING LAGU ---
-    # Album: gunakan cover album bersama.
-    # Chart / Single: unduh cover unik masing-masing lagu di subfolder khusus agar tidak saling menimpa.
+    # Cover Handling: Album memakai cover album bersama, Chart memakai cover asli masing-masing lagu
     is_album = collection_meta.get("type") == "album"
 
     if is_album and collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
@@ -744,8 +781,11 @@ async def start_nhaccuatui(link: str, user: dict):
     temp_folder = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/"
     os.makedirs(temp_folder, exist_ok=True)
 
-    col_title = page_info.get("title") or songs[0].get("artist") or ("NhacCuaTui Chart" if url_type == "chart" else "NhacCuaTui")
-    col_artist = page_info.get("artist") or songs[0].get("artist") or "Various Artists"
+    col_title = page_info.get("title") or ("BXH NhacCuaTui" if url_type == "chart" else "NhacCuaTui Album")
+    if re.match(r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$', col_title.strip()):
+        col_title = "BXH NhacCuaTui"
+
+    col_artist = page_info.get("artist") or ("NhacCuaTui" if url_type == "chart" else "Various Artists")
 
     full_cover = ""
     thumb_cover = ""
@@ -769,8 +809,8 @@ async def start_nhaccuatui(link: str, user: dict):
             "thumbnail": thumb_cover or full_cover,
             "raw_cover": raw_cover,
             "genre": song.get("genre") or page_info.get("genre") or "Pop",
-            "date": page_info.get("date", ""),
-            "release_date": page_info.get("release_date", ""),
+            "date": song.get("date") or page_info.get("date", ""),
+            "release_date": song.get("release_date") or page_info.get("release_date", ""),
             "tempfolder": temp_folder,
             "type": "track",
         }
