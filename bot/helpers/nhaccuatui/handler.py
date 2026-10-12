@@ -231,10 +231,8 @@ async def save_optimized_cover(url: str, dest_folder: str, title: str = "", arti
                 w, h = img_rgb.size
                 LOGGER.info(f"NhacCuaTui: Cover final tersimpan dengan resolusi {w}x{h}")
 
-                # 1. Gambar resolusi penuh untuk tag lagu dan poster
                 img_rgb.save(full_path, "JPEG", quality=95, optimize=True)
 
-                # 2. Thumbnail dokumen/ZIP (maksimal 320x320)
                 thumb = img_rgb.copy()
                 thumb.thumbnail((320, 320), Image.Resampling.LANCZOS)
                 thumb.save(thumb_path, "JPEG", quality=85, optimize=True)
@@ -307,6 +305,16 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
         or ""
     )
 
+    # Ekstraksi Genre lagu
+    genre = (
+        song_data.get("genreName")
+        or song_data.get("genreTitle")
+        or (song_data.get("genre", {}).get("name") if isinstance(song_data.get("genre"), dict) else song_data.get("genre"))
+        or (song_data.get("genres")[0].get("name") if isinstance(song_data.get("genres"), list) and song_data.get("genres") and isinstance(song_data.get("genres")[0], dict) else "")
+        or song_data.get("categoryName")
+        or ""
+    )
+
     return {
         "key": song_data.get("key") or name,
         "title": name,
@@ -316,6 +324,7 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
         "cover": cover_url,
         "duration": song_data.get("duration") or 0,
         "explicit": False,
+        "genre": str(genre).strip(),
     }
 
 
@@ -334,6 +343,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
 
         const pageTitle = (getMeta('og:title') || document.title || '').replace(/\s*[-|]\s*NhacCuaTui.*$/i, '').trim();
         const pageImage = getMeta('og:image') || getMeta('twitter:image') || '';
+        const pageGenre = getMeta('music:genre') || getMeta('genre') || '';
 
         const albums = [];
         const singleSongs = [];
@@ -360,6 +370,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
                     artistName: String(obj.artistName || ''),
                     image: obj.coverImage || obj.image || obj.avatar || obj.thumbURL || obj.bgImage || '',
                     date: obj.dateCreate || obj.dateRelease || obj.publishDate || '',
+                    genre: obj.genreName || obj.genreTitle || (obj.genre && obj.genre.name) || obj.categoryName || '',
                     total: obj.numOfItems || obj.total || obj.totalSong || list.length,
                     listSong: list,
                     path: path
@@ -410,6 +421,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         return {
             pageTitle,
             pageImage,
+            pageGenre,
             bestAlbum,
             singleSongs
         };
@@ -419,6 +431,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         "title": extracted_payload.get("pageTitle", ""),
         "artist": "",
         "cover": extracted_payload.get("pageImage", ""),
+        "genre": extracted_payload.get("pageGenre", ""),
         "release_date": "",
         "date": "",
         "explicit": False,
@@ -436,6 +449,8 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
                     page_info["title"] = s["title"]
                 if not page_info["artist"]:
                     page_info["artist"] = s["artist"]
+                if not page_info["genre"] and s.get("genre"):
+                    page_info["genre"] = s["genre"]
                 if not page_info["cover"] and s.get("cover"):
                     page_info["cover"] = s["cover"]
                 break
@@ -445,6 +460,8 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
             page_info["title"] = best_album["name"].strip()
         if best_album.get("artistName"):
             page_info["artist"] = best_album["artistName"].strip()
+        if best_album.get("genre"):
+            page_info["genre"] = best_album["genre"].strip()
 
         raw_cov = page_info.get("cover") or best_album.get("image") or ""
         page_info["cover"] = await upgrade_cover_url(raw_cov)
@@ -456,6 +473,8 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         for raw_s in best_album.get("listSong", []):
             s = parse_song(raw_s, quality_pref)
             if s:
+                if not s.get("genre") and page_info.get("genre"):
+                    s["genre"] = page_info["genre"]
                 songs.append(s)
 
         expected_total = best_album.get("total")
@@ -518,6 +537,7 @@ async def capture_via_click(context: BrowserContext, song_url: str) -> dict | No
             result["artist"] = "Unknown Artist"
             result["quality"] = "Stream"
             result["cover"] = ""
+            result["genre"] = "Pop"
             result["duration"] = 0
             result["explicit"] = False
         except asyncio.TimeoutError:
@@ -622,6 +642,9 @@ async def download_single_nct_track(
     track_meta["tempfolder"] = collection_meta.get("tempfolder", f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
 
     # --- TAG METADATA UNTUK MEDIAINFO ---
+    final_genre = song.get("genre") or collection_meta.get("genre") or "Pop"
+    track_meta["genre"] = str(final_genre).strip()
+
     track_meta["composer"] = song.get("composer") or collection_meta.get("composer") or track_meta["artist"]
     track_meta["producer"] = song.get("producer") or collection_meta.get("producer") or track_meta["artist"]
     track_meta["publisher"] = song.get("publisher") or collection_meta.get("publisher") or "NhacCuaTui"
@@ -650,7 +673,6 @@ async def download_single_nct_track(
     safe_title = sanitize_filename(song["title"])
     safe_artist = sanitize_filename(track_meta["artist"])
     
-    # Format penamaan file sesuai permintaan: 01 - Judul - Artis.mp3
     if is_single:
         fname = f"{safe_title} - {safe_artist}.{ext_clean}"
     else:
@@ -721,6 +743,7 @@ async def start_nhaccuatui(link: str, user: dict):
             "cover": full_cover,
             "thumbnail": thumb_cover or full_cover,
             "raw_cover": raw_cover,
+            "genre": song.get("genre") or page_info.get("genre") or "Pop",
             "date": page_info.get("date", ""),
             "release_date": page_info.get("release_date", ""),
             "tempfolder": temp_folder,
@@ -756,6 +779,7 @@ async def start_nhaccuatui(link: str, user: dict):
     album_meta["raw_cover"] = raw_cover
     album_meta["cover"] = full_cover
     album_meta["thumbnail"] = thumb_cover or full_cover
+    album_meta["genre"] = page_info.get("genre") or (songs[0].get("genre") if songs else "Pop") or "Pop"
     album_meta["release_date"] = page_info.get("release_date", "")
     album_meta["date"] = page_info.get("date", "")
     album_meta["explicit"] = False
