@@ -15,7 +15,6 @@ from playwright.async_api import Page, BrowserContext
 from config import Config
 from bot.logger import LOGGER
 from bot.settings import bot_set
-from bot.helpers.message import edit_message
 from bot.helpers.metadata import metadata as base_metadata, set_metadata
 from bot.helpers.utils import (
     download_file,
@@ -85,7 +84,6 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
 
 
 async def fetch_itunes_cover(title: str, artist: str) -> str:
-    """Mencari sampul beresolusi tinggi (hingga 3000x3000) via iTunes jika cover bawaan terlalu kecil."""
     clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
     clean_artist = re.sub(r'\(.*?\)|\[.*?\]', '', artist).strip()
     query = f"{clean_title} {clean_artist}".strip()
@@ -104,9 +102,8 @@ async def fetch_itunes_cover(title: str, artist: str) -> str:
                     if results:
                         art = results[0].get("artworkUrl100", "")
                         if art:
-                            # Ubah 100x100 menjadi resolusi penuh 3000x3000
                             high_res = re.sub(r'\d+x\d+bb', '3000x3000bb', art)
-                            LOGGER.info(f"NhacCuaTui: Menemukan cover resolusi tinggi via iTunes -> {high_res}")
+                            LOGGER.info(f"NhacCuaTui: Cover resolusi tinggi ditemukan di iTunes -> {high_res}")
                             return high_res
     except Exception as e:
         LOGGER.debug(f"NhacCuaTui: iTunes cover fallback gagal: {e}")
@@ -115,17 +112,11 @@ async def fetch_itunes_cover(title: str, artist: str) -> str:
 
 
 async def upgrade_cover_url(url: str) -> str:
-    """
-    Mengekstrak master cover beresolusi tinggi dari NixCDN.
-    Memeriksa varian resolusi tinggi (_2000, _1500, _1000, dll.) terlebih dahulu,
-    lalu menempatkan file tanpa suffix di posisi paling akhir.
-    """
     if not url or not isinstance(url, str):
         return ""
 
     clean_url = url.split("?")[0].strip()
 
-    # Buang suffix ukuran (_152x152, _500, _300, dsb.)
     clean_base = re.sub(r'_(?:\d+x\d+|\d+_\d+|\d+|thumb|small|medium|large|avatar)\.([a-zA-Z0-9]+)$', r'.\1', clean_url, flags=re.I)
     m = re.search(r'^(.*?)\.([a-zA-Z0-9]+)$', clean_base)
     if not m:
@@ -134,14 +125,12 @@ async def upgrade_cover_url(url: str) -> str:
     raw_base = m.group(1)
     ext = m.group(2)
 
-    # Sinkronisasi folder /song/ dan /playlist/ karena cover master sering disimpan di /playlist/
     base_variants = [raw_base]
     if "/song/" in raw_base:
         base_variants.append(raw_base.replace("/song/", "/playlist/"))
     if "/playlist/" in raw_base:
         base_variants.append(raw_base.replace("/playlist/", "/song/"))
 
-    # URUTAN PRIORITAS: Dari resolusi tertinggi ke terendah
     desired_sizes = (
         "_2000.", "_1500.", "_1200.", "_1000.", "_800.",
         "_600.", "_500.", "_600x600.", "_500x500.",
@@ -154,7 +143,6 @@ async def upgrade_cover_url(url: str) -> str:
         for b in base_variants:
             candidates.append(f"{b}{sz}{ext}")
 
-    # Tambahkan file asli tanpa suffix di urutan paling belakang
     for b in base_variants:
         candidates.append(f"{b}.{ext}")
 
@@ -179,13 +167,12 @@ async def upgrade_cover_url(url: str) -> str:
             results = await asyncio.gather(*tasks)
             valid_urls = set(r for r in results if r)
 
-            # Pilih varian yang valid sesuai urutan prioritas
             for c in candidates:
                 if c in valid_urls:
-                    LOGGER.info(f"NhacCuaTui: Menemukan cover resolusi tinggi NixCDN -> {c}")
+                    LOGGER.info(f"NhacCuaTui: Cover resolusi tinggi ditemukan di NixCDN -> {c}")
                     return c
     except Exception as e:
-        LOGGER.warning(f"NhacCuaTui: Gagal mengecek variasi cover: {e}")
+        LOGGER.warning(f"NhacCuaTui: Gagal memeriksa varian cover: {e}")
 
     return clean_url
 
@@ -215,7 +202,6 @@ async def save_optimized_cover(url: str, dest_folder: str, title: str = "", arti
 
     downloaded = await download_to_raw(url)
 
-    # Validasi dimensi gambar dengan PIL
     need_itunes_fallback = False
     if downloaded and os.path.exists(raw_path):
         try:
@@ -228,7 +214,6 @@ async def save_optimized_cover(url: str, dest_folder: str, title: str = "", arti
     else:
         need_itunes_fallback = True
 
-    # Jika cover NixCDN hanya 152x152, cari alternatif beresolusi tinggi di iTunes
     if need_itunes_fallback and title:
         itunes_url = await fetch_itunes_cover(title, artist)
         if itunes_url:
@@ -246,10 +231,10 @@ async def save_optimized_cover(url: str, dest_folder: str, title: str = "", arti
                 w, h = img_rgb.size
                 LOGGER.info(f"NhacCuaTui: Cover final tersimpan dengan resolusi {w}x{h}")
 
-                # 1. Simpan gambar resolusi penuh asli untuk poster & metadata audio
+                # 1. Gambar resolusi penuh untuk tag lagu dan poster
                 img_rgb.save(full_path, "JPEG", quality=95, optimize=True)
 
-                # 2. Simpan thumbnail khusus ZIP/dokumen (maks 320x320) agar tampil di Telegram
+                # 2. Thumbnail dokumen/ZIP (maksimal 320x320)
                 thumb = img_rgb.copy()
                 thumb.thumbnail((320, 320), Image.Resampling.LANCZOS)
                 thumb.save(thumb_path, "JPEG", quality=85, optimize=True)
@@ -636,7 +621,18 @@ async def download_single_nct_track(
     track_meta["explicit"] = False
     track_meta["tempfolder"] = collection_meta.get("tempfolder", f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}-temp/")
 
-    # Pasang cover master ke tag file audio
+    # --- TAG METADATA UNTUK MEDIAINFO ---
+    track_meta["composer"] = song.get("composer") or collection_meta.get("composer") or track_meta["artist"]
+    track_meta["producer"] = song.get("producer") or collection_meta.get("producer") or track_meta["artist"]
+    track_meta["publisher"] = song.get("publisher") or collection_meta.get("publisher") or "NhacCuaTui"
+    track_meta["label"] = track_meta["publisher"]
+    track_meta["pub"] = track_meta["publisher"]
+    
+    release_year = track_meta["date"] or (track_meta["release_date"][:4] if track_meta["release_date"] else datetime.now().year)
+    track_meta["copyright"] = song.get("copyright") or collection_meta.get("copyright") or f"© {release_year} {track_meta['publisher']}"
+    track_meta["cpr"] = track_meta["copyright"]
+    track_meta["isrc"] = song.get("isrc") or collection_meta.get("isrc") or ""
+
     if collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
         track_meta["cover"] = collection_meta["cover"]
         track_meta["thumbnail"] = collection_meta.get("thumbnail") or collection_meta["cover"]
@@ -653,10 +649,12 @@ async def download_single_nct_track(
 
     safe_title = sanitize_filename(song["title"])
     safe_artist = sanitize_filename(track_meta["artist"])
+    
+    # Format penamaan file sesuai permintaan: 01 - Judul - Artis.mp3
     if is_single:
         fname = f"{safe_title} - {safe_artist}.{ext_clean}"
     else:
-        fname = f"{index:02d}. {safe_title} - {safe_artist}.{ext_clean}"
+        fname = f"{index:02d} - {safe_title} - {safe_artist}.{ext_clean}"
 
     filepath = os.path.join(folderpath, sanitize_filename(fname))
     track_meta["filepath"] = filepath
@@ -692,9 +690,6 @@ async def start_nhaccuatui(link: str, user: dict):
     if url_type == "unsupported":
         raise Exception("NhacCuaTui saat ini hanya mendukung tautan Lagu Tunggal (/bai-hat/ atau /song/) dan Album (/album/). Link Playlist, Chart, dan Artist tidak didukung.")
 
-    if "bot_msg" in user:
-        await edit_message(user["bot_msg"], "🔍 Memuat halaman NhacCuaTui & mengekstrak stream...")
-
     songs, page_info = await collect_songs(link, qual_pref)
     if not songs:
         raise Exception("Tidak ditemukan lagu yang dapat diunduh dari link NhacCuaTui tersebut (Khusus VIP atau link tidak valid).")
@@ -705,7 +700,6 @@ async def start_nhaccuatui(link: str, user: dict):
     col_title = page_info.get("title") or songs[0].get("artist") or "NhacCuaTui"
     col_artist = page_info.get("artist") or songs[0].get("artist") or "Various Artists"
 
-    # Unduh variasi gambar resolusi tertinggi
     full_cover = ""
     thumb_cover = ""
     raw_cover = page_info.get("cover") or songs[0].get("cover") or ""
@@ -766,7 +760,6 @@ async def start_nhaccuatui(link: str, user: dict):
     album_meta["date"] = page_info.get("date", "")
     album_meta["explicit"] = False
 
-    # Kirim Art Poster menggunakan resolusi penuh asli
     if full_cover:
         album_meta["poster_msg"] = await post_art_poster(user, album_meta)
 
@@ -793,7 +786,6 @@ async def start_nhaccuatui(link: str, user: dict):
     album_meta["tracks"] = valid_tracks
     album_meta["albums"] = [{"tracks": valid_tracks}]
 
-    # Berikan thumbnail khusus (320x320) agar Telegram Bot API dapat merender ikon arsip ZIP
     if thumb_cover and os.path.exists(thumb_cover):
         album_meta["cover"] = thumb_cover
 
