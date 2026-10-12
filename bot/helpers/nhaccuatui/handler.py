@@ -672,19 +672,28 @@ async def download_single_nct_track(
     track_meta["cpr"] = track_meta["copyright"]
     track_meta["isrc"] = song.get("isrc") or collection_meta.get("isrc") or ""
 
-    if collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
+    # --- PENANGANAN COVER MASING-MASING LAGU ---
+    # Album: gunakan cover album bersama.
+    # Chart / Single: unduh cover unik masing-masing lagu di subfolder khusus agar tidak saling menimpa.
+    is_album = collection_meta.get("type") == "album"
+
+    if is_album and collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
         track_meta["cover"] = collection_meta["cover"]
         track_meta["thumbnail"] = collection_meta.get("thumbnail") or collection_meta["cover"]
     else:
         raw_song_cover = song.get("cover") or collection_meta.get("raw_cover") or ""
+        track_cover_folder = os.path.join(track_meta["tempfolder"], f"track_{index}")
         if raw_song_cover:
             upgraded = await upgrade_cover_url(raw_song_cover)
             f_cov, t_cov = await save_optimized_cover(
-                upgraded, track_meta["tempfolder"],
+                upgraded, track_cover_folder,
                 title=track_meta["title"], artist=track_meta["artist"]
             )
-            track_meta["cover"] = f_cov
-            track_meta["thumbnail"] = t_cov
+            track_meta["cover"] = f_cov or collection_meta.get("cover", "")
+            track_meta["thumbnail"] = t_cov or collection_meta.get("thumbnail", "")
+        else:
+            track_meta["cover"] = collection_meta.get("cover", "")
+            track_meta["thumbnail"] = collection_meta.get("thumbnail", "")
 
     safe_title = sanitize_filename(song["title"])
     safe_artist = sanitize_filename(track_meta["artist"])
@@ -763,6 +772,7 @@ async def start_nhaccuatui(link: str, user: dict):
             "date": page_info.get("date", ""),
             "release_date": page_info.get("release_date", ""),
             "tempfolder": temp_folder,
+            "type": "track",
         }
         track_meta = await download_single_nct_track(
             song, 1, 1, folderpath, col_meta, user, is_single=True
@@ -781,7 +791,6 @@ async def start_nhaccuatui(link: str, user: dict):
     )
     os.makedirs(folderpath, exist_ok=True)
 
-    # Sertakan cover ke folder agar masuk ke dalam file ZIP
     if full_cover and os.path.exists(full_cover):
         album_cover_dest = os.path.join(folderpath, "cover.jpg")
         shutil.copy2(full_cover, album_cover_dest)
