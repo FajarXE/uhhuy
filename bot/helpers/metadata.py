@@ -998,13 +998,31 @@ async def get_audio_extension(path):
 
 async def get_cover_session(used_proxy=None):
     """
-    Mengambil atau membuat aiohttp.ClientSession global.
-    Karena aiohttp mengikat tipe Connector per-Session, 
-    kita memisahkan Session berdasarkan proxy yang dipakai.
+    Mengambil atau membuat aiohttp.ClientSession global dengan mekanisme 
+    pembersihan (sweeper) otomatis untuk mencegah memory leak.
     """
     global _COVER_SESSIONS
+    current_time = time.time()
     
-    if used_proxy not in _COVER_SESSIONS or _COVER_SESSIONS[used_proxy].closed:
+    # --- 1. LOGIKA SWEEPER (PEMBERSIHAN SESI MENGANGGUR) ---
+    # Cari sesi proksi yang tidak digunakan selama lebih dari 10 menit (600 detik)
+    stale_proxies = [
+        proxy for proxy, data in _COVER_SESSIONS.items() 
+        if current_time - data.get('last_used', 0) > 600
+    ]
+    
+    # Hapus dan tutup sesi yang sudah basi agar RAM kembali lega
+    for proxy in stale_proxies:
+        old_data = _COVER_SESSIONS.pop(proxy, None)
+        if old_data and old_data.get('session') and not old_data['session'].closed:
+            # Tutup sesi lama di background agar tidak memblokir alur pengunduhan saat ini
+            asyncio.create_task(old_data['session'].close())
+    # -------------------------------------------------------
+
+    # --- 2. PEMBUATAN ATAU PENGAMBILAN SESI AKTIF ---
+    session_data = _COVER_SESSIONS.get(used_proxy)
+    
+    if not session_data or session_data['session'].closed:
         from bot.helpers.proxy_manager import proxy_manager
         connector = proxy_manager.get_aiohttp_connector(used_proxy)
         
@@ -1016,11 +1034,14 @@ async def get_cover_session(used_proxy=None):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        # Simpan ke cache memory
-        _COVER_SESSIONS[used_proxy] = aiohttp.ClientSession(headers=headers, connector=connector)
-        
-    return _COVER_SESSIONS[used_proxy]
-# ----------------------------------------------------
+        # Buat sesi baru dan simpan bersama stempel waktu saat ini
+        new_session = aiohttp.ClientSession(headers=headers, connector=connector)
+        _COVER_SESSIONS[used_proxy] = {'session': new_session, 'last_used': current_time}
+        return new_session
+    else:
+        # Jika sesi masih ada dan aktif, perbarui stempel waktunya
+        session_data['last_used'] = current_time
+        return session_data['session']
 
 async def _download_cover_with_headers(url: str, destination: str, proxy: str = None):
     if not url: return
@@ -1119,7 +1140,9 @@ async def close_all_cover_sessions():
     from bot.logger import LOGGER
     
     closed_count = 0
-    for proxy, session in list(_COVER_SESSIONS.items()):
+    # Sesuaikan iterasi karena nilai dictionary sekarang berupa dict {'session': ..., 'last_used': ...}
+    for proxy, data in list(_COVER_SESSIONS.items()):
+        session = data.get('session')
         if session and not session.closed:
             await session.close()
             closed_count += 1
