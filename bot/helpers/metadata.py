@@ -240,14 +240,49 @@ async def set_metadata(metadata:dict, user_id: int = None):
             audio_path
         ]
         import asyncio
+        import os
+        from bot.logger import LOGGER
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5.0)
+        
         if process.returncode == 0:
             true_codec = stdout.decode().strip().lower()
+            
+            # --- [PERBAIKAN] KOREKSI EKSTENSI FILE (FALLBACK MUTAGEN) ---
+            ext = os.path.splitext(audio_path)[1].lower()
+            expected_ext = ext
+            
+            if true_codec == 'flac' and ext != '.flac':
+                expected_ext = '.flac'
+            elif true_codec in ['alac', 'aac'] and ext not in ['.m4a', '.mp4', '.m4b']:
+                expected_ext = '.m4a'
+            elif 'pcm' in true_codec and ext not in ['.wav', '.aiff', '.aif']:
+                expected_ext = '.wav'
+            elif true_codec == 'mp3' and ext != '.mp3':
+                expected_ext = '.mp3'
+            elif true_codec == 'vorbis' and ext != '.ogg':
+                expected_ext = '.ogg'
+            elif true_codec == 'opus' and ext != '.opus':
+                expected_ext = '.opus'
+                
+            # Jika ditemukan ketidaksesuaian parah, rename file sebelum diproses Mutagen
+            if expected_ext != ext:
+                new_path = os.path.splitext(audio_path)[0] + expected_ext
+                try:
+                    os.rename(audio_path, new_path)
+                    LOGGER.info(f"Koreksi Ekstensi Mutagen: {os.path.basename(audio_path)} -> {expected_ext} (Codec Asli: {true_codec})")
+                    audio_path = new_path
+                    metadata['filepath'] = new_path
+                    metadata['extension'] = expected_ext.replace('.', '')
+                except Exception as rename_err:
+                    LOGGER.warning(f"Gagal melakukan koreksi nama file {audio_path}: {rename_err}")
+            # ------------------------------------------------------------
+            
     except Exception as e:
         from bot.logger import LOGGER
         LOGGER.warning(f"Gagal menjalankan ffprobe asinkron pada {audio_path}: {e}")
@@ -313,40 +348,29 @@ async def set_metadata(metadata:dict, user_id: int = None):
     if lyrics_manager and user_id:
         from bot.settings import bot_set
         
-        # [PERBAIKAN 1]: Baca ID sebagai integer DAN string agar tidak pernah kosong
         user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
         
-        # Cek status masing-masing tombol
         embed_lyrics = user_settings.get('lyrics_status', False)
         send_file_lyrics = user_settings.get('send_lyrics_file', False)
         
-        # Lakukan pencarian lirik JIKA minimal salah satu tombol aktif
         if embed_lyrics or send_file_lyrics:
             try:
-                # [PERBAIKAN 2]: HACK AMAN
-                # Simpan status asli, lalu paksa jadi True sesaat agar lyrics_manager 
-                # tidak membatalkan pencarian jika lyrics_status sedang OFF.
                 original_status = user_settings.get('lyrics_status')
                 user_settings['lyrics_status'] = True 
                 
-                # Cari lirik
                 lyrics_text = await lyrics_manager.fetch_lyrics(metadata, user_id)
                 
-                # Kembalikan status tombol ke bentuk aslinya
                 if original_status is not None:
                     user_settings['lyrics_status'] = original_status
                 else:
                     user_settings['lyrics_status'] = False
 
-                # Jika lirik berhasil didapatkan:
                 if lyrics_text: 
-                    # 1. Masukkan lirik ke dalam metadata audio (Hanya jika Status: ON)
                     if embed_lyrics:
                         metadata['lyrics'] = lyrics_text
                     else:
-                        metadata['lyrics'] = "" # Kosongkan agar tidak tertanam di lagu
+                        metadata['lyrics'] = "" 
                         
-                    # 2. Buat file lirik terpisah (Hanya jika Send Lyrics File: ON)
                     if send_file_lyrics:
                         ext = ".lrc"
                         base_path = os.path.splitext(audio_path)[0]
@@ -362,7 +386,7 @@ async def set_metadata(metadata:dict, user_id: int = None):
                 from bot.logger import LOGGER
                 LOGGER.exception("Error fetching lyrics:")
 
-    # --- 3. ROUTING KE HANDLER SPESIFIK ---
+    # --- 4. ROUTING KE HANDLER SPESIFIK ---
     try:
         if isinstance(handle, (OggVorbis, OggOpus)):
             await set_vorbis(metadata, handle, dur_ms)
