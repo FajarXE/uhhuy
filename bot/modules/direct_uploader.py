@@ -45,8 +45,8 @@ class ProgressFileWrapper(io.IOBase):
         if chunk:
             self.bytes_read += len(chunk)
             now = time.time()
-            # Tembakkan radar progres setiap 1.5 detik agar Telegram tidak FloodWait
-            if self.details and (now - self.last_update > 1.5 or self.bytes_read == self.total_size):
+            # Tembakkan radar progres setiap 10.0 detik agar Telegram tidak FloodWait
+            if self.details and (now - self.last_update > 10.0 or self.bytes_read == self.total_size):
                 self.last_update = now
                 from bot.helpers.ui_manager import progress_message
                 
