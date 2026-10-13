@@ -76,7 +76,6 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
         except Exception:
             pass
 
-    # Format DD/MM/YYYY atau DD-MM-YYYY
     m_dmy = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', s)
     if m_dmy:
         day = m_dmy.group(1).zfill(2)
@@ -84,7 +83,6 @@ def parse_nct_date(raw_val) -> tuple[str, str]:
         year = m_dmy.group(3)
         return f"{year}-{month}-{day}", year
 
-    # Format YYYY-MM-DD atau YYYY/MM/DD
     m_ymd = re.search(r'(\d{4})[-/](\d{2})[-/](\d{2})', s)
     if m_ymd:
         return f"{m_ymd.group(1)}-{m_ymd.group(2)}-{m_ymd.group(3)}", m_ymd.group(1)
@@ -295,6 +293,7 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
     name = (song_data.get("name") or song_data.get("title") or "").strip()
     if not name:
         return None
+        
     stream = best_stream(song_data.get("streamURL", []), quality_pref)
     if not stream:
         return None
@@ -303,7 +302,6 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
     if not audio_url:
         return None
 
-    # Tangkap singerName di samping artistName
     artist_name = (
         song_data.get("artistName")
         or song_data.get("singerName")
@@ -332,7 +330,6 @@ def parse_song(song_data: dict, quality_pref: str) -> dict | None:
         or ""
     )
 
-    # Validasi album: abaikan tipe boolean True/False
     raw_album = song_data.get("album")
     album_name = (
         song_data.get("albumName")
@@ -381,6 +378,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
 
         const collections = [];
         const singleSongs = [];
+        const songMap = {};
         const seen = new Set();
 
         function search(obj, depth = 0, path = "") {
@@ -394,21 +392,25 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
 
             if (obj.streamURL && (obj.name || obj.title)) {
                 singleSongs.push(obj);
+                const sKey = String(obj.key || obj.id || '');
+                if (sKey) songMap[sKey] = obj;
             }
 
             const list = obj.listSong || obj.songs || obj.songList || obj.items;
             if (Array.isArray(list) && list.length > 0) {
                 const sample = list[0];
                 if (sample && (sample.name || sample.title || sample.streamURL || sample.key)) {
+                    const hasStreams = list.some(s => s && s.streamURL && Array.isArray(s.streamURL) && s.streamURL.length > 0);
                     collections.push({
                         key: String(obj.key || obj.id || obj.albumKey || obj.chartKey || ''),
                         name: String(obj.name || obj.title || obj.chartName || ''),
-                        artistName: String(obj.artistName || ''),
+                        artistName: String(obj.artistName || obj.singerName || ''),
                         image: obj.coverImage || obj.image || obj.avatar || obj.thumbURL || obj.bgImage || '',
                         date: obj.dateCreate || obj.dateRelease || obj.publishDate || '',
                         genre: obj.genreName || obj.genreTitle || (obj.genre && obj.genre.name) || obj.categoryName || '',
                         total: obj.numOfItems || obj.total || obj.totalSong || list.length,
                         listSong: list,
+                        hasStreams: hasStreams,
                         path: path
                     });
                 }
@@ -435,6 +437,9 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
                 let score = 0;
                 const colName = col.name.toLowerCase();
                 const colPath = col.path.toLowerCase();
+
+                // Bonus sangat besar untuk koleksi yang benar-benar membawa streamURL
+                if (col.hasStreams) score += 1000;
 
                 for (const neg of negWords) {
                     if (colName.includes(neg) || colPath.includes(neg)) score -= 200;
@@ -471,7 +476,8 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
             pageImage,
             pageGenre,
             bestCol,
-            singleSongs
+            singleSongs,
+            songMap
         };
     }""", {"urlKey": url_key, "urlType": url_type})
 
@@ -486,6 +492,7 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
     }
 
     best_col = extracted_payload.get("bestCol")
+    song_map = extracted_payload.get("songMap", {})
     songs = []
 
     if url_type == "song":
@@ -506,7 +513,6 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
     elif url_type in ("album", "chart") and best_col:
         col_name = best_col.get("name", "").strip()
 
-        # Jangan gunakan nama koleksi jika hanya berupa tanggal (misal 12/10/2026)
         is_just_date = bool(re.match(r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$', col_name))
         if col_name and not is_just_date:
             page_info["title"] = col_name
@@ -526,6 +532,15 @@ async def extract_nuxt_data(page: Page, url: str, quality_pref: str) -> tuple[li
         page_info["date"] = year_date
 
         for raw_s in best_col.get("listSong", []):
+            # Jika objek track di listSong tidak memiliki streamURL, satukan dengan data dari songMap
+            s_key = str(raw_s.get("key") or raw_s.get("id") or "")
+            if not raw_s.get("streamURL") and s_key in song_map:
+                merged = copy.deepcopy(song_map[s_key])
+                for k, v in raw_s.items():
+                    if v and k not in merged:
+                        merged[k] = v
+                raw_s = merged
+
             s = parse_song(raw_s, quality_pref)
             if s:
                 if not s.get("genre") and page_info.get("genre"):
@@ -682,7 +697,6 @@ async def download_single_nct_track(
     track_meta["artist"] = song.get("artist") or collection_meta.get("artist") or "Unknown Artist"
     track_meta["albumartist"] = collection_meta.get("artist") or track_meta["artist"]
     
-    # Pengaturan Album: jika chart atau album kosong/boolean, gunakan judul lagu (Single)
     is_chart = collection_meta.get("type") == "playlist"
     song_album = song.get("album")
     if not song_album or str(song_album).strip().lower() in ("true", "false"):
@@ -726,7 +740,6 @@ async def download_single_nct_track(
     track_meta["cpr"] = track_meta["copyright"]
     track_meta["isrc"] = song.get("isrc") or collection_meta.get("isrc") or ""
 
-    # Cover Handling: Album memakai cover album bersama, Chart memakai cover asli masing-masing lagu
     is_album = collection_meta.get("type") == "album"
 
     if is_album and collection_meta.get("cover") and os.path.exists(str(collection_meta["cover"])):
