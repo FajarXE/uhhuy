@@ -215,14 +215,22 @@ async def dedicated_ui_worker():
     from bot.helpers.message import edit_message
     
     last_memory_sweep = time.time()
+    
+    # Cache untuk melacak perubahan persentase dan waktu update per chat
+    last_percentages = {} 
+    last_force_updates = {}
 
     while True:
-        await asyncio.sleep(10.0)
+        # --- 1. DYNAMIC SLEEP (ANTI-FLOODWAIT) ---
+        # Jika ada lebih dari 20 pengguna membuka panel secara bersamaan,
+        # perlebar interval update menjadi 20 detik.
+        ui_count = len(GLOBAL_UI_MSG)
+        sleep_interval = 20.0 if ui_count > 20 else 10.0
+        await asyncio.sleep(sleep_interval)
         
         now = time.time()
         
         # --- [GARBAGE COLLECTOR OTONOM] ---
-        # Membersihkan RAM setiap 60 detik tanpa menunggu interaksi pengguna
         if now - last_memory_sweep > 60:
             last_memory_sweep = now
             async with GLOBAL_STATE_LOCK:
@@ -236,12 +244,14 @@ async def dedicated_ui_worker():
                 
                 for k in stale_tasks:
                     GLOBAL_TASKS.pop(k, None)
-                    GLOBAL_CANCEL_DICT.discard(k) # Bersihkan juga ID Cancel agar RAM tidak bocor
+                    GLOBAL_CANCEL_DICT.discard(k)
                 
-                # Bersihkan memori paginasi (halaman) yang ditinggalkan
+                # Bersihkan RAM untuk Radar yang sudah ditutup
                 stale_pages = [cid for cid in GLOBAL_UI_PAGES if cid not in GLOBAL_UI_MSG]
                 for cid in stale_pages:
                     GLOBAL_UI_PAGES.pop(cid, None)
+                    last_percentages.pop(cid, None)
+                    last_force_updates.pop(cid, None)
         # ----------------------------------
 
         if not GLOBAL_UI_MSG: continue
@@ -250,8 +260,47 @@ async def dedicated_ui_worker():
         for chat_id, msg in targets:
             try:
                 page = GLOBAL_UI_PAGES.get(chat_id, 1)
-                g_text, g_markup = await get_status_text(page=page)
                 
+                # --- 2. SMART UPDATE LOGIC ---
+                current_pcts = {}
+                async with GLOBAL_STATE_LOCK:
+                    for task_id, t in GLOBAL_TASKS.items():
+                        # Ekstrak angka persentase murni dari string (Contoh: "45.20%" -> 45.20)
+                        pct_str = str(t.get('percentage', '0%')).replace('%', '')
+                        try:
+                            current_pcts[task_id] = float(pct_str)
+                        except ValueError:
+                            current_pcts[task_id] = 0.0
+
+                should_update = False
+                prev_pcts = last_percentages.get(chat_id, {})
+                
+                # Skenario A: Ada task baru masuk atau task lama selesai
+                if set(current_pcts.keys()) != set(prev_pcts.keys()):
+                    should_update = True
+                else:
+                    # Skenario B: Cek apakah ada persentase task yang bergeser >= 1.0%
+                    for tid, pct in current_pcts.items():
+                        if abs(pct - prev_pcts.get(tid, 0.0)) >= 1.0:
+                            should_update = True
+                            break
+                
+                # Skenario C: Force refresh setiap 60 detik (agar speed & uptime tetap sinkron)
+                if now - last_force_updates.get(chat_id, 0) > 60:
+                    should_update = True
+
+                # Jika belum berubah 1% dan belum 60 detik, lewati pengeditan pesan ini!
+                if not should_update:
+                    continue
+
+                # --- 3. EKSEKUSI UPDATE UI ---
+                g_text, g_markup = await get_status_text(page=page)
                 await edit_message(msg, g_text, g_markup, antiflood=False)
-                await asyncio.sleep(0.15) # Rem API Telegram
-            except Exception: pass
+                
+                # Simpan state terbaru ke memori untuk iterasi berikutnya
+                last_percentages[chat_id] = current_pcts
+                last_force_updates[chat_id] = now
+                
+                await asyncio.sleep(0.15) # Rem API Telegram internal antar-pesan
+            except Exception: 
+                pass
