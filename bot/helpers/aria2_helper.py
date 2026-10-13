@@ -181,7 +181,35 @@ async def aria2_download(url, filepath, details=None):
                     await proxy_manager.report_fail(used_proxy)
                 return False
                 
-            await asyncio.sleep(2.0)
+            # --- [ADAPTIVE POLLING LOGIC] ---
+            sleep_interval = 2.0  # Interval bawaan
+            
+            if total_length > 0:
+                percentage = (completed_length / total_length) * 100
+                
+                # Jika file raksasa (> 500 MB)
+                if total_length > 500 * 1024 * 1024:
+                    if percentage < 95:
+                        sleep_interval = 5.0  # Santai di pertengahan
+                    else:
+                        sleep_interval = 1.5  # Kebut saat hampir selesai
+                        
+                # Jika file sedang (> 100 MB)
+                elif total_length > 100 * 1024 * 1024:
+                    if percentage < 95:
+                        sleep_interval = 3.5
+                    else:
+                        sleep_interval = 1.5
+                        
+                # Jika file kecil (< 100 MB)
+                else:
+                    if percentage > 90:
+                        sleep_interval = 1.0  # Sangat agresif di akhir agar cepat
+                    else:
+                        sleep_interval = 2.0
+
+            await asyncio.sleep(sleep_interval)
+            # --------------------------------
 
     except Exception as e:
         LOGGER.error(f"Aria2 RPC Exception: {e}")
