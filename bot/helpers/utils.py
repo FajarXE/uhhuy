@@ -331,13 +331,26 @@ async def split_zip_system(folderpath):
             # --- BUNUH ZOMBIE PROCESS ZIP (PROTEKSI GANDA) ---
             try:
                 if process.returncode is None:
-                    process.terminate()          # Percobaan penghentian halus (SIGTERM)
-                    await asyncio.sleep(0.5)     # Beri jeda OS merespons
+                    process.terminate()          
+                    await asyncio.sleep(0.5)     
                     if process.returncode is None:
-                        process.kill()           # Penghentian paksa absolut (SIGKILL)
+                        process.kill()           
                         LOGGER.warning("Proses ZIP dipaksa mati dengan SIGKILL (Zombie terdeteksi).")
             except Exception as kill_err:
                 LOGGER.error(f"Gagal menghentikan paksa proses zip: {kill_err}")
+                
+            # --- [PERBAIKAN] BERSIHKAN FILE YATIM (RESIDU PARTISI ZIP) ---
+            try:
+                for f in os.listdir(parent_dir):
+                    if f == f"{base_name}.zip" or (f.startswith(f"{base_name}.z") and f.replace(f"{base_name}.z", "").isdigit()):
+                        try:
+                            os.remove(os.path.join(parent_dir, f))
+                            LOGGER.info(f"Pembersihan residu batal zip: {f}")
+                        except Exception:
+                            pass
+            except Exception as e:
+                LOGGER.debug(f"Gagal memindai folder saat pembersihan zip: {e}")
+            # -------------------------------------------------------------
             raise
         
         if process.returncode == 0:
@@ -386,13 +399,22 @@ async def create_zip_system(folderpath):
             # --- BUNUH ZOMBIE PROCESS ZIP (PROTEKSI GANDA) ---
             try:
                 if process.returncode is None:
-                    process.terminate()          # Percobaan penghentian halus (SIGTERM)
-                    await asyncio.sleep(0.5)     # Beri jeda OS merespons
+                    process.terminate()          
+                    await asyncio.sleep(0.5)     
                     if process.returncode is None:
-                        process.kill()           # Penghentian paksa absolut (SIGKILL)
+                        process.kill()           
                         LOGGER.warning("Proses ZIP dipaksa mati dengan SIGKILL (Zombie terdeteksi).")
             except Exception as kill_err:
                 LOGGER.error(f"Gagal menghentikan paksa proses zip: {kill_err}")
+                
+            # --- [PERBAIKAN] BERSIHKAN FILE YATIM (RESIDU ZIP) ---
+            try:
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                    LOGGER.info(f"Pembersihan residu batal zip: {zip_path}")
+            except Exception:
+                pass
+            # -----------------------------------------------------
             raise
         
         if process.returncode == 0: return zip_path
