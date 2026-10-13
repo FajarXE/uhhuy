@@ -217,7 +217,7 @@ async def dedicated_ui_worker():
     last_memory_sweep = time.time()
 
     while True:
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(10.0)
         
         now = time.time()
         
