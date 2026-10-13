@@ -84,14 +84,12 @@ class MongoDB:
         if not query:
             query = {}
             
-        # Motor menggunakan to_list() untuk mengekstrak seluruh data cursor secara efisien
-        data_list = await self.client.music.find(query).to_list(length=None)
-        data_dict = {}
+        # Menggunakan find_one() untuk langsung mengambil 1 dokumen (menghemat penggunaan RAM)
+        data_dict = await self.client.music.find_one(query) or {}
         
-        for data in data_list:
-            data_dict = data
         if "_id" in data_dict:
             data_dict.pop("_id")
+            
         return data_dict
 
     async def save_user_settings(self, user_id: int=0, data: dict=None) -> None:
