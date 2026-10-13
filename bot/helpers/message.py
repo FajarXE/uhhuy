@@ -193,7 +193,7 @@ async def standalone_local_progress(current, total, p_state: dict, user, text, t
     if not p_state['msg']: return
 
     now = time.time()
-    if now - p_state['last_update_time'] > 1.5 or current == total:
+    if now - p_state['last_update_time'] > 10.0 or current == total:
         diff = max(now - p_state['start_time'], 1)
         speed = current / diff
         percentage = (current / total) * 100 if total > 0 else 0
