@@ -73,6 +73,21 @@ try:
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor genie_manager.")
     genie_manager = None
+try:
+    from ..helpers.amazon.manager import amazon_manager
+except ImportError:
+    LOGGER.warning("ProviderSettings: Gagal mengimpor amazon_manager.")
+    amazon_manager = None
+try:
+    from ..helpers.highresaudio.manager import highresaudio_manager
+except ImportError:
+    LOGGER.warning("ProviderSettings: Gagal mengimpor highresaudio_manager.")
+    highresaudio_manager = None
+try:
+    from ..helpers.audiomack.manager import audiomack_manager
+except ImportError:
+    LOGGER.warning("ProviderSettings: Gagal mengimpor audiomack_manager.")
+    audiomack_manager = None
 
 
 @Client.on_callback_query(filters.regex(pattern=r"^providerPanel"))
@@ -922,3 +937,38 @@ async def genie_quality_cb(c, cb:CallbackQuery):
         genie_manager.quality = to_set
         await database.set_variable('GENIE_QUALITY', to_set)
         await genie_cb(c, cb)
+
+
+#----------------
+# HIGHRESAUDIO & AUDIOMACK (GLOBAL ADMIN)
+#----------------
+@Client.on_callback_query(filters.regex(pattern=r"^hraP"))
+async def highresaudio_cb(c, cb: CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        if not highresaudio_manager or not highresaudio_manager.clients:
+            return await edit_message(cb.message, "Layanan HIGHRESAUDIO tidak aktif.")
+        await edit_message(cb.message, "**HIGHRESAUDIO PANEL (GLOBAL)**\n\nKualitas Default: FLAC (Lossless)", markup=hra_button())
+
+@Client.on_callback_query(filters.regex(pattern=r"^amackP"))
+async def audiomack_cb(c, cb: CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        if not audiomack_manager:
+            return await edit_message(cb.message, "Layanan Audiomack tidak aktif.")
+        quality = {"HQ": "HQ (Default Server)"}
+        current = getattr(audiomack_manager, 'quality', 'HQ')
+        if current in quality:
+            quality[current] += '✅'
+        await edit_message(cb.message, "**AUDIOMACK PANEL (GLOBAL)**\n\nPilih kualitas default bot:", markup=amack_button(quality))
+
+@Client.on_callback_query(filters.regex(pattern=r"^amackQ_"))
+async def audiomack_quality_cb(c, cb: CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        to_set = cb.data.split('_')[1]
+        if audiomack_manager:
+            audiomack_manager.quality = to_set
+            await database.set_variable('AUDIOMACK_QUALITY', to_set)
+        await audiomack_cb(c, cb)
+
+@Client.on_callback_query(filters.regex(pattern=r"^ignore$"))
+async def ignore_cb(c, cb: CallbackQuery):
+    await cb.answer()
