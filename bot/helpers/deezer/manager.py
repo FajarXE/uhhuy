@@ -194,5 +194,10 @@ class DeezerLoginManager:
             for c in clients: await c.close()
         self.clients = []
         self.user_clients = {}
+        try:
+            from .metadata import close_meta_session
+            await close_meta_session()
+        except Exception:
+            pass
 
 deezer_manager = DeezerLoginManager(Config.DEEZER_ACCOUNTS)
