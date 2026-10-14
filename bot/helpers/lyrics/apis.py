@@ -5,19 +5,24 @@ import aiohttp
 import asyncio
 import logging
 import aiolimiter
-from datetime import datetime
 
 LOGGER = logging.getLogger(__name__)
 
-# --- KONTROL RATE LIMIT (ANTI-BAN LYRICS API) ---
+# --- KONTROL RATE LIMIT & SESI HTTP BERSAMA ---
 MX_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 LRC_LIMITER = aiolimiter.AsyncLimiter(10, 5)
-GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5) 
-# ------------------------------------------------
+GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 
-# =======================================================
-# FUNGSI VALIDASI CERDAS UNTUK LRCLIB & GENIUS
-# =======================================================
+_LYRICS_SESSION = None
+
+def get_lyrics_session():
+    global _LYRICS_SESSION
+    if _LYRICS_SESSION is None or _LYRICS_SESSION.closed:
+        connector = aiohttp.TCPConnector(limit=30, keepalive_timeout=30, enable_cleanup_closed=True)
+        _LYRICS_SESSION = aiohttp.ClientSession(connector=connector)
+    return _LYRICS_SESSION
+# ----------------------------------------------
+
 def clean_string(text):
     if not text: return ""
     text = str(text)
@@ -41,7 +46,6 @@ def is_valid_match(t1, t2, a1=None, a2=None):
         if ca1 and ca2:
             return (ca1 in ca2 or ca2 in ca1)
     return True
-# =======================================================
 
 
 class MusixmatchAPI:
@@ -60,8 +64,10 @@ class MusixmatchAPI:
         self.token = None
         self._token_lock = asyncio.Lock()
 
-    async def get_token(self, session):
+    async def get_token(self, session, force_refresh=False):
         async with self._token_lock:
+            if force_refresh:
+                self.token = None
             if self.token:
                 return self.token
                 
@@ -71,7 +77,6 @@ class MusixmatchAPI:
                     async with session.get(self.API_URL + "token.get", params=params, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
                         
-                        # Validasi mendalam untuk Token
                         if isinstance(data, dict):
                             msg = data.get('message')
                             if isinstance(msg, dict):
@@ -92,17 +97,18 @@ class MusixmatchAPI:
         if not title or not artist:
             return None, None
 
-        async with aiohttp.ClientSession() as session:
-            if not self.token:
-                await self.get_token(session)
-                
-            if not self.token:
-                LOGGER.warning(f"Musixmatch: Lewati '{title}' karena gagal mendapatkan token.")
-                return None, None
+        session = get_lyrics_session()
+        if not self.token:
+            await self.get_token(session)
+            
+        if not self.token:
+            LOGGER.warning(f"Musixmatch: Lewati '{title}' karena gagal mendapatkan token.")
+            return None, None
 
-            plain = None
-            synced = None
+        plain = None
+        synced = None
 
+        for attempt in range(2):
             params = {
                 "format": "json",
                 "namespace": "lyrics_richsynched",
@@ -120,19 +126,24 @@ class MusixmatchAPI:
                     async with session.get(self.API_URL + "macro.subtitles.get", params=params, headers=self.headers, timeout=15) as r:
                         data = await r.json(content_type=None)
                         
-                        # 0. Validasi Lapis demi Lapis untuk mencegah List Object Error
                         if not isinstance(data, dict): return None, None
-                        
                         message = data.get("message")
                         if not isinstance(message, dict): return None, None
                         
+                        # [FIX] Cek jika token expired (status 401/403), refresh token lalu ulangi 1x
+                        main_status = message.get("header", {}).get("status_code")
+                        if main_status in (401, 403) and attempt == 0:
+                            LOGGER.info("Musixmatch: Token kedaluwarsa, mengambil token baru...")
+                            await self.get_token(session, force_refresh=True)
+                            if not self.token:
+                                return None, None
+                            continue
+
                         body = message.get("body")
                         if not isinstance(body, dict): return None, None
-                        
                         macro_calls = body.get("macro_calls")
                         if not isinstance(macro_calls, dict): return None, None
                         
-                        # 1. Parsing Plain Lyrics secara aman
                         track_lyrics = macro_calls.get("track.lyrics.get")
                         if isinstance(track_lyrics, dict):
                             tl_msg = track_lyrics.get("message")
@@ -148,7 +159,6 @@ class MusixmatchAPI:
                                         else:
                                             plain = lyrics.get("lyrics_body")
 
-                        # 2. Parsing Synced LRC secara aman
                         track_subs = macro_calls.get("track.subtitles.get")
                         if isinstance(track_subs, dict):
                             ts_msg = track_subs.get("message")
@@ -162,16 +172,17 @@ class MusixmatchAPI:
                                             subtitle = first_sub.get("subtitle")
                                             if isinstance(subtitle, dict):
                                                 synced = subtitle.get("subtitle_body")
+                        break
             except Exception as e:
                 LOGGER.warning(f"Musixmatch Lyrics Error untuk '{title}': {e}")
+                break
 
-            return plain, synced
+        return plain, synced
 
 
 class LRCLibAPI:
     def __init__(self):
         self.base_url = 'https://lrclib.net/api'
-        # Menggunakan User-Agent yang lebih menyerupai browser/aplikasi asli seperti di referensi
         self.headers = {'User-Agent': 'BotMusic/1.0'}
 
     async def _fetch_with_retry(self, session, url, params):
@@ -182,7 +193,6 @@ class LRCLibAPI:
                         if r.status == 200:
                             return await r.json(content_type=None)
                         elif r.status in (429, 503):
-                            # [FIX] Aman dari error ValueError jika header Retry-After bukan angka
                             try:
                                 retry_after = int(r.headers.get('Retry-After', 5))
                             except ValueError:
@@ -190,8 +200,6 @@ class LRCLibAPI:
                             LOGGER.warning(f"LRCLib Rate Limit {r.status}. Retrying in {retry_after}s...")
                             await asyncio.sleep(retry_after)
                             continue
-                        elif r.status == 404:
-                            return None 
                         else:
                             return None
             except Exception as e:
@@ -200,38 +208,28 @@ class LRCLibAPI:
         return None
 
     async def get_lyrics(self, title, artist, album, duration):
-        async with aiohttp.ClientSession() as session:
-            # --- 1. [FIX] SUSUN PARAMETER SECARA DINAMIS (Seperti Referensi) ---
-            params = {'track_name': title, 'artist_name': artist}
-            
-            # Hanya masukkan album jika string-nya tidak kosong
-            if album:
-                params['album_name'] = album
-                
-            # Hanya masukkan durasi jika lebih dari 0 detik (menghindari error default 0 dari manager)
-            if duration and int(duration) > 0:
-                params['duration'] = str(duration)
+        session = get_lyrics_session()
+        params = {'track_name': title, 'artist_name': artist}
+        if album:
+            params['album_name'] = album
+        if duration and int(duration) > 0:
+            params['duration'] = str(duration)
 
-            # --- 2. COBA EXACT MATCH (/get) ---
-            data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
-            if data:
-                return data.get('plainLyrics'), data.get('syncedLyrics')
-            
-            # --- 3. [FIX] COBA SEARCH FALLBACK (/search) ---
-            # Jangan gunakan parameter 'q', gunakan parameter spesifik seperti referensi
-            search_params = {'track_name': title, 'artist_name': artist}
-            data_list = await self._fetch_with_retry(session, f'{self.base_url}/search', search_params)
-            
-            if data_list and isinstance(data_list, list) and len(data_list) > 0:
-                for item in data_list:
-                    res_title = item.get('trackName', '')
-                    res_artist = item.get('artistName', '')
-                    
-                    # Tetap gunakan fungsi validasi Anda untuk memastikan kecocokan
-                    if is_valid_match(title, res_title, artist, res_artist):
-                        return item.get('plainLyrics'), item.get('syncedLyrics')
-            
-            return None, None
+        data = await self._fetch_with_retry(session, f'{self.base_url}/get', params)
+        if data:
+            return data.get('plainLyrics'), data.get('syncedLyrics')
+        
+        search_params = {'track_name': title, 'artist_name': artist}
+        data_list = await self._fetch_with_retry(session, f'{self.base_url}/search', search_params)
+        
+        if data_list and isinstance(data_list, list) and len(data_list) > 0:
+            for item in data_list:
+                res_title = item.get('trackName', '')
+                res_artist = item.get('artistName', '')
+                if is_valid_match(title, res_title, artist, res_artist):
+                    return item.get('plainLyrics'), item.get('syncedLyrics')
+        
+        return None, None
 
 
 class GeniusAPI:
@@ -247,7 +245,6 @@ class GeniusAPI:
         }
 
     async def _fetch_with_retry(self, session, endpoint, params):
-        # Mengadaptasi sistem HTTPAdapter max_retries=10 dari referensi
         for attempt in range(5):
             try:
                 async with GENIUS_LIMITER:
@@ -257,10 +254,8 @@ class GeniusAPI:
                             if data.get('meta', {}).get('status') == 200:
                                 return data.get('response')
                             return None
-                        
-                        # Menangkap status forcelist (429, 500, 502, 503, 504) seperti referensi
                         elif r.status in [429, 500, 502, 503, 504]:
-                            delay = 0.4 * (2 ** attempt) # Backoff factor
+                            delay = 0.4 * (2 ** attempt)
                             LOGGER.warning(f"Genius API {r.status}. Retrying in {delay}s...")
                             await asyncio.sleep(delay)
                             continue
@@ -272,35 +267,33 @@ class GeniusAPI:
         return None
 
     async def get_lyrics(self, title, artist, album, duration):
-        async with aiohttp.ClientSession() as session:
-            track_id = None
-            
-            # 1. Search Track (Mengikuti kueri pencarian dari interface_2.py)
-            search_query = f"{artist} {title}"
-            response = await self._fetch_with_retry(session, 'search', {'q': search_query})
-            
-            if response and 'hits' in response:
-                for hit in response['hits']:
-                    result = hit.get('result', {})
-                    res_title = result.get('title', '')
-                    res_title_feat = result.get('title_with_featured', '')
-                    res_artist = result.get('artist_names', '')
-                    
-                    if is_valid_match(title, res_title, artist, res_artist) or \
-                       is_valid_match(title, res_title_feat, artist, res_artist):
-                        track_id = result.get('id')
-                        break
-                        
-            if not track_id:
-                return None, None
+        session = get_lyrics_session()
+        track_id = None
+        
+        search_query = f"{artist} {title}"
+        response = await self._fetch_with_retry(session, 'search', {'q': search_query})
+        
+        if response and 'hits' in response:
+            for hit in response['hits']:
+                result = hit.get('result', {})
+                res_title = result.get('title', '')
+                res_title_feat = result.get('title_with_featured', '')
+                res_artist = result.get('artist_names', '')
                 
-            # 2. Get Lyrics (Mengikuti endpoint songs/{id} dari genius_api.py)
-            song_data = await self._fetch_with_retry(session, f'songs/{track_id}', {'text_format': 'plain'})
-            
-            if song_data and 'song' in song_data:
-                lyrics_data = song_data['song'].get('lyrics')
-                if lyrics_data:
-                    plain_lyrics = lyrics_data.get('plain')
-                    return plain_lyrics, None
-            
+                if is_valid_match(title, res_title, artist, res_artist) or \
+                   is_valid_match(title, res_title_feat, artist, res_artist):
+                    track_id = result.get('id')
+                    break
+                    
+        if not track_id:
             return None, None
+            
+        song_data = await self._fetch_with_retry(session, f'songs/{track_id}', {'text_format': 'plain'})
+        
+        if song_data and 'song' in song_data:
+            lyrics_data = song_data['song'].get('lyrics')
+            if lyrics_data:
+                plain_lyrics = lyrics_data.get('plain')
+                return plain_lyrics, None
+        
+        return None, None
