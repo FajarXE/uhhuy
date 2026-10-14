@@ -137,9 +137,9 @@ async def periodic_garbage_collector():
                     continue
                     
                 try:
-                    # Ambil waktu modifikasi terakhir file/folder
-                    mtime = os.path.getmtime(file_path)
-                    age_seconds = now - mtime
+                    # [FIX] Gunakan waktu terbaru antara mtime dan ctime agar file baru ber-timestamp lawas tidak terhapus
+                    last_active_time = max(os.path.getmtime(file_path), os.path.getctime(file_path))
+                    age_seconds = now - last_active_time
                     
                     # Jika umur melampaui 24 jam (86400 detik)
                     if age_seconds > 86400:
