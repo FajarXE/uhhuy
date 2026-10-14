@@ -1358,8 +1358,7 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
 <blockquote>
 <b>📦 ZIP SETTINGS</b>
 PLAYLIST : {p_zip} | ALBUM : {a_zip}
-ARTIST : {ar_zip} | POSTER : {po_zip}
-VIDEO : {v_zip}
+POSTER : {po_zip} | VIDEO : {v_zip}
 
 <b>☁️ UPLOAD MODE: {upload_mode}</b>
 Gofile: {t_gf} | Buzz: {t_bh}
