@@ -406,4 +406,9 @@ if __name__ == "__main__":
         logging.critical(f"Main: ERROR FATAL UTAMA: {e}")
         traceback.print_exc()
     finally:
+        # [FIX] Pastikan seluruh sesi aiohttp (seperti Aria2) ditutup meskipun terjadi crash saat startup
+        try:
+            loop.run_until_complete(shutdown_all_services())
+        except Exception:
+            pass
         logging.info("Main: Selesai.")
