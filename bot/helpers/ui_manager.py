@@ -204,7 +204,7 @@ async def progress_message(done, total, details):
             'speed': speed_str, 'machine': machine, 'mode': dest_mode,
             'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
             'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl,
-            'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0,
+            'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0, 'owner_id': details.get('owner_id') or (details['msg'].from_user.id if details.get('msg') and hasattr(details['msg'], 'from_user') and details['msg'].from_user else 0),
             'timestamp': now
         })
     # ------------------------------------------------
