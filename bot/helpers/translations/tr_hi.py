@@ -1,4 +1,6 @@
-class HI(object):
+from .tr_en import EN
+
+class HI(EN):
     __language__ = 'hi'
 #----------------
 #
