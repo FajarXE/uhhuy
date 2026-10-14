@@ -8,7 +8,6 @@ mutagen
 pathvalidate
 Pillow
 psutil
-psycopg2-binary
 aiohttp-socks
 pycryptodomex
 git+https://github.com/KurimuzonAkuma/pyrogram
