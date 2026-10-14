@@ -1,10 +1,10 @@
-# --- PERBAIKAN DI SINI ---
-# Mendefinisikan dictionary global agar bisa diimpor oleh file lain
-BOT_QOBUZ_CLIENTS = {}
-# --- BATAS PERBAIKAN ---
+# [FILE: bot/__init__.py]
 
+import subprocess
+import os
 from config import Config
-import subprocess, os
+
+BOT_QOBUZ_CLIENTS = {}
 
 bot = Config.BOT_USERNAME
 
@@ -13,8 +13,16 @@ plugins = dict(
 )
 
 PORT = int(os.getenv("PORT", "0"))
-# [FIX] Tambahkan 'exec' agar subprocess bisa dibunuh dengan tuntas oleh .terminate()
-gunicorn_process = subprocess.Popen(f"exec gunicorn server:app --bind 0.0.0.0:{PORT} --threads 4", shell=True)
+gunicorn_process = None
+
+def start_gunicorn():
+    global gunicorn_process
+    if PORT > 0 and gunicorn_process is None:
+        gunicorn_process = subprocess.Popen(
+            f"exec gunicorn server:app --bind 0.0.0.0:{PORT} --threads 4",
+            shell=True
+        )
+    return gunicorn_process
 
 class CMD(object):
     START = ["start"]
