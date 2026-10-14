@@ -77,7 +77,8 @@ class Config:
 #--------------------
     WORK_DIR = getenv("WORK_DIR", "./bot/")
     DOWNLOADS_FOLDER = getenv("DOWNLOADS_FOLDER", "DOWNLOADS")
-    DOWNLOAD_BASE_DIR = WORK_DIR + DOWNLOADS_FOLDER
+    # [FIX] Gunakan os.path.join agar aman meskipun WORK_DIR tidak diakhiri '/'
+    DOWNLOAD_BASE_DIR = os.path.join(WORK_DIR, DOWNLOADS_FOLDER)
     LOCAL_STORAGE = getenv("DOWNLOAD_BASE_DIR", DOWNLOAD_BASE_DIR) 
 #--------------------
 
