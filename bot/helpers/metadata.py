@@ -33,6 +33,8 @@ from bot.logger import LOGGER
 COVER_LOCKS = {}
 COVER_LOCK_WAITERS = {}
 _COVER_SESSIONS = {}
+_LYRICS_ORIGINAL_STATE = {}
+_LYRICS_ACTIVE_COUNT = {}
 
 class SafeTempFile:
     """Wrapper pelindung untuk mencegah error deepcopy pada objek file OS."""
@@ -345,26 +347,24 @@ async def set_metadata(metadata:dict, user_id: int = None):
     dur_ms = parse_duration_to_ms(current_dur)
     metadata['duration'] = int(dur_ms / 1000)
 
-    # Ambil Lirik (Opsional / Terpisah untuk Embed dan File Fisik)
+    # Ambil Lirik (Opsional / Terpisah untuk Embed dan File Fisik - Aman untuk Konkurensi)
     if lyrics_manager and user_id:
         from bot.settings import bot_set
         
         user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
         
-        embed_lyrics = user_settings.get('lyrics_status', False)
+        # Jika ada proses paralel lain yang sedang meminjam flag lyrics_status, baca nilai aslinya
+        embed_lyrics = _LYRICS_ORIGINAL_STATE.get(user_id, user_settings.get('lyrics_status', False))
         send_file_lyrics = user_settings.get('send_lyrics_file', False)
         
         if embed_lyrics or send_file_lyrics:
+            if _LYRICS_ACTIVE_COUNT.get(user_id, 0) == 0:
+                _LYRICS_ORIGINAL_STATE[user_id] = user_settings.get('lyrics_status', False)
+            _LYRICS_ACTIVE_COUNT[user_id] = _LYRICS_ACTIVE_COUNT.get(user_id, 0) + 1
+            
             try:
-                original_status = user_settings.get('lyrics_status')
                 user_settings['lyrics_status'] = True 
-                
                 lyrics_text = await lyrics_manager.fetch_lyrics(metadata, user_id)
-                
-                if original_status is not None:
-                    user_settings['lyrics_status'] = original_status
-                else:
-                    user_settings['lyrics_status'] = False
 
                 if lyrics_text: 
                     if embed_lyrics:
@@ -378,14 +378,18 @@ async def set_metadata(metadata:dict, user_id: int = None):
                         lyrics_file_path = f"{base_path}{ext}"
                         
                         try:
-                            with open(lyrics_file_path, 'w', encoding='utf-8') as lf:
-                                lf.write(lyrics_text)
-                        except Exception as e:
-                            from bot.logger import LOGGER
+                            async with aiofiles.open(lyrics_file_path, 'w', encoding='utf-8') as lf:
+                                await lf.write(lyrics_text)
+                        except Exception:
                             LOGGER.exception("Gagal menulis file lirik fisik:")
-            except Exception as e:
-                from bot.logger import LOGGER
+            except Exception:
                 LOGGER.exception("Error fetching lyrics:")
+            finally:
+                _LYRICS_ACTIVE_COUNT[user_id] = _LYRICS_ACTIVE_COUNT.get(user_id, 1) - 1
+                if _LYRICS_ACTIVE_COUNT[user_id] <= 0:
+                    _LYRICS_ACTIVE_COUNT.pop(user_id, None)
+                    orig_val = _LYRICS_ORIGINAL_STATE.pop(user_id, False)
+                    user_settings['lyrics_status'] = orig_val
 
     # --- 4. ROUTING KE HANDLER SPESIFIK ---
     try:
