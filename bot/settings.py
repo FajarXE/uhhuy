@@ -141,9 +141,13 @@ class BotSettings:
     async def initialize_users(self) -> dict:
         user_data = await database.initialize_users()
         
+        # [FIX] Gunakan .update() agar objek LRUCache(maxsize=1000) tidak tertimpa menjadi dict biasa
+        if isinstance(user_data, dict) and user_data:
+            self.user_data.update(user_data)
+        
         if tidal_manager and tidal_manager.clients:
-            tidal_manager.user_data = user_data
+            tidal_manager.user_data = self.user_data
             
-        self.user_data = user_data
+        return self.user_data
 
 bot_set = BotSettings()
