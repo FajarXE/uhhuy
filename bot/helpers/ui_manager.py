@@ -102,8 +102,28 @@ async def get_status_text(page=1, limit=5):
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n" # Spasi antar task
 
-    total_dl_raw = sum(t.get('speed_dl_raw', 0) for t in tasks)
-    total_ul_raw = sum(t.get('speed_ul_raw', 0) for t in tasks)
+    # --- [FIX] HITUNG KECEPATAN GLOBAL SECARA AKURAT TANPA DUPLIKASI ---
+    try:
+        aria_stats = await get_aria2_global_stat()
+        aria_dl = int(aria_stats.get('downloadSpeed', 0)) if aria_stats else 0
+        aria_ul = int(aria_stats.get('uploadSpeed', 0)) if aria_stats else 0
+    except Exception:
+        aria_dl = aria_ul = 0
+
+    try:
+        from bot.helpers.deezer.dzapi import get_deezer_speed
+        dz_spd = get_deezer_speed()
+    except Exception:
+        dz_spd = 0
+
+    # Hanya jumlahkan kecepatan dari task non-Aria2 agar tidak terhitung ganda dengan aria_dl
+    non_aria_dl = sum(
+        t.get('speed_dl_raw', 0) for t in tasks 
+        if 'aria2' not in str(t.get('machine', '')).lower()
+    )
+    total_dl_raw = aria_dl + dz_spd + non_aria_dl
+    total_ul_raw = aria_ul + sum(t.get('speed_ul_raw', 0) for t in tasks)
+    # -------------------------------------------------------------------
         
     global_dl = f"{get_readable_file_size(total_dl_raw)}/s" if total_dl_raw > 0 else "0B/s"
     global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
@@ -174,25 +194,19 @@ async def progress_message(done, total, details):
         task_type = 'Track'
     
     task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16] if details.get('msg') else details.get('task_id', 'unknown')
-    
+        
     try:
         user_id = details['msg'].chat.id
         dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode)
-    except: dest_mode = bot_set.upload_mode
-        
-    try:
-        stats = await get_aria2_global_stat()
-        speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
-        speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-    except: speed_dl = speed_ul = 0
+    except Exception:
+        dest_mode = bot_set.upload_mode
 
     machine = details.get('machine', 'Aria2c 1.37.0')
 
-    if action.lower() == 'upload': speed_ul += speed
-    elif action.lower() == 'download' and machine == 'Telegram API': speed_dl += speed
+    # [FIX] Simpan kecepatan murni per-task (kecepatan global dihitung sekali di get_status_text)
+    speed_dl = speed if (action.lower() == 'download' and total > 1000) else 0
+    speed_ul = speed if (action.lower() == 'upload' and total > 1000) else 0
 
-    # --- [FIX] UPDATE DICTIONARY DALAM LOCK MEMORI ---
-    # Ini mencegah alokasi memori berulang kali dan mengatasi CPU Overhead
     async with GLOBAL_STATE_LOCK:
         if task_id not in GLOBAL_TASKS:
             GLOBAL_TASKS[task_id] = {}
@@ -204,10 +218,10 @@ async def progress_message(done, total, details):
             'speed': speed_str, 'machine': machine, 'mode': dest_mode,
             'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
             'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl,
-            'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0, 'owner_id': details.get('owner_id') or (details['msg'].from_user.id if details.get('msg') and hasattr(details['msg'], 'from_user') and details['msg'].from_user else 0),
+            'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0,
+            'owner_id': details.get('owner_id') or (details['msg'].from_user.id if details.get('msg') and hasattr(details['msg'], 'from_user') and details['msg'].from_user else 0),
             'timestamp': now
         })
-    # ------------------------------------------------
 
 
 async def dedicated_ui_worker():
