@@ -724,7 +724,14 @@ async def batch_telegram_upload(metadata: dict, user: UserDetails):
                     
     if not tracks_to_upload: return
 
+    # [FIX] Ambil task_id untuk memantau sinyal batal sebelum memulai lagu berikutnya
+    task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16] if 'bot_msg' in user and user['bot_msg'] else None
+
     for track in tracks_to_upload:
+        if task_id and task_id in GLOBAL_CANCEL_DICT:
+            LOGGER.info("Batch upload dihentikan sebelum memulai lagu berikutnya.")
+            raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+            
         try:
             await telegram_upload(track, user, batch_mode=True)
             await asyncio.sleep(2.0)
@@ -734,5 +741,6 @@ async def batch_telegram_upload(metadata: dict, user: UserDetails):
         except FileNotFoundError:
             pass
         except Exception as e:
-            # [FIX]
+            if task_id and task_id in GLOBAL_CANCEL_DICT:
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             LOGGER.exception("Gagal mengunggah track dalam mode batch:")
