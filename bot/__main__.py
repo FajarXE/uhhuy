@@ -344,17 +344,15 @@ async def shutdown_all_services():
         from bot.helpers.database.mongo_async import database
         import inspect
         
-        # Opsi 1: Jika objek database mengekspos client Motor langsung
-        if hasattr(database, 'client'):
-            database.client.close()
-            logging.info("Main: Koneksi pool MongoDB berhasil ditutup dengan aman.")
-            
-        # Opsi 2: Jika objek database memiliki metode close() khusus
-        elif hasattr(database, 'close'):
+        # [FIX] Prioritaskan metode close() atau tutup objek AsyncIOMotorClient (_db), bukan database.client
+        if hasattr(database, 'close'):
             if inspect.iscoroutinefunction(database.close):
                 await database.close()
             else:
                 database.close()
+            logging.info("Main: Koneksi pool MongoDB berhasil ditutup dengan aman.")
+        elif getattr(database, '_db', None) is not None:
+            database._db.close()
             logging.info("Main: Koneksi pool MongoDB berhasil ditutup dengan aman.")
             
     except Exception as e:
