@@ -363,35 +363,34 @@ async def run_download_task(link: str, user: dict):
     
     # Menunggu slot pribadi kosong (User lain TIDAK akan terpengaruh)
     async with user_sem:
-        # Hapus pesan "Masuk Antrean" ketika tugas ini akhirnya mulai berjalan
         if notif_msg:
             try: await notif_msg.delete()
             except: pass
             
         task_successful = False
+        recorded_quota = None  # Menyimpan tuple (user_id, link_type, timestamp) untuk rollback jika gagal
         
         try:
             user['bot_msg'] = await send_message(user, 'Mempersiapkan tugas...')
             
-            # --- PUSATKAN PESAN STATUS ---
-            # [FIX] MENGGUNAKAN ui_manager ALIH-ALIH utils
             import bot.helpers.ui_manager as ui_manager
-            
-            if chat_id in ui_manager.GLOBAL_UI_MSG:
-                try: 
-                    from bot.tgclient import aio
-                    await aio.delete_messages(chat_id, ui_manager.GLOBAL_UI_MSG[chat_id].id)
-                except Exception: 
-                    pass
-            ui_manager.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
-            
-            # --- [SINKRONISASI KE MONGODB] ---
             from bot.helpers.database.mongo_async import database
-            await database.save_ui_state(chat_id, user['bot_msg'].id, 1)
-            # ---------------------------------
-            
             import hashlib
             import time
+
+            # --- [FIX RACE CONDITION RADAR UI] ---
+            async with ui_manager.GLOBAL_STATE_LOCK:
+                old_radar = ui_manager.GLOBAL_UI_MSG.get(chat_id)
+                if old_radar and old_radar.id != user['bot_msg'].id:
+                    try:
+                        await aio.delete_messages(chat_id, old_radar.id)
+                    except Exception:
+                        pass
+                ui_manager.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
+            
+            await database.save_ui_state(chat_id, user['bot_msg'].id, 1)
+            # -------------------------------------
+            
             cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
             
             if cancel_id in ui_manager.GLOBAL_CANCEL_DICT:
@@ -433,19 +432,16 @@ async def run_download_task(link: str, user: dict):
                 LOGGER.warning(f"Timeout saat me-resolve shortlink: {link}, lanjut pakai link asli.")
 
             # =======================================================================
-            # --- [FITUR LIMIT UNDUHAN PENGGUNA GRATIS] ---
+            # --- [FIX: FITUR LIMIT UNDUHAN PENGGUNA GRATIS YANG FLEKSIBEL & ADIL] ---
             from bot.settings import bot_set
             
-            # 1. Pastikan fitur limit diaktifkan lewat variabel server (.env)
-            if Config.FREE_ALBUM_LIMIT is not None and Config.FREE_PLAYLIST_LIMIT is not None and Config.FREE_VIDEO_LIMIT is not None and Config.FREE_TRACK_LIMIT is not None and Config.FREE_WAIT_TIME is not None:
-                
-                # 2. Abaikan limit jika pengguna adalah Admin atau masuk dalam daftar VIP (Auth Users)
+            if Config.FREE_WAIT_TIME is not None:
                 if user['user_id'] not in bot_set.admins and user['user_id'] not in bot_set.auth_users:
                     current_time = time.time()
                     link_lower = link.lower()
+                    uid = user['user_id']
                     
-                    # 3. Identifikasi jenis tautan berdasarkan pola URL
-                    link_type = "track" # Default ke track (Tanpa Limit)
+                    link_type = "track"
                     if re.search(r'/(album|release|ep|master|albuminfo|sets|albums)(/|\?|$)', link_lower):
                         link_type = "album"
                     elif re.search(r'/(playlist|mix|chart|playlists)(/|\?|$)', link_lower) or "playlist" in link_lower:
@@ -457,84 +453,45 @@ async def run_download_task(link: str, user: dict):
                     elif re.search(r'/(track|tracks|song)(/|\?|$)', link_lower):
                         link_type = "track"
                     
-                    # 4. Bersihkan riwayat lama yang sudah melewati batas tunggu dinamis
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['album'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['album'] if current_time - ts < Config.FREE_WAIT_TIME]
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] if current_time - ts < Config.FREE_WAIT_TIME]
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['artist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['artist'] if current_time - ts < Config.FREE_WAIT_TIME]
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['video'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['video'] if current_time - ts < Config.FREE_WAIT_TIME]
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['track'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['track'] if current_time - ts < Config.FREE_WAIT_TIME]
+                    # Bersihkan riwayat yang sudah kedaluwarsa untuk semua kategori milik user ini
+                    for k_type in ('album', 'playlist', 'artist', 'video', 'track'):
+                        USER_DOWNLOAD_HISTORY[uid][k_type] = [
+                            ts for ts in USER_DOWNLOAD_HISTORY[uid][k_type]
+                            if current_time - ts < Config.FREE_WAIT_TIME
+                        ]
 
-                    # Periksa apakah seluruh daftar riwayat (album, playlist, dll) sudah kosong
-                    is_history_empty = all(not history_list for history_list in USER_DOWNLOAD_HISTORY[user['user_id']].values())
-                    if is_history_empty:
-                        USER_DOWNLOAD_HISTORY.pop(user['user_id'], None)
+                    if all(not h_list for h_list in USER_DOWNLOAD_HISTORY[uid].values()):
+                        USER_DOWNLOAD_HISTORY.pop(uid, None)
+
+                    limit_map = {
+                        "artist": (Config.FREE_ARTIST_LIMIT, "Artist"),
+                        "video": (Config.FREE_VIDEO_LIMIT, "Video"),
+                        "album": (Config.FREE_ALBUM_LIMIT, "Album"),
+                        "playlist": (Config.FREE_PLAYLIST_LIMIT, "Playlist"),
+                        "track": (Config.FREE_TRACK_LIMIT, "Track"),
+                    }
                     
-                    # 5. Cek aturan limitasi
-                    if link_type == "artist":
-                        if Config.FREE_ARTIST_LIMIT <= 0:
-                            raise Exception("🔒 vip access required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
-                        elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['artist']) >= Config.FREE_ARTIST_LIMIT:
-                            oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['artist'][0]
-                            wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
-                            mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_ARTIST_LIMIT} Artist link(s). Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
-                        else:
-                            USER_DOWNLOAD_HISTORY[user['user_id']]['artist'].append(current_time)
-                            
-                    elif link_type == "video":
-                        if Config.FREE_VIDEO_LIMIT <= 0:
-                             raise Exception("🔒 vip access required!\nDownloading Video links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
-                        elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['video']) >= Config.FREE_VIDEO_LIMIT:
-                            oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['video'][0]
-                            wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
-                            mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_VIDEO_LIMIT} Video. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
-                        else:
-                            USER_DOWNLOAD_HISTORY[user['user_id']]['video'].append(current_time)
+                    type_limit, type_label = limit_map.get(link_type, (None, "Track"))
                     
-                    elif link_type == "album":
-                        if Config.FREE_ALBUM_LIMIT <= 0:
-                             raise Exception("🔒 vip access required!\nDownloading Album links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
-                        elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['album']) >= Config.FREE_ALBUM_LIMIT:
-                            oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['album'][0]
-                            wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
+                    # Jika type_limit diatur (bukan None), terapkan pengecekan
+                    if type_limit is not None:
+                        if type_limit <= 0:
+                            raise Exception(f"🔒 vip access required!\nDownloading {type_label} links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
+                        elif len(USER_DOWNLOAD_HISTORY[uid][link_type]) >= type_limit:
+                            oldest_ts = USER_DOWNLOAD_HISTORY[uid][link_type][0]
+                            wait_time = max(1, int(Config.FREE_WAIT_TIME - (current_time - oldest_ts)))
                             mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_ALBUM_LIMIT} Albums. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
+                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {type_limit} {type_label}(s). Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
                         else:
-                            USER_DOWNLOAD_HISTORY[user['user_id']]['album'].append(current_time)
-                            
-                    elif link_type == "playlist":
-                        if Config.FREE_PLAYLIST_LIMIT <= 0:
-                             raise Exception("🔒 vip access required!\nDownloading Playlist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
-                        elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['playlist']) >= Config.FREE_PLAYLIST_LIMIT:
-                            oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'][0]
-                            wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
-                            mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_PLAYLIST_LIMIT} Playlist. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
-                        else:
-                            USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'].append(current_time)
-                            
-                    elif link_type == "track":
-                        if Config.FREE_TRACK_LIMIT <= 0:
-                             raise Exception("🔒 vip access required!\nDownloading Track links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
-                        elif len(USER_DOWNLOAD_HISTORY[user['user_id']]['track']) >= Config.FREE_TRACK_LIMIT:
-                            oldest_ts = USER_DOWNLOAD_HISTORY[user['user_id']]['track'][0]
-                            wait_time = int(Config.FREE_WAIT_TIME - (current_time - oldest_ts))
-                            mins, secs = divmod(wait_time, 60)
-                            raise Exception(f"⏳ limit reached!\nYou have reached the limit of {Config.FREE_TRACK_LIMIT} Tracks. Please wait {mins} mins {secs} secs, or contact @monomars to donate for unlimited access.")
-                        else:
-                            USER_DOWNLOAD_HISTORY[user['user_id']]['track'].append(current_time)
+                            USER_DOWNLOAD_HISTORY[uid][link_type].append(current_time)
+                            recorded_quota = (uid, link_type, current_time)
             # =======================================================================
 
-            # --- [FIX SEMAPHORE] BATAS WAKTU DIPERPANJANG UNTUK PLAYLIST RAKSASA ---
             try:
-                # Memaksa agar tugas seberat apa pun tidak boleh berjalan lebih dari 6 jam (21600 detik)
                 await asyncio.wait_for(start_link(link, user), timeout=21600.0)
                 task_successful = True
             except asyncio.TimeoutError:
-                # Melemparkan error ke blok 'except Exception as e:' agar diproses dengan rapi
                 raise Exception("Tugas memakan waktu terlalu lama (> 6 Jam) dan diputus paksa oleh sistem agar tidak memblokir antrean.")
-            # -----------------------------------------------------------------------
                 
         except asyncio.CancelledError:
             LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan.")
@@ -547,7 +504,6 @@ async def run_download_task(link: str, user: dict):
                 ui_manager.GLOBAL_TASKS.pop(task_id_cancel, None)
             
             try:
-                # [FIX] Hapus import lokal di sini, gunakan import global yang sudah ada di atas file
                 await send_message(user, "🛑 **Tugas dibatalkan oleh pengguna.**", 'text')
             except: pass
             await asyncio.sleep(5) 
@@ -603,11 +559,19 @@ async def run_download_task(link: str, user: dict):
                 ui_manager.GLOBAL_TASKS.pop(task_id_err, None)
 
             try:
-                # [FIX] Hapus import lokal di sini
                 await send_message(user, error_message, type='text', markup=admin_markup)
             except: pass 
                 
         finally:
+            # --- [FIX: ROLLBACK KUOTA JIKA UNDUHAN GAGAL / DIBATALKAN] ---
+            if not task_successful and recorded_quota:
+                q_uid, q_type, q_ts = recorded_quota
+                if q_uid in USER_DOWNLOAD_HISTORY and q_ts in USER_DOWNLOAD_HISTORY[q_uid][q_type]:
+                    USER_DOWNLOAD_HISTORY[q_uid][q_type].remove(q_ts)
+                    if all(not h_list for h_list in USER_DOWNLOAD_HISTORY[q_uid].values()):
+                        USER_DOWNLOAD_HISTORY.pop(q_uid, None)
+            # -------------------------------------------------------------
+
             await cleanup(user)
 
             current_sem = USER_SEMAPHORES.get(chat_id)
@@ -615,37 +579,49 @@ async def run_download_task(link: str, user: dict):
                 USER_SEMAPHORES.pop(chat_id, None)
             
             try:
-                if 'bot_msg' in user:
+                if 'bot_msg' in user and user['bot_msg']:
                     import hashlib
                     import bot.helpers.ui_manager as ui_manager
+                    from bot.helpers.database.mongo_async import database
+                    
                     final_task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+                    
+                    has_active_tasks = False
+                    radar_to_delete = None
                     
                     async with ui_manager.GLOBAL_STATE_LOCK:
                         ui_manager.GLOBAL_TASKS.pop(final_task_id, None)
                         ui_manager.GLOBAL_CANCEL_DICT.discard(final_task_id)
-
-                    try:
-                        from bot.helpers.database.mongo_async import database
-                        await database.client.cancelled_tasks.delete_one({'_id': final_task_id})
-                    except: pass
-                    
-                    current_radar = ui_manager.GLOBAL_UI_MSG.get(chat_id)
-                    if current_radar and current_radar.id == user['bot_msg'].id:
                         
-                        has_active_tasks = False
-                        async with ui_manager.GLOBAL_STATE_LOCK:
-                            for t in ui_manager.GLOBAL_TASKS.values():
-                                if t.get('user_id') == chat_id:
-                                    has_active_tasks = True
-                                    break
+                        for t in ui_manager.GLOBAL_TASKS.values():
+                            if t.get('user_id') == chat_id:
+                                has_active_tasks = True
+                                break
                         
                         if not has_active_tasks:
-                            try: await user['bot_msg'].delete()
-                            except: pass
-                            ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
+                            radar_to_delete = ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
                             ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
-                            try: await database.remove_ui_state(chat_id)
-                            except: pass
+
+                    try:
+                        await database.client.cancelled_tasks.delete_one({'_id': final_task_id})
+                    except Exception:
+                        pass
+                    
+                    # Jika sudah tidak ada tugas aktif di chat ini, hapus pesan radar & bot_msg
+                    if not has_active_tasks:
+                        try:
+                            await user['bot_msg'].delete()
+                        except Exception:
+                            pass
+                        if radar_to_delete and radar_to_delete.id != user['bot_msg'].id:
+                            try:
+                                await aio.delete_messages(chat_id, radar_to_delete.id)
+                            except Exception:
+                                pass
+                        try:
+                            await database.remove_ui_state(chat_id)
+                        except Exception:
+                            pass
             except Exception as e:
                 LOGGER.debug(f"Pembersihan akhir gagal (Non-Fatal): {e}")
 
