@@ -112,8 +112,10 @@ async def aria2_download(url, filepath, details=None):
             LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
         
         if details:
-            details['task_id'] = gid
-            # Prioritaskan display_title kustom agar ekstensi target (WAV/AIFF) yang muncul di radar
+            details['gid'] = gid  # [FIX] Simpan GID Aria2 secara terpisah
+            # Jangan timpa details['task_id'] jika sudah berisi hash pesan dari ui_manager
+            if not details.get('task_id'):
+                details['task_id'] = gid
             details['title'] = details.get('display_title') or file_name
             details['type'] = 'Download'
 
@@ -124,12 +126,14 @@ async def aria2_download(url, filepath, details=None):
             "method": "aria2.tellStatus",
             "params": [ARIA2_SECRET, gid]
         }
-        # ---------------------------------------------------------------
         
         while True:
-            if details and 'task_id' in details:
+            if details:
                 from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT
-                if details['task_id'] in GLOBAL_CANCEL_DICT:
+                t_id = details.get('task_id')
+                a_gid = details.get('gid')
+                # [FIX] Cek pembatalan baik melalui task_id (hash pesan) maupun gid Aria2
+                if (t_id and t_id in GLOBAL_CANCEL_DICT) or (a_gid and a_gid in GLOBAL_CANCEL_DICT):
                     await aria2_cancel(gid) 
                     LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
                     return False
