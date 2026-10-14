@@ -402,13 +402,13 @@ def language_buttons(languages, selected):
         inline_keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=text.UPPER(),
+                    text=text.upper(),  # [FIX] Huruf kecil .upper() agar tidak crash AttributeError
                     callback_data=f'langSet_{item.__language__}'
                 )
             ]
         )
     main_button, close_button = fetch_base_buttons()
-    inline_keyboard += main_button+ close_button
+    inline_keyboard += main_button + close_button
     return InlineKeyboardMarkup(inline_keyboard)
 
 # tidal panel
@@ -1438,22 +1438,27 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     
     user_dict = bot_set.user_data.get(user_id, {})
 
-    is_playlist = user_dict.get("PLAYLIST_ZIP", False)
+    def _get_bool(key_up, key_low):
+        val = user_dict.get(key_up)
+        if val is None:
+            val = user_dict.get(key_low, False)
+        return bool(val)
+
+    is_playlist = _get_bool("PLAYLIST_ZIP", "playlist_zip")
     style_playlist = ButtonStyle.SUCCESS if is_playlist else ButtonStyle.DANGER
     buttons.append([InlineKeyboardButton(text="PLAYLIST_ZIP", callback_data="zip_playlist", style=style_playlist)])
 
-    is_album = user_dict.get("ALBUM_ZIP", False)
+    is_album = _get_bool("ALBUM_ZIP", "album_zip")
     style_album = ButtonStyle.SUCCESS if is_album else ButtonStyle.DANGER
     buttons.append([InlineKeyboardButton(text="ALBUM_ZIP", callback_data="zip_album", style=style_album)])
 
-    is_poster = user_dict.get("ART_POSTER", False)
+    is_poster = _get_bool("ART_POSTER", "art_poster")
     style_poster = ButtonStyle.SUCCESS if is_poster else ButtonStyle.DANGER
     
-    # Tambahkan status UI untuk VIDEO_ZIP
-    is_video = user_dict.get("VIDEO_ZIP", False)
+    is_video = _get_bool("VIDEO_ZIP", "video_zip")
     style_video = ButtonStyle.SUCCESS if is_video else ButtonStyle.DANGER
     
-    # Letakkan ART_POSTER dan VIDEO_ZIP berdampingan
+    # Letakkan ART_POSTER dan VIDEO_ZIP berdampingan seperti semula
     buttons.append([
         InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster", style=style_poster),
         InlineKeyboardButton(text="VIDEO_ZIP", callback_data="zip_video", style=style_video)
