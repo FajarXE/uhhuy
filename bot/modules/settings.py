@@ -161,54 +161,58 @@ async def ban(client: Client, msg: Message):
     if await check_user(msg.from_user.id, restricted=True):
         try:
             id_ = int(msg.text.split(" ", maxsplit=1)[1])
-        except IndexError:
+        except (IndexError, ValueError):
             await send_message(msg, lang.s.BAN_AUTH_FORMAT)
             return
 
-        user = False if str(id_).startswith('-100') else True
-        if user:
+        is_user = False if str(id_).startswith('-100') else True
+        if is_user:
             if id_ in bot_set.auth_users:
                 bot_set.auth_users.remove(id_)
-                # --- [PERBAIKAN] ---
-                await database.set_variable('AUTH_USERS', bot_set.auth_users)
+                # [FIX] Gunakan operasi atomik $pull di MongoDB
+                await database.authorize_users(id_, remove=True)
             else:
                 await send_message(msg, lang.s.USER_DOEST_EXIST)
+                return
         else:
             if id_ in bot_set.auth_chats:
                 bot_set.auth_chats.remove(id_)
-                # --- [PERBAIKAN] ---
-                await database.set_variable('AUTH_CHATS', bot_set.auth_chats)
+                # [FIX] Gunakan operasi atomik $pull di MongoDB
+                await database.authorize_chats(id_, remove=True)
             else:
                 await send_message(msg, lang.s.USER_DOEST_EXIST)
+                return
+                
         await send_message(msg, lang.s.BAN_ID)
-        
 
 @Client.on_message(filters.command(CMD.AUTH + ["add"]))
 async def auth(client: Client, msg: Message):
     if await check_user(msg.from_user.id, restricted=True):
         try:
             id_ = int(msg.text.split(" ", maxsplit=1)[1])
-        except IndexError:
+        except (IndexError, ValueError):
             await send_message(msg, lang.s.BAN_AUTH_FORMAT)
             return
 
-        user = False if str(id_).startswith('-100') else True
-        if user:
+        is_user = False if str(id_).startswith('-100') else True
+        if is_user:
             if id_ not in bot_set.auth_users:
                 bot_set.auth_users.append(id_)
-                # --- [PERBAIKAN] ---
-                await database.set_variable('AUTH_USERS', bot_set.auth_users)
+                # [FIX] Gunakan operasi atomik $addToSet di MongoDB
+                await database.authorize_users(id_, remove=False)
             else:
                 await send_message(msg, lang.s.USER_EXIST)
+                return
         else:
             if id_ not in bot_set.auth_chats:
                 bot_set.auth_chats.append(id_)
-                # --- [PERBAIKAN] ---
-                await database.set_variable('AUTH_CHATS', bot_set.auth_chats)
+                # [FIX] Gunakan operasi atomik $addToSet di MongoDB
+                await database.authorize_chats(id_, remove=False)
             else:
                 await send_message(msg, lang.s.USER_EXIST)
+                return
+                
         await send_message(msg, lang.s.AUTH_ID)
-
 
 @Client.on_message(filters.command(CMD.LOG))
 async def send_log(client: Client, msg: Message):
