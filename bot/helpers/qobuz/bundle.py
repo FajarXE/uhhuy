@@ -24,27 +24,30 @@ _BUNDLE_URL_REGEX = re.compile(
 class Bundle:
     def __init__(self):
         self._session = Session()
+        try:
+            # --- SUNTIKAN PROXY GLOBAL ---
+            if getattr(Config, 'QOBUZ_PROXY', None):
+                self._session.proxies = {
+                    "http": Config.QOBUZ_PROXY,
+                    "https": Config.QOBUZ_PROXY
+                }
+            # -----------------------------
 
-        # --- SUNTIKAN PROXY GLOBAL ---
-        if getattr(Config, 'QOBUZ_PROXY', None):
-            self._session.proxies = {
-                "http": Config.QOBUZ_PROXY,
-                "https": Config.QOBUZ_PROXY
-            }
-        # -----------------------------
+            response = self._session.get(f"{_BASE_URL}/login", timeout=20)
+            response.raise_for_status()
 
-        response = self._session.get(f"{_BASE_URL}/login")
-        response.raise_for_status()
+            bundle_url_match = _BUNDLE_URL_REGEX.search(response.text)
+            if not bundle_url_match:
+                raise NotImplementedError("Bundle URL not found")
 
-        bundle_url_match = _BUNDLE_URL_REGEX.search(response.text)
-        if not bundle_url_match:
-            raise NotImplementedError("Bundle URL found")
+            bundle_url = bundle_url_match.group(1)
+            response = self._session.get(_BASE_URL + bundle_url, timeout=30)
+            response.raise_for_status()
 
-        bundle_url = bundle_url_match.group(1)
-        response = self._session.get(_BASE_URL + bundle_url)
-        response.raise_for_status()
-
-        self._bundle = response.text
+            self._bundle = response.text
+        finally:
+            # [FIX] Tutup sesi requests agar socket tidak bocor
+            self._session.close()
 
     def get_app_id(self):
         match = _APP_ID_REGEX.search(self._bundle)
@@ -62,7 +65,8 @@ class Bundle:
             secrets[timezone] = [seed]
 
         keypairs = list(secrets.items())
-        secrets.move_to_end(keypairs[1][0], last=False)
+        if len(keypairs) > 1:
+            secrets.move_to_end(keypairs[1][0], last=False)
         info_extras_regex = _INFO_EXTRAS_REGEX.format(
             timezones="|".join([timezone.capitalize() for timezone in secrets])
         )
