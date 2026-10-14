@@ -86,25 +86,29 @@ async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
-    # --- PERBAIKAN ARIA2 DETAILS (Memicu Progress Bar) ---
+    # --- PERBAIKAN ARIA2 DETAILS (Memicu Progress Bar & Tombol Cancel) ---
+    import hashlib
     details = None
     if upload and 'bot_msg' in user:
+        task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         details = {
             'msg': user['bot_msg'],
             'title': track_meta.get('title', 'Unknown'),
-            'type': track_meta.get('type', 'Track').capitalize()
+            'type': track_meta.get('type', 'Track').capitalize(),
+            'action': 'Download',
+            'task_id': task_id
         }
 
     err = await deezerapi.dl_track(item_id, url, track_meta['filepath'], details=details)
     if err:
         LOGGER.error(f"Deezer dl_track gagal: {err}")
         return False
-    # -----------------------------------------------------
+    # ---------------------------------------------------------------------
 
     if not os.path.exists(track_meta['filepath']) or os.path.getsize(track_meta['filepath']) == 0: 
-        LOGGER.warning(f"Deezer: File gagal diunduh atau kosong!")
+        LOGGER.warning("Deezer: File gagal diunduh atau kosong!")
         try: os.remove(track_meta['filepath'])
-        except: pass
+        except Exception: pass
         return False
 
     is_valid_header = False
@@ -114,7 +118,8 @@ async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=
             if track_meta['extension'] == 'flac':
                 if header == b'fLaC': is_valid_header = True
             else: 
-                if header.startswith(b'ID3') or header.startswith(b'\xff\xfb') or header.startswith(b'\xff\xf3'):
+                # [FIX] Dukung seluruh variasi sync-word MPEG Audio (ID3, FFFB, FFFA, FFF3, FFF2, FFE3)
+                if header.startswith(b'ID3') or (len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
                     is_valid_header = True
     except Exception as e:
         LOGGER.warning(f"Gagal membaca header file: {e}")
