@@ -38,6 +38,12 @@ def get_meta_session():
     return _META_SESSION
 # ----------------------------------------------
 
+async def close_meta_session():
+    global _META_SESSION
+    if _META_SESSION and not _META_SESSION.closed:
+        await _META_SESSION.close()
+        _META_SESSION = None
+
 # --- 1. CLEANING UTILS ---
 
 def clean_string_simple(text):
@@ -411,28 +417,31 @@ async def process_track_metadata(track_id, r_id, cover=None,
         metadata['itunesadvisory'] = '0'
 
     # COVER ART
-    # --- LOGIKA SUMBER COVER ---
-    uid = int(user.get('user_id', 0)) if user else 0
-    cover_source = bot_set.user_data.get(uid, {}).get("deezer_cover_source", "itunes") # Default itunes agar perilaku lama tetap jalan
-    
-    cover_id = get_val('ALB_PICTURE')
-    final_cover_url = None
+    # [FIX] Jika cover sudah diunduh di level Album, langsung gunakan tanpa mengunduh ulang per lagu
+    if cover and os.path.exists(str(cover)):
+        metadata['cover'] = cover
+        metadata['thumbnail'] = thumbnail if (thumbnail and os.path.exists(str(thumbnail))) else cover
+    else:
+        uid = int(user.get('user_id', 0)) if user else 0
+        cover_source = bot_set.user_data.get(uid, {}).get("deezer_cover_source", "itunes")
+        
+        cover_id = get_val('ALB_PICTURE')
+        final_cover_url = None
 
-    if cover_source == "itunes":
-        final_cover_url = itunes_info.get('cover_url')
-    elif cover_source == "musicbrainz":
-        session = get_meta_session()
-        final_cover_url = await get_musicbrainz_cover_url(metadata, session)
+        if cover_source == "itunes":
+            final_cover_url = itunes_info.get('cover_url')
+        elif cover_source == "musicbrainz":
+            session = get_meta_session()
+            final_cover_url = await get_musicbrainz_cover_url(metadata, session)
 
-    # Fallback ke Original jika API pihak ketiga gagal / disetel ke original
-    if not final_cover_url and cover_id:
-        final_cover_url = f'https://cdn-images.dzcdn.net/images/cover/{cover_id}/1200x0-none-100-0-0.png'
-    if not final_cover_url and os.path.exists(FALLBACK_IMAGE_PATH):
-        final_cover_url = FALLBACK_IMAGE_PATH
-    # ---------------------------
+        if not final_cover_url and cover_id:
+            final_cover_url = f'https://cdn-images.dzcdn.net/images/cover/{cover_id}/1200x0-none-100-0-0.png'
+        if not final_cover_url and os.path.exists(FALLBACK_IMAGE_PATH):
+            final_cover_url = FALLBACK_IMAGE_PATH
 
-    metadata['cover'] = await create_cover_file(final_cover_url, metadata)
-    metadata['thumbnail'] = await get_cover(cover_id, metadata, True)
+        cover_path = await create_cover_file(final_cover_url, metadata)
+        metadata['cover'] = cover_path
+        metadata['thumbnail'] = cover_path
 
     metadata['token'] = t_meta_page.get('TRACK_TOKEN')
     metadata['token_expiry'] = t_meta_page.get('TRACK_TOKEN_EXPIRE')
