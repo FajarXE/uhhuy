@@ -163,6 +163,9 @@ async def start_services():
     logging.info("------------------------------------------------")
     logging.info("Main: Memulai Inisialisasi Layanan...")
     
+    from bot import start_gunicorn
+    start_gunicorn()
+    
     try:
         from bot.helpers.aria2_helper import aria2_purge_all
         await aria2_purge_all()
