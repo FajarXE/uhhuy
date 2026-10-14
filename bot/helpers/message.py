@@ -62,6 +62,9 @@ async def fetch_user_details(msg: Message, reply=False) -> dict:
 
 async def check_user(uid=None, msg=None, restricted=False) -> bool:
     actual_uid = uid if uid else (msg.from_user.id if msg and msg.from_user else None)
+    # [FIX] Jika msg berasal dari query.message (pesan milik Bot sendiri di Private Chat), gunakan chat.id sebagai actual_uid
+    if msg and msg.from_user and msg.from_user.is_self and msg.chat and msg.chat.id > 0 and not uid:
+        actual_uid = msg.chat.id
 
     if actual_uid and actual_uid not in bot_set.user_data:
         from bot.helpers.database.mongo_async import database
@@ -69,12 +72,8 @@ async def check_user(uid=None, msg=None, restricted=False) -> bool:
         bot_set.user_data[actual_uid] = user_db_data or {}
         
         if user_db_data:
-            # --- [FIX ERROR] ---
-            # Hapus baris 'from .utils import sync_single_user_managers'
-            # Karena fungsinya sudah ada di file ini sendiri, kita bisa langsung memanggilnya
             import asyncio
             asyncio.create_task(sync_single_user_managers(actual_uid, user_db_data))
-            # -------------------
 
     if restricted:
         if actual_uid in bot_set.admins: return True
@@ -82,6 +81,7 @@ async def check_user(uid=None, msg=None, restricted=False) -> bool:
         if bot_set.bot_public: return True
         else:
             all_chats = list(bot_set.admins) + bot_set.auth_chats + bot_set.auth_users 
+            if actual_uid and actual_uid in all_chats: return True
             if msg and msg.from_user and msg.from_user.id in all_chats: return True
             elif msg and msg.chat and msg.chat.id in all_chats: return True
     return False
