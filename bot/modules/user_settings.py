@@ -966,6 +966,8 @@ async def uset_amz_login_cmd(client, message):
 # --- COMMAND EKSEKUSI TV LOGIN ---
 @Client.on_message(filters.command("amazon_auth"))
 async def amz_tv_auth_cmd(client, message):
+    if not await check_user(msg=message):
+        return
     user_id = message.from_user.id
 
     # 1. Batasi jumlah antrean login agar tidak membebani server
