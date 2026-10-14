@@ -214,9 +214,10 @@ async def standalone_local_progress(current, total, p_state: dict, user, text, t
             if dz_spd > 0: speed_dl += dz_spd
         except: pass
         
+        dest_mode = bot_set.user_data.get(p_state['chat_id'], {}).get('upload_mode', bot_set.upload_mode)
         file_title = os.path.basename(text) if isinstance(text, str) else "Unknown File"
         
-        # --- [FIX] UPDATE DICTIONARY DALAM LOCK MEMORI ---
+        # --- [FIX] UPDATE DICTIONARY DALAM LOCK MEMORI TANPA DUPLIKASI SPEED_DL ---
         async with GLOBAL_STATE_LOCK:
             if p_state['cancel_id'] not in GLOBAL_TASKS:
                 GLOBAL_TASKS[p_state['cancel_id']] = {}
@@ -228,12 +229,12 @@ async def standalone_local_progress(current, total, p_state: dict, user, text, t
                 'processed': f"{get_readable_file_size(current)} of {get_readable_file_size(total)}",
                 'speed': f"{get_readable_file_size(speed)}/s", 'machine': "Telegram API",
                 'mode': dest_mode, 'cancel_id': p_state['cancel_id'],
-                'dl_speed': f"{get_readable_file_size(speed_dl)}/s", 'ul_speed': f"{get_readable_file_size(speed)}/s",
-                'speed_dl_raw': speed_dl, 'speed_ul_raw': speed,
+                'dl_speed': "0B/s", 'ul_speed': f"{get_readable_file_size(speed)}/s",
+                'speed_dl_raw': 0, 'speed_ul_raw': speed,
                 'user_id': p_state['msg'].chat.id if p_state['msg'] else 0,
                 'timestamp': now
             })
-        # -------------------------------------------------
+        # --------------------------------------------------------------------------
         p_state['last_update_time'] = now
 
 # ==========================================================
