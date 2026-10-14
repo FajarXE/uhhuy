@@ -27,24 +27,25 @@ class Config:
             PORT = int(PORT)
 
         # --- [TAMBAHAN: VARIABEL LIMIT PENGGUNA GRATIS] ---
-        # Jika tidak diisi di server/ .env, nilainya menjadi None (Fitur Mati)
+        # Jika tidak diisi di server/ .env, nilainya menjadi None (Bebas Limit untuk tipe tersebut)
+        # Isi dengan angka 0 jika ingin membuat tipe tersebut khusus VIP (VIP Only)
         _free_track = getenv("FREE_TRACK_LIMIT")
-        FREE_TRACK_LIMIT = int(_free_track) if _free_track else None
+        FREE_TRACK_LIMIT = int(_free_track) if _free_track is not None and _free_track.strip() != "" else None
         
         _free_album = getenv("FREE_ALBUM_LIMIT")
-        FREE_ALBUM_LIMIT = int(_free_album) if _free_album else None
+        FREE_ALBUM_LIMIT = int(_free_album) if _free_album is not None and _free_album.strip() != "" else None
         
         _free_playlist = getenv("FREE_PLAYLIST_LIMIT")
-        FREE_PLAYLIST_LIMIT = int(_free_playlist) if _free_playlist else None
+        FREE_PLAYLIST_LIMIT = int(_free_playlist) if _free_playlist is not None and _free_playlist.strip() != "" else None
 
         _free_artist = getenv("FREE_ARTIST_LIMIT")
-        FREE_ARTIST_LIMIT = int(_free_artist) if _free_artist else 0  # Default 0 (VIP Only) jika limit aktif
+        FREE_ARTIST_LIMIT = int(_free_artist) if _free_artist is not None and _free_artist.strip() != "" else None
 
         _free_video = getenv("FREE_VIDEO_LIMIT")
-        FREE_VIDEO_LIMIT = int(_free_video) if _free_video else None
+        FREE_VIDEO_LIMIT = int(_free_video) if _free_video is not None and _free_video.strip() != "" else None
         
         _free_wait = getenv("FREE_WAIT_TIME")
-        FREE_WAIT_TIME = int(_free_wait) if _free_wait else None
+        FREE_WAIT_TIME = int(_free_wait) if _free_wait is not None and _free_wait.strip() != "" else None
         # --------------------------------------------------
 
         # --- [TAMBAHAN: VARIABEL LIMIT ANTREAN] ---
