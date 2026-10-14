@@ -2,21 +2,18 @@
 
 import os
 import asyncio
-import requests
 import json
 import re
 import io
 import time
 import aiohttp
+import aiofiles
 import hashlib
 import base64
 import unicodedata
 import uuid
-from urllib.parse import quote
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from zlib import crc32
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from aiohttp.client_exceptions import ServerDisconnectedError, ClientConnectorError
 from bot.logger import LOGGER
 
@@ -643,14 +640,14 @@ class DirectUpload:
             LOGGER.error(f"Terabox Locate Upload Host error: {e}")
             return None
 
-        # 3. Upload Chunks
+        # 3. Upload Chunks (Non-Blocking dengan aiofiles)
         total_chunks = len(hashes["chunks"])
         bytes_uploaded = 0
         upload_chunk_url = f"{upload_host}/rest/2.0/pcs/superfile2"
 
         from bot.helpers.ui_manager import progress_message, GLOBAL_CANCEL_DICT
 
-        with open(filepath, "rb") as f:
+        async with aiofiles.open(filepath, "rb") as f:
             for i in range(total_chunks):
                 if details and details.get('task_id') in GLOBAL_CANCEL_DICT:
                     LOGGER.warning(f"Terabox Upload dibatalkan oleh pengguna: {filename}")
@@ -662,7 +659,7 @@ class DirectUpload:
                         pass
                     raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
-                chunk_bytes = f.read(chunk_size)
+                chunk_bytes = await f.read(chunk_size)
                 chunk_len = len(chunk_bytes)
 
                 chunk_params = {
@@ -673,12 +670,13 @@ class DirectUpload:
                     "partseq": str(i)
                 }
 
-                chunk_form = aiohttp.FormData()
-                chunk_form.add_field("file", chunk_bytes, filename="blob", content_type="application/octet-stream")
-
                 chunk_uploaded = False
                 for attempt in range(4):
                     try:
+                        # Buat FormData baru di setiap percobaan agar stream tidak habis saat retry
+                        chunk_form = aiohttp.FormData()
+                        chunk_form.add_field("file", chunk_bytes, filename="blob", content_type="application/octet-stream")
+                        
                         async with session.post(upload_chunk_url, params=chunk_params, data=chunk_form, headers=base_headers, timeout=aiohttp.ClientTimeout(total=300)) as resp:
                             res = await resp.json(content_type=None)
                             if res.get("md5"):
