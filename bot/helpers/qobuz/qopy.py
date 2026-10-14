@@ -17,8 +17,9 @@ from bot.logger import LOGGER
 from bot.helpers.database.mongo_async import database
 from bot.settings import bot_set
 
-# TAMBAHKAN BARIS INI: Limiter berbagi untuk semua akun
+# Limiter berbagi untuk semua akun
 GLOBAL_QOBUZ_LIMITER = aiolimiter.AsyncLimiter(30, 60)
+
 
 class QoClient:
     def __init__(self, email=None, password=None, user_id=None, user_token=None, app_id=None, app_secret=None):
@@ -27,10 +28,10 @@ class QoClient:
         self.user_id = str(user_id) if user_id else None
         self.user_token = user_token
         
-        # --- [TAMBAHAN] Simpan kredensial spesifik akun ---
+        # --- Simpan kredensial spesifik akun ---
         self.custom_app_id = str(app_id) if app_id else None
         self.custom_app_secret = str(app_secret) if app_secret else None
-        # --------------------------------------------------
+        # ---------------------------------------
         
         self.uat = None
         self.label = None
@@ -38,10 +39,8 @@ class QoClient:
         self.id = None
         self.secrets = None
         self.session = None
-        # MATIKAN BARIS INI:
-        # self.ratelimit = aiolimiter.AsyncLimiter(30, 60)
         self.base = "https://www.qobuz.com/api.json/0.2/"
-        self.quality = 6 # Default 6 (Lossless)
+        self.quality = 6  # Default 6 (Lossless)
 
     def get_tokens(self):
         # 1. Prioritaskan App ID & Secret spesifik dari Akun tersebut
@@ -85,21 +84,21 @@ class QoClient:
             params = {
                 "extra": "tracks",
                 "playlist_id": kwargs["id"],
-                "limit": 99999,
+                "limit": 500,
                 "offset": kwargs["offset"],
             }
         elif epoint == "artist/get":
             params = {
                 "app_id": self.id,
                 "artist_id": kwargs["id"],
-                "limit": 99999,
+                "limit": 500,
                 "offset": kwargs["offset"],
                 "extra": "albums",
             }
         elif epoint == "label/get":
             params = {
                 "label_id": kwargs["id"],
-                "limit": 99999,
+                "limit": 500,
                 "offset": kwargs["offset"],
                 "extra": "albums",
             }
@@ -142,7 +141,6 @@ class QoClient:
         return await self.session_call(epoint, params)
 
     async def session_call(self, epoint, params):
-        # GANTI self.ratelimit MENJADI GLOBAL_QOBUZ_LIMITER
         async with GLOBAL_QOBUZ_LIMITER:
             async with self.session.get(self.base + epoint, params=params) as r:
                 if epoint == "user/login":
@@ -180,6 +178,10 @@ class QoClient:
                 else:
                     j_iterable = j
 
+                # [FIX PAGINATION] Hitung jumlah aktual item yang dikembalikan oleh API Qobuz
+                items_list = j_iterable.get('items', [])
+                fetched_count = len(items_list) if items_list else 500
+
                 if offset == 0:
                     total_items = j_iterable.get(key)
                     if total_items is None:
@@ -187,11 +189,14 @@ class QoClient:
                         return
                         
                     yield j 
-                    total = total_items - 99999
+                    total = total_items - fetched_count
                 else:
                     yield j 
-                    total -= 99999
-                offset += 99999
+                    total -= fetched_count
+                    
+                if not items_list:
+                    break
+                offset += fetched_count
             
             except Exception as e:
                 LOGGER.error(f"QOBUZ Multi-Meta Parsing Gagal untuk {epoint}: {e}")
@@ -246,7 +251,6 @@ class QoClient:
         }
         
         try:
-            # GANTI self.ratelimit MENJADI GLOBAL_QOBUZ_LIMITER
             async with GLOBAL_QOBUZ_LIMITER:
                 async with self.session.get(self.base + test_epoint, params=params) as r:
                     if r.status == 200:
@@ -255,26 +259,6 @@ class QoClient:
         except Exception as e:
             LOGGER.debug(f"Test Secret Failed: {e}")
             return False
-
-    def get_tokens(self):
-        # 1. Prioritaskan App ID & Secret spesifik dari Akun tersebut
-        if self.custom_app_id and self.custom_app_secret:
-            self.id = self.custom_app_id
-            self.secrets = [self.custom_app_secret]
-            LOGGER.info(f"QOBUZ : Akun ini menggunakan APP_ID spesifik ({self.id}) dari .env")
-            
-        # 2. Fallback ke App ID Global jika akun tidak memiliki pengaturan spesifik
-        elif Config.QOBUZ_APP_ID and Config.QOBUZ_APP_SECRET:
-            self.id = str(Config.QOBUZ_APP_ID)
-            self.secrets = [str(Config.QOBUZ_APP_SECRET)]
-            LOGGER.info(f"QOBUZ : Menggunakan APP_ID Global ({self.id}) dari .env")
-            
-        # 3. Fallback terakhir ke Bundle Scraper (Dinamic Web)
-        else:
-            LOGGER.info("QOBUZ : Mengambil App ID & Secret dinamis via Bundle Scraper...")
-            bundle = Bundle()
-            self.id = str(bundle.get_app_id())
-            self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
 
     async def login(self):
         # Lempar fungsi yang mengandung scraping 'requests' sinkron ke thread lain
@@ -348,7 +332,7 @@ class QoClient:
             res.append(data)
         return res
 
-    async def setup_quality(self, user_id: int=0, qual: int=0) -> None:
+    async def setup_quality(self, user_id: int = 0, qual: int = 0) -> None:
         try:
             user_id = int(user_id)
             qual = int(qual)
@@ -374,7 +358,7 @@ class QoClient:
 
 class QobuzManager:
     def __init__(self):
-        self.user_clients = {} # Cache Sesi Aktif
+        self.user_clients = {}  # Cache Sesi Aktif
 
     def _read_db(self):
         return {} 
@@ -393,20 +377,14 @@ class QobuzManager:
             return False, "Data kredensial tidak lengkap."
         
         try:
-            # Login otomatis membedakan jalur berdasarkan parameter yang ada di QoClient
             await temp_client.login()
             label = temp_client.label
             final_q_user_id = temp_client.user_id
-            final_q_token = temp_client.uat # Ambil token aktif
+            final_q_token = temp_client.uat  # Ambil token aktif
         except Exception as e:
             # Tutup sesi HANYA jika login gagal
             await temp_client.close_session()
             return False, f"Gagal validasi akun ({login_mode}): {str(e)}"
-        
-        # --- [PERBAIKAN PENTING] ---
-        # BAGIAN INI DIHAPUS: await temp_client.close_session() 
-        # Tujuannya agar sesi tetap hidup dan bisa langsung dipakai unduh
-        # ---------------------------
 
         tg_user_id = int(tg_user_id)
         
@@ -422,7 +400,7 @@ class QobuzManager:
         # Siapkan payload
         new_account = {
             "user_id": str(final_q_user_id),
-            "email": email if email else str(final_q_user_id), # Gunakan email atau UID untuk label
+            "email": email if email else str(final_q_user_id),
             "token": final_q_token,
             "label": label
         }
@@ -437,15 +415,21 @@ class QobuzManager:
         bot_set.user_data[tg_user_id]['qobuz_accounts'] = new_list
         await database.save_user_settings(tg_user_id, {'qobuz_accounts': new_list})
         
-        # 4. Bersihkan cache lama dan MASUKKAN sesi yang baru
-        if tg_user_id in self.user_clients:
-            for c in self.user_clients[tg_user_id]:
+        # 4. Buat label informatif untuk sesi baru
+        email_label = email if email else str(final_q_user_id)
+        temp_client.label = f"{email_label} (Private)"
+
+        # [FIX MULTI-ACCOUNT] Pertahankan sesi akun lain milik user yang masih aktif di RAM
+        existing_clients = self.user_clients.get(tg_user_id, [])
+        kept_clients = []
+        for c in existing_clients:
+            if str(c.user_id) == str(final_q_user_id):
                 await c.close_session()
+            elif c.session and not c.session.closed:
+                kept_clients.append(c)
                 
-        # --- [PERBAIKAN UTAMA] ---
-        # Simpan sesi yang berhasil login langsung ke RAM agar siap pakai
-        self.user_clients[tg_user_id] = [temp_client]
-        # -------------------------
+        kept_clients.append(temp_client)
+        self.user_clients[tg_user_id] = kept_clients
             
         return True, f"Akun {label} berhasil diautentikasi dan siap digunakan detik ini juga!"
 
@@ -476,7 +460,6 @@ class QobuzManager:
         return False
 
     def has_private_session(self, tg_user_id):
-        # Cek langsung dari Memory bot_set
         tg_user_id = int(tg_user_id)
         if tg_user_id in bot_set.user_data:
             accounts = bot_set.user_data[tg_user_id].get('qobuz_accounts', [])
@@ -498,33 +481,24 @@ class QobuzManager:
             accounts = bot_set.user_data[tg_user_id].get('qobuz_accounts', [])
             
             for acc in accounts:
-                # --- [PERBAIKAN 1] ---
-                # Pastikan app_id dan app_secret ikut dipanggil dari database
                 client = QoClient(
                     user_id=acc['user_id'], 
                     user_token=acc['token'],
                     app_id=acc.get('app_id'),
                     app_secret=acc.get('app_secret')
                 )
-                # ---------------------
                 
                 try:
                     await client.login()
                     
-                    # Buat label lebih informatif (menampilkan email jika login via email)
                     email_label = acc.get('email', client.label)
                     client.label = f"{email_label} (Private)"
                     
                     loaded_clients.append(client)
                 except Exception as e:
                     LOGGER.error(f"Gagal login ulang akun user {tg_user_id} (ID: {acc['user_id']}): {e}")
-                    
-                    # --- [PERBAIKAN 2: MENCEGAH MEMORY LEAK] ---
-                    # Tutup sesi HANYA jika login ulang ini gagal, 
-                    # agar tidak memicu error "Unclosed client session"
                     if client.session and not client.session.closed:
                         await client.close_session()
-                    # -------------------------------------------
             
             if loaded_clients:
                 self.user_clients[tg_user_id] = loaded_clients
@@ -537,6 +511,17 @@ class QobuzManager:
             bot_set.user_data[user_id] = {}
         bot_set.user_data[user_id]['qobuz_qual'] = int(quality)
         await database.save_user_settings(user_id, {'qobuz_qual': int(quality)})
+
+    async def shutdown(self):
+        """Menutup seluruh sesi akun private Qobuz saat bot dimatikan"""
+        for uid, clients in list(self.user_clients.items()):
+            for c in clients:
+                try:
+                    await c.close_session()
+                except Exception:
+                    pass
+        self.user_clients.clear()
+
 
 # Instance Global
 qobuz_manager = QobuzManager()
