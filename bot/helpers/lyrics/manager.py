@@ -1,7 +1,6 @@
 # [GANTI SELURUH FILE: bot/helpers/lyrics/manager.py]
 
 import logging
-# --- PERBAIKAN: Impor GeniusAPI ---
 from bot.helpers.lyrics.apis import MusixmatchAPI, LRCLibAPI, GeniusAPI
 from bot.settings import bot_set
 
@@ -11,7 +10,6 @@ class LyricsManager:
     def __init__(self):
         self.musixmatch = MusixmatchAPI()
         self.lrclib = LRCLibAPI()
-        # --- PERBAIKAN: Inisialisasi Genius ---
         self.genius = GeniusAPI()
     
     async def fetch_lyrics(self, metadata: dict, user_id: int):
@@ -19,9 +17,10 @@ class LyricsManager:
         Mengambil lirik berdasarkan pengaturan pengguna.
         Mengembalikan string lirik atau None.
         """
-        user_settings = bot_set.user_data.get(user_id, {})
+        user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
         
-        if not user_settings.get('lyrics_status', False):
+        # [FIX] Izinkan pengambilan lirik jika salah satu (Embed ATAU File .lrc) aktif
+        if not user_settings.get('lyrics_status', False) and not user_settings.get('send_lyrics_file', False):
             return None
 
         provider = user_settings.get('lyrics_provider', 'lrclib') 
@@ -35,7 +34,8 @@ class LyricsManager:
         try:
             if duration_raw: duration = int(float(duration_raw))
             else: duration = 0
-        except: duration = 0
+        except Exception:
+            duration = 0
 
         plain = None
         synced = None
@@ -48,7 +48,6 @@ class LyricsManager:
             elif provider == 'lrclib':
                 plain, synced = await self.lrclib.get_lyrics(title, artist, album, duration)
             elif provider == 'genius':
-                # --- PERBAIKAN: Panggil fungsi dari class Genius ---
                 plain, synced = await self.genius.get_lyrics(title, artist, album, duration)
             
             if l_type == 'synced':
