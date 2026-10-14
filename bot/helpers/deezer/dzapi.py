@@ -196,18 +196,31 @@ class DeezerAPI:
         if time() - self.renew_timestamp >= 3600:
             LOGGER.debug("Deezer: License token expired - trying to refresh User data")
             await self._api_call('deezer.getUserData')
-        if time() - track_token_expiry >= 0:
+        if not track_token or (track_token_expiry and time() - track_token_expiry >= 0):
             LOGGER.debug("Deezer: Track token expired - trying to refresh token")
-            track_token = await self._api_call('song.getData', {'sng_id': id, 'array_default': ['TRACK_TOKEN']})['TRACK_TOKEN']
+            # [FIX] Bungkus await dengan tanda kurung sebelum mengakses key ['TRACK_TOKEN']
+            fresh_data = await self._api_call('song.getData', {'sng_id': id, 'array_default': ['TRACK_TOKEN']})
+            track_token = fresh_data.get('TRACK_TOKEN')
+            
         json_payload = { 
             'license_token': self.license_token,
-            'media': [{'type': 'FULL','formats': [{'cipher': 'BF_CBC_STRIPE', 'format': format}]}],
+            'media': [{'type': 'FULL', 'formats': [{'cipher': 'BF_CBC_STRIPE', 'format': format}]}],
             'track_tokens': [track_token]
         }
         async with GLOBAL_DZ_LIMITER:
             async with self.session.post('https://media.deezer.com/v1/get_url', json=json_payload) as r:
                 resp = await r.json()
-        return resp['data'][0]['media'][0]['sources'][0]['url']
+                
+        # [FIX] Cegah KeyError jika track diblokir / tidak tersedia di akun ini
+        data_list = resp.get('data')
+        if not data_list or not isinstance(data_list, list):
+            raise Exception(f"Track not available (Empty media response: {resp})")
+        first_data = data_list[0]
+        if 'errors' in first_data or not first_data.get('media'):
+            err_detail = first_data.get('errors', 'No media stream')
+            raise Exception(f"Track not available in your country or subscription: {err_detail}")
+            
+        return first_data['media'][0]['sources'][0]['url']
 
     async def get_album(self, id):
         try:
@@ -254,6 +267,8 @@ class DeezerAPI:
         return res
 
     def _get_blowfish_key(self, track_id):
+        if len(self.bf_secret) < 16:
+            raise Exception("DEEZER_BF_SECRET belum diatur atau kurang dari 16 karakter di .env!")
         md5_id = MD5.new(str(track_id).encode()).hexdigest().encode('ascii')
         key = bytes([md5_id[i] ^ md5_id[i + 16] ^ self.bf_secret[i] for i in range(16)])
         return key
