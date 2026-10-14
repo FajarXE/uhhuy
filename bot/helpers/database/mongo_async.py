@@ -155,7 +155,8 @@ class MongoDB:
                 {'_id': task_id}, 
                 {'$set': {
                     'status': 'cancelled',
-                    'created_at': datetime.datetime.utcnow() # <-- Tambahan penanda TTL
+                    # [FIX] Gunakan timezone-aware UTC untuk kompatibilitas Python 3.14
+                    'created_at': datetime.datetime.now(datetime.timezone.utc)
                 }}, 
                 upsert=True
             )
@@ -188,7 +189,8 @@ class MongoDB:
                 {'$set': {
                     'message_id': message_id, 
                     'page': page,
-                    'updated_at': datetime.datetime.utcnow() # <-- Tambahan penanda TTL
+                    # [FIX] Gunakan timezone-aware UTC untuk kompatibilitas Python 3.14
+                    'updated_at': datetime.datetime.now(datetime.timezone.utc)
                 }},
                 upsert=True
             )
@@ -216,5 +218,12 @@ class MongoDB:
         except Exception:
             pass
     # ----------------------------------------
+
+    def close(self):
+        """Menutup koneksi pool AsyncIOMotorClient dengan aman"""
+        if self._db is not None:
+            self._db.close()
+            self._db = None
+            self._client = None
 
 database = MongoDB()
