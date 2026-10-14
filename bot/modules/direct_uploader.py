@@ -580,9 +580,15 @@ class DirectUpload:
         }
 
         size = os.path.getsize(filepath)
-        filename = unicodedata.normalize("NFKD", os.path.basename(filepath)).encode("ascii", "ignore").decode()
-        if not filename:
-            filename = f"file_{int(time.time())}"
+        
+        # --- [FIX] Pisahkan nama dan ekstensi agar judul non-Latin (Jepang/Korea/Mandarin) tidak berubah jadi ".flac" ---
+        raw_name = os.path.basename(filepath)
+        name_part, ext_part = os.path.splitext(raw_name)
+        clean_name = unicodedata.normalize("NFKD", name_part).encode("ascii", "ignore").decode().strip()
+        if not clean_name:
+            clean_name = f"track_{int(time.time())}"
+        filename = f"{clean_name}{ext_part}"
+        # ----------------------------------------------------------------------------------------------------------------
 
         hashes = await asyncio.to_thread(self._terabox_hash_file, filepath, size)
         chunk_size = hashes["chunk_size"]
