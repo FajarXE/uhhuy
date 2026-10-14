@@ -338,7 +338,8 @@ async def album_upload(metadata: dict, user: UserDetails):
     user_dict = user.copy()
     user_id = user['user_id']
     user_settings = bot_set.user_data.get(user_id, {})
-    user_mode = user_settings.get('upload_mode', 'Telegram')
+    # [FIX] Gunakan bot_set.upload_mode sebagai fallback, bukan hardcode 'Telegram'
+    user_mode = user_settings.get('upload_mode', bot_set.upload_mode)
     
     _, is_zip, _, show_poster = fetch_zip_settings(user)
     LOGGER.info(f"[DEBUG ALBUM] User: {user_id} | Mode: {user_mode} | ZIP: {is_zip} | Poster: {show_poster}")
@@ -351,7 +352,8 @@ async def album_upload(metadata: dict, user: UserDetails):
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
             await progress_message(0, 1, up_zip)
             
-        metadata['zip_path'] = await zip_handler(metadata['folderpath'])
+        # [FIX] Kirimkan user_id ke zip_handler agar mode Cloud tidak ter-split 1.9GB
+        metadata['zip_path'] = await zip_handler(metadata['folderpath'], user_id)
         LOGGER.info(f"[DEBUG ALBUM] Hasil Zipping: {metadata.get('zip_path')}")
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain', 'Terabox']:
@@ -411,17 +413,19 @@ async def artist_upload(metadata: dict, user: UserDetails):
     user_dict = user.copy()
     user_id = user['user_id']
     user_settings = bot_set.user_data.get(user_id, {})
-    user_mode = user_settings.get('upload_mode', 'Telegram')
+    # [FIX] Gunakan bot_set.upload_mode sebagai fallback
+    user_mode = user_settings.get('upload_mode', bot_set.upload_mode)
     
     _, _, is_zip, show_poster = fetch_zip_settings(user)
-    LOGGER.info(f"[DEBUG ARTIST] User: {user_id} | ZIP: {is_zip} | Poster: {show_poster}")
+    LOGGER.info(f"[DEBUG ARTIST] User: {user_id} | Mode: {user_mode} | ZIP: {is_zip} | Poster: {show_poster}")
     handle_lyrics_files(metadata.get('folderpath'), user_id)
 
     if is_zip and not metadata.get('zip_path'):
         if 'bot_msg' in user: 
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
             await progress_message(0, 1, up_zip)
-        metadata['zip_path'] = await zip_handler(metadata['folderpath'])
+        # [FIX] Kirimkan user_id ke zip_handler
+        metadata['zip_path'] = await zip_handler(metadata['folderpath'], user_id)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain', 'Terabox']:
         target = metadata.get('folderpath')
@@ -476,17 +480,19 @@ async def artist_upload(metadata: dict, user: UserDetails):
 async def playlist_upload(metadata: dict, user: UserDetails):
     user_id = user['user_id']
     user_settings = bot_set.user_data.get(user_id, {})
-    user_mode = user_settings.get('upload_mode', 'Telegram')
+    # [FIX] Gunakan bot_set.upload_mode sebagai fallback
+    user_mode = user_settings.get('upload_mode', bot_set.upload_mode)
     
     is_zip, _, _, show_poster = fetch_zip_settings(user)
-    LOGGER.info(f"[DEBUG PLAYLIST] User: {user_id} | ZIP: {is_zip} | Poster: {show_poster}")
+    LOGGER.info(f"[DEBUG PLAYLIST] User: {user_id} | Mode: {user_mode} | ZIP: {is_zip} | Poster: {show_poster}")
     handle_lyrics_files(metadata.get('folderpath'), user_id)
 
     if is_zip and not metadata.get('zip_path'):
         if 'bot_msg' in user: 
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
             await progress_message(0, 1, up_zip)
-        metadata['zip_path'] = await zip_handler(metadata['folderpath'])
+        # [FIX] Kirimkan user_id ke zip_handler
+        metadata['zip_path'] = await zip_handler(metadata['folderpath'], user_id)
 
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain', 'Terabox']:
         target = metadata.get('folderpath')
