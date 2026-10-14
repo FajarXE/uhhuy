@@ -5,18 +5,6 @@ from pyrogram import Client
 from .logger import LOGGER
 from .settings import bot_set
 
-# Import manager dengan aman
-try:
-    from bot import BOT_QOBUZ_CLIENTS 
-except ImportError:
-    BOT_QOBUZ_CLIENTS = {}
-
-try: from .helpers.deezer.manager import deezer_manager
-except ImportError: deezer_manager = None
-
-try: from .helpers.beatport.manager import beatport_manager
-except ImportError: beatport_manager = None
-
 plugins = dict(root="bot/modules")
 
 class Bot(Client):
@@ -28,7 +16,7 @@ class Bot(Client):
             bot_token=Config.TG_BOT_TOKEN,
             plugins=plugins,
             workdir=Config.WORK_DIR,
-            in_memory=False,
+            in_memory=True,  # [FIX] Konsisten dengan mode In-Memory (bebas SQLite lock)
             ipv6=False,
             workers=20,
             sleep_threshold=30
@@ -60,29 +48,8 @@ class Bot(Client):
                 try:
                     if hasattr(client, 'session') and client.session:
                         await client.session.close()
-                except Exception: pass
-        
-        # Cleanup Qobuz
-        if BOT_QOBUZ_CLIENTS:
-            for client in BOT_QOBUZ_CLIENTS.values():
-                try: await client.close_session() 
-                except: pass
-            
-        # Cleanup Deezer
-        if deezer_manager and hasattr(deezer_manager, 'clients'):
-            for client in deezer_manager.clients:
-                try: 
-                    if client.session and not client.session.closed:
-                        await client.session.close()
-                except: pass
-                
-        # Cleanup Beatport
-        if beatport_manager and hasattr(beatport_manager, 'clients'):
-            for client in beatport_manager.clients:
-                try:
-                    if hasattr(client, 'session') and client.session and not client.session.closed:
-                        await client.session.close()
-                except: pass
+                except Exception:
+                    pass
             
         LOGGER.info('BOT : Exited Successfully ! Bye..........')
 
