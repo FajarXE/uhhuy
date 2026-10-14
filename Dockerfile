@@ -40,9 +40,9 @@ COPY requirements.txt .
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 # --- [TAMBAHAN UNTUK AUDIOMACK] ---
-# Menginstal Chromium Browser dan Dependensi OS yang dibutuhkan Playwright
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# [FIX] Menginstal Chromium beserta dependensi OS dalam 1 layer & membersihkan cache apt
+RUN playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
 # ----------------------------------
 
 COPY . .
