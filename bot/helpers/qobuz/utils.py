@@ -296,8 +296,9 @@ async def get_track_metadata(item_id, r_id, q_meta=None, user: dict=None):
         else:
             logging.error(f"SEMUA SUMBER GAGAL, dan fallback lokal TIDAK DITEMUKAN di {FALLBACK_IMAGE_PATH}")
     
-    metadata['cover'] = await create_cover_file(final_cover_path_or_url, metadata)
-    metadata['thumbnail'] = await create_cover_file(final_cover_path_or_url, metadata, True)
+    cover_file_path = await create_cover_file(final_cover_path_or_url, metadata)
+    metadata['cover'] = cover_file_path
+    metadata['thumbnail'] = cover_file_path
 
     return metadata, None
   
@@ -409,8 +410,9 @@ async def get_album_metadata(item_id, r_id, user: dict):
         else:
             logging.error(f"SEMUA SUMBER GAGAL, dan fallback lokal TIDAK DITEMUKAN di {FALLBACK_IMAGE_PATH}")
     
-    metadata['cover'] = await create_cover_file(final_cover_path_or_url, metadata)
-    metadata['thumbnail'] = await create_cover_file(final_cover_path_or_url, metadata, True)
+    cover_file_path = await create_cover_file(final_cover_path_or_url, metadata)
+    metadata['cover'] = cover_file_path
+    metadata['thumbnail'] = cover_file_path
 
     # --- BOOKLET CHECK ---
     metadata['booklet_url'] = None
@@ -500,11 +502,17 @@ async def get_playlist_meta(raw_meta, tracks, r_id, user: dict):
         metadata['thumbnail'] = None
     
     for track in tracks:
+        if not track.get('streamable', True):
+            continue
         track_meta, err = await get_track_metadata(track['id'], r_id, track, user=user)
-        if err:
-            if err == "UNAVAILABLE":
-                raise QobuzContentUnavailableError(f"Track {track['id']} di playlist tidak tersedia.")
+        if err or not track_meta:
+            continue
         metadata['tracks'].append(track_meta)
+        
+    if not metadata['tracks']:
+        raise QobuzContentUnavailableError("Seluruh lagu di dalam playlist ini tidak tersedia di region akun ini.")
+        
+    metadata['totaltracks'] = str(len(metadata['tracks']))
     return metadata
 
 async def get_artist_meta(artist_raw):
@@ -592,12 +600,15 @@ async def check_type(url, user: dict):
                     skip_extras=True,
                 )
             else:
-                if type_dict["iterable_key"] not in content[0]:
-                     raise QobuzContentUnavailableError(f"Respons Qobuz tidak memiliki '{type_dict['iterable_key']}'")
-                if 'items' in content[0][type_dict["iterable_key"]]:
-                    items = content[0][type_dict["iterable_key"]]['items']
-                else:
-                    raise QobuzContentUnavailableError(f"Playlist ID:{item_id} kosong atau tidak memiliki track.")
+                iter_key = type_dict["iterable_key"]
+                if iter_key not in content[0]:
+                    raise QobuzContentUnavailableError(f"Respons Qobuz tidak memiliki '{iter_key}'")
+                items = []
+                for page in content:
+                    if iter_key in page and isinstance(page[iter_key], dict) and 'items' in page[iter_key]:
+                        items.extend(page[iter_key]['items'])
+                if not items:
+                    raise QobuzContentUnavailableError(f"Playlist/Label ID:{item_id} kosong atau tidak memiliki item.")
         return items, item_id, type_dict, content
     else:
         return None, item_id, type_dict, content
