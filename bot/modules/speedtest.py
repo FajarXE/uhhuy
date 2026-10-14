@@ -66,45 +66,44 @@ async def speedtest_handler(client, message):
 def run_speedtest():
     start_time = time.time()
     
-    with SuppressOutput():
-        s = speedtest.Speedtest(secure=True)
-        s.get_best_server()
-        s.download()
-        s.upload()
-        s.results.share()
-        
-        res = s.results.dict()
-        
-        # 1. Konversi ke MB/s (Megabyte/s)
-        d_mbyte = (res["download"] / 8) / 1024 / 1024
-        u_mbyte = (res["upload"] / 8) / 1024 / 1024
-        
-        res['download_mbyte'] = f"{d_mbyte:.2f} MB/s"
-        res['upload_mbyte'] = f"{u_mbyte:.2f} MB/s"
+    s = speedtest.Speedtest(secure=True)
+    s.get_best_server()
+    s.download()
+    s.upload()
+    s.results.share()
+    
+    res = s.results.dict()
+    
+    # 1. Konversi ke MB/s (Megabyte/s)
+    d_mbyte = (res["download"] / 8) / 1024 / 1024
+    u_mbyte = (res["upload"] / 8) / 1024 / 1024
+    
+    res['download_mbyte'] = f"{d_mbyte:.2f} MB/s"
+    res['upload_mbyte'] = f"{u_mbyte:.2f} MB/s"
 
-        # 2. Konversi ke Gbps (Gigabit/s)
-        d_gbps = res["download"] / 1_000_000_000
-        u_gbps = res["upload"] / 1_000_000_000
+    # 2. Konversi ke Gbps (Gigabit/s)
+    d_gbps = res["download"] / 1_000_000_000
+    u_gbps = res["upload"] / 1_000_000_000
 
-        res['download_gbps'] = f"{d_gbps:.2f} Gbps"
-        res['upload_gbps'] = f"{u_gbps:.2f} Gbps"
-        
-        # 3. Masking IP
-        real_ip = res['client']['ip']
-        try:
-            parts = real_ip.split('.')
-            if len(parts) >= 2:
-                masked_ip = f"{parts[0]}.{parts[1]}xxxxxx"
-            else:
-                masked_ip = "Hidden"
-        except:
+    res['download_gbps'] = f"{d_gbps:.2f} Gbps"
+    res['upload_gbps'] = f"{u_gbps:.2f} Gbps"
+    
+    # 3. Masking IP
+    real_ip = res['client']['ip']
+    try:
+        parts = real_ip.split('.')
+        if len(parts) >= 2:
+            masked_ip = f"{parts[0]}.{parts[1]}.xxx.xxx"
+        else:
             masked_ip = "Hidden"
-        
-        res['ip_masked'] = masked_ip
-        
-        # 4. Hitung Waktu Eksekusi
-        end_time = time.time()
-        exec_duration = end_time - start_time
-        res['exec_time'] = f"{exec_duration:.2f}"
-        
-        return res
+    except Exception:
+        masked_ip = "Hidden"
+    
+    res['ip_masked'] = masked_ip
+    
+    # 4. Hitung Waktu Eksekusi
+    end_time = time.time()
+    exec_duration = end_time - start_time
+    res['exec_time'] = f"{exec_duration:.2f}"
+    
+    return res
