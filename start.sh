@@ -3,7 +3,7 @@
 # Tangkap sinyal terminasi (SIGINT, SIGTERM, EXIT) dan bunuh semua proses anak
 trap 'kill $(jobs -p) 2>/dev/null; exit' SIGINT SIGTERM EXIT
 
-# [FIX] Menambahkan --rpc-secret dan mengunci --rpc-listen-all=false agar sinkron dengan aria2_helper.py
+# Menjalankan daemon aria2c dengan RPC Secret dan akses lokal
 aria2c --daemon=true \
        --enable-rpc \
        --rpc-listen-all=false \
@@ -21,13 +21,20 @@ aria2c --daemon=true \
 # Menjalankan API Scraper Audiomack dan menyimpan lognya
 uvicorn audiomack_api.main:app --host 127.0.0.1 --port 8000 > uvicorn_error.log 2>&1 &
 
-# Beri jeda agar browser Playwright termuat
-sleep 15
+# [FIX] Tunggu secara dinamis hingga Uvicorn siap (Maksimal 20 detik)
+echo "Menunggu API Uvicorn Audiomack siap..."
+for i in {1..20}; do
+    if curl -s http://127.0.0.1:8000/docs > /dev/null; then
+        echo "Uvicorn siap dalam ${i} detik!"
+        break
+    fi
+    sleep 1
+done
 
 echo "=== LOG UVICORN AUDIOMACK ==="
 cat uvicorn_error.log
 echo "============================="
 
-# Menjalankan bot utama di foreground
+# Menjalankan bot utama
 python3 -m bot & 
 wait
