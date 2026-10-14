@@ -416,6 +416,7 @@ async def run_download_task(link: str, user: dict):
                     'speed_dl_raw': 0,
                     'speed_ul_raw': 0,
                     'user_id': chat_id,
+                    'owner_id': user.get('user_id', chat_id), # [FIX] Simpan ID personal pembuat task
                     'timestamp': time.time(),
                     'is_queue': False
                 }
