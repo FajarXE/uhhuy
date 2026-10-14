@@ -459,6 +459,10 @@ async def artist_upload(metadata: dict, user: UserDetails):
                     task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
                     details = {'msg': user['bot_msg'], 'title': os.path.basename(item), 'type': 'Zip Archive', 'action': 'Upload', 'machine': 'Telegram API', 'task_id': task_id}
                 await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata, progress=tg_progress_callback, progress_args=(details,))
+        else:
+            # [FIX] Menambahkan batch upload saat opsi Artist ZIP tidak aktif
+            LOGGER.info("[DEBUG ARTIST] Uploading Batch Tracks (ZIP False/Gagal)")
+            await batch_telegram_upload(metadata, user)
     else:
         rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
         if show_poster and metadata.get('poster_msg'):
@@ -590,38 +594,56 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
     # ---------------------------------------------------
 
 async def rclone_upload(user: UserDetails, realpath):
-    path_to_upload = realpath
+    from pathlib import Path
     base_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
-    if isinstance(realpath, list): path_to_upload = base_path
-    elif isinstance(realpath, str) and realpath.endswith('.zip'): path_to_upload = realpath
-    else: path_to_upload = realpath 
-    path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
     
-    process = await asyncio.create_subprocess_exec(
-        "rclone", "copy", "--config", "./rclone.conf", path, Config.RCLONE_DEST,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    
-    async def consume_stream(stream):
-        while True:
-            line = await stream.readline()
-            if not line:
-                break
-
-    try:
-        await asyncio.gather(
-            consume_stream(process.stdout),
-            consume_stream(process.stderr),
-            process.wait()
+    async def _run_rclone_copy(src: str, dest: str):
+        process = await asyncio.create_subprocess_exec(
+            "rclone", "copy", "--config", "./rclone.conf", src, dest,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-    except asyncio.CancelledError:
-        # --- BUNUH ZOMBIE PROCESS RCLONE ---
+        
+        async def consume_stream(stream):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+
         try:
-            process.terminate()
-        except Exception:
-            pass
-        raise # Lempar kembali error ke fungsi pemanggil agar antrean dibersihkan
-    
+            await asyncio.gather(
+                consume_stream(process.stdout),
+                consume_stream(process.stderr),
+                process.wait()
+            )
+        except asyncio.CancelledError:
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            raise
+
+    # [FIX] Gunakan path spesifik agar folder mentah tidak ikut terunggah saat mode ZIP / Track satuan
+    if isinstance(realpath, list):
+        for item in realpath:
+            try:
+                rel_parent = Path(item).relative_to(base_path).parent
+                dest_dir = f"{Config.RCLONE_DEST}/{rel_parent}" if str(rel_parent) != "." else Config.RCLONE_DEST
+            except ValueError:
+                dest_dir = Config.RCLONE_DEST
+            await _run_rclone_copy(str(item), dest_dir)
+    else:
+        target_path = Path(realpath)
+        try:
+            rel_path = target_path.relative_to(base_path)
+            if target_path.is_dir():
+                dest_dir = f"{Config.RCLONE_DEST}/{rel_path}" if str(rel_path) != "." else Config.RCLONE_DEST
+            else:
+                rel_parent = rel_path.parent
+                dest_dir = f"{Config.RCLONE_DEST}/{rel_parent}" if str(rel_parent) != "." else Config.RCLONE_DEST
+        except ValueError:
+            dest_dir = Config.RCLONE_DEST
+        await _run_rclone_copy(str(target_path), dest_dir)
+
     r_link, i_link = await create_link(realpath, base_path)
     return r_link, i_link
 
