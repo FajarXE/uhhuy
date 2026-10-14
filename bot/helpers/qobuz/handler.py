@@ -375,30 +375,20 @@ async def start_playlist(tracks, playlist, user):
         # ------------------------------------------------------
         _, play_meta['quality'] = await get_quality(track_meta, user)
     except QobuzContentUnavailableError as e:
-        raise e # Lemparkan ke luar agar memicu pergantian akun
-    except:
+        raise e  # Lemparkan ke luar agar memicu pergantian akun
+    except Exception:
         play_meta['quality'] = "Unknown"
 
     update_details = {'text': lang.s.DOWNLOAD_PROGRESS, 'msg': user['bot_msg'], 'title': play_meta['title'], 'type': play_meta['type']}
     play_meta['poster_msg'] = await post_art_poster(user, play_meta)
 
-    # --- DETEKSI MODE UPLOAD ---
-    upload = True
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
-    
-    user_id = user.get('user_id')
-    raw_user_data = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
-    user_mode = raw_user_data.get('upload_mode', 'Telegram')
-    
-    # Jika mode Cloud (Gofile/Buzz/Viking), matikan upload per track
-    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles']:
-        upload = False
 
     # [FIX] SATUKAN LOGIC CONCURRENT & SEQUENTIAL MENGGUNAKAN RADAR PINTAR ARIA2
     if bot_set.playlist_conc:
         limit_pekerja = Config.MAX_WORKERS
     else:
-        limit_pekerja = 1 # Sequential (Kerjakan 1 per 1 agar berurutan)
+        limit_pekerja = 1  # Sequential (Kerjakan 1 per 1 agar berurutan)
 
     tasks = []
     for track in play_meta['tracks']: 
@@ -412,10 +402,13 @@ async def start_playlist(tracks, playlist, user):
     play_meta['tracks'] = successful_tracks
     play_meta['totaltracks'] = len(successful_tracks)
 
-    # Copy Cover
-    if play_meta.get('cover') and os.path.exists(play_meta['cover']):
-        try: shutil.copy2(play_meta['cover'], os.path.join(play_meta['folderpath'], "cover.jpg"))
-        except: pass
+    # Copy Cover (Pastikan folderpath tidak None agar aman saat playlist_sort aktif)
+    if play_meta.get('folderpath') and play_meta.get('cover') and os.path.exists(play_meta['cover']):
+        try:
+            os.makedirs(play_meta['folderpath'], exist_ok=True)
+            shutil.copy2(play_meta['cover'], os.path.join(play_meta['folderpath'], "cover.jpg"))
+        except Exception:
+            pass
 
     # Sort Playlist jika diminta
     if playlist_zip and playlist_sort: 
