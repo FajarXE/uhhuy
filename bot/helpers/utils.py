@@ -274,21 +274,27 @@ async def create_link(path, basepath):
     return rclone_link, index_link
 
 
-# --- [FIX] OPTIMASI NATIVE SYSTEM ZIP UNTUK SPLIT ---
-async def zip_handler(folderpath):
+# --- [FIX] OPTIMASI NATIVE SYSTEM ZIP DENGAN DETEKSI USER_ID AKURAT ---
+async def zip_handler(folderpath, user_id=None):
     user_mode = bot_set.upload_mode
     try:
-        parts = folderpath.split(os.sep)
-        for part in parts:
-            if part.isdigit() and len(part) > 5:
-                u_id = int(part)
-                u_data = bot_set.user_data.get(u_id, {})
-                if not u_data:
-                     u_data = bot_set.user_data.get(str(u_id), {})
-                if u_data.get('upload_mode'):
-                    user_mode = u_data['upload_mode']
-                break
-    except: pass
+        # 1. Prioritaskan pencarian langsung menggunakan user_id jika tersedia
+        if user_id is not None:
+            u_data = bot_set.user_data.get(int(user_id)) or bot_set.user_data.get(str(user_id), {})
+            if u_data and u_data.get('upload_mode'):
+                user_mode = u_data['upload_mode']
+        else:
+            # 2. Fallback lama jika dipanggil dari modul lain tanpa argumen user_id
+            parts = folderpath.split(os.sep)
+            for part in parts:
+                if part.isdigit() and len(part) > 5:
+                    u_id = int(part)
+                    u_data = bot_set.user_data.get(u_id) or bot_set.user_data.get(str(u_id), {})
+                    if u_data and u_data.get('upload_mode'):
+                        user_mode = u_data['upload_mode']
+                    break
+    except Exception:
+        pass
 
     if user_mode == 'Telegram':
         LOGGER.info(f"[ZIP] Mode Telegram: Menggunakan Native OS Split Zip (1900MB)")
