@@ -31,6 +31,7 @@ from config import Config
 from bot.logger import LOGGER
 
 COVER_LOCKS = {}
+COVER_LOCK_WAITERS = {}
 _COVER_SESSIONS = {}
 
 class SafeTempFile:
@@ -1128,7 +1129,7 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
     if not url: return './project-siesta.png'
     if url.startswith("//"): url = "https:" + url
 
-    if 'cover_temp_obj' in meta and os.path.exists(meta['cover_temp_obj'].name):
+    if 'cover_temp_obj' in meta and os.path.exists(meta['cover_temp_obj'].name) and os.path.getsize(meta['cover_temp_obj'].name) > 0:
         return meta['cover_temp_obj'].name
 
     temp_dir = meta.get('tempfolder', '.')
@@ -1137,21 +1138,24 @@ async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = 
     temp_file = tempfile.NamedTemporaryFile(dir=temp_dir, suffix='.jpg', delete=True)
     cover_path = temp_file.name
     
-    # --- PERBAIKAN DI SINI ---
     # Gunakan wrapper SafeTempFile agar lolos dari jebakan copy.deepcopy() di modul penyedia musik
     meta['cover_temp_obj'] = SafeTempFile(temp_file)
-    # -------------------------
 
+    # [FIX] Gunakan reference counter agar lock tidak dihapus saat coroutine lain masih mengantre
     lock = COVER_LOCKS.get(url)
     if lock is None:
         lock = asyncio.Lock()
         COVER_LOCKS[url] = lock
+    COVER_LOCK_WAITERS[url] = COVER_LOCK_WAITERS.get(url, 0) + 1
 
     try:
         async with lock:
-            await _download_cover_with_headers(url, cover_path, proxy=proxy)
+            if not (os.path.exists(cover_path) and os.path.getsize(cover_path) > 0):
+                await _download_cover_with_headers(url, cover_path, proxy=proxy)
     finally:
-        if url in COVER_LOCKS:
+        COVER_LOCK_WAITERS[url] = COVER_LOCK_WAITERS.get(url, 1) - 1
+        if COVER_LOCK_WAITERS[url] <= 0:
+            COVER_LOCK_WAITERS.pop(url, None)
             COVER_LOCKS.pop(url, None)
     
     if os.path.exists(cover_path) and os.path.getsize(cover_path) > 0:
