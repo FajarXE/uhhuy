@@ -19,9 +19,10 @@ class MongoDB:
         if self._db is None:
             self._db = AsyncIOMotorClient(
                 Config.DATABASE_URL,
-                serverSelectionTimeoutMS=5000, # Batal mencoba jika server mati > 5 detik
-                connectTimeoutMS=10000,        # Batas waktu handshake
-                maxPoolSize=200                # Angkat batas koneksi simultan untuk konkurensi tinggi
+                serverSelectionTimeoutMS=20000, # [FIX] Naikkan ke 20 detik untuk DNS SRV & TLS MongoDB Atlas
+                connectTimeoutMS=20000,         # [FIX] Batas waktu handshake 20 detik
+                socketTimeoutMS=30000,
+                maxPoolSize=200
             )
         return self._db
         
@@ -84,13 +85,18 @@ class MongoDB:
         if not query:
             query = {}
             
-        # Menggunakan find_one() untuk langsung mengambil 1 dokumen (menghemat penggunaan RAM)
-        data_dict = await self.client.music.find_one(query) or {}
-        
-        if "_id" in data_dict:
-            data_dict.pop("_id")
-            
-        return data_dict
+        # [FIX] Tambahkan retry & try-except agar bot tidak crash fatal saat cold-start ke MongoDB Atlas
+        for attempt in range(3):
+            try:
+                data_dict = await self.client.music.find_one(query) or {}
+                if "_id" in data_dict:
+                    data_dict.pop("_id")
+                return data_dict
+            except Exception as e:
+                logging.warning(f"MongoDB get_variable timeout/error (Percobaan {attempt+1}/3): {e}")
+                if attempt == 2:
+                    logging.error("MongoDB gagal dihubungi setelah 3 percobaan. Menggunakan pengaturan default sementara.")
+                    return {}
 
     async def save_user_settings(self, user_id: int=0, data: dict=None) -> None:
         if data is None:
