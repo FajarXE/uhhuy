@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import time  # <-- [TAMBAHAN IMPORT]
 from bot.logger import LOGGER
 
 try:
@@ -18,7 +19,7 @@ class ProxyPoolManager:
         if not proxy_url: return
         async with self._lock:
             if proxy_url not in self.proxies:
-                self.proxies[proxy_url] = {"fails": 0, "active": True}
+                self.proxies[proxy_url] = {"fails": 0, "active": True, "disabled_at": 0}
                 LOGGER.info(f"Proxy Pool: Proksi ditambahkan -> {proxy_url}")
 
     async def get_proxy(self, specific_proxy=None):
@@ -28,6 +29,15 @@ class ProxyPoolManager:
             return specific_proxy
             
         async with self._lock:
+            # --- [FIX: AUTO-HEAL PROXY SETELAH 15 MENIT (900 DETIK)] ---
+            now = time.time()
+            for url, data in self.proxies.items():
+                if not data["active"] and (now - data.get("disabled_at", 0) > 900):
+                    data["active"] = True
+                    data["fails"] = 0
+                    LOGGER.info(f"Proxy Pool: Mengaktifkan kembali proksi setelah cooldown -> {url}")
+            # -----------------------------------------------------------
+
             active_proxies = [url for url, data in self.proxies.items() if data["active"]]
             if not active_proxies:
                 return None
@@ -46,7 +56,8 @@ class ProxyPoolManager:
                 self.proxies[proxy_url]["fails"] += 1
                 if self.proxies[proxy_url]["fails"] >= 3:
                     self.proxies[proxy_url]["active"] = False
-                    LOGGER.warning(f"Proxy Pool: Proksi dibekukan (Mati) -> {proxy_url}")
+                    self.proxies[proxy_url]["disabled_at"] = time.time()  # <-- [CATAT WAKTU BEKU]
+                    LOGGER.warning(f"Proxy Pool: Proksi dibekukan sementara (Cooldown 15m) -> {proxy_url}")
 
     async def report_success(self, proxy_url):
         """Mereset hitungan kegagalan jika proksi berhasil digunakan."""
