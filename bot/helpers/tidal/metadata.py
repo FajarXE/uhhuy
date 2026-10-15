@@ -15,8 +15,27 @@ from bot.logger import LOGGER
 from ..metadata import metadata as base_meta
 from ..metadata import create_cover_file
 
-# Limit 1 request setiap 1.5 detik
+# Limit 1 request setiap 1.5 detik untuk MusicBrainz
 MBZ_LIMITER = aiolimiter.AsyncLimiter(1, 1.5)
+
+# --- SESI HTTP BERSAMA (SHARED SESSION) ---
+_TIDAL_META_SESSION = None
+
+def get_tidal_meta_session():
+    global _TIDAL_META_SESSION
+    if _TIDAL_META_SESSION is None or _TIDAL_META_SESSION.closed:
+        _TIDAL_META_SESSION = aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(limit=30, keepalive_timeout=30, enable_cleanup_closed=True)
+        )
+    return _TIDAL_META_SESSION
+
+async def close_tidal_meta_session():
+    global _TIDAL_META_SESSION
+    if _TIDAL_META_SESSION and not _TIDAL_META_SESSION.closed:
+        await _TIDAL_META_SESSION.close()
+        _TIDAL_META_SESSION = None
+# ------------------------------------------
+
 
 # --- FUNGSI BANTUAN API PIHAK KETIGA ---
 
@@ -28,68 +47,56 @@ async def get_deezer_genre_by_upc(upc):
     if not upc:
         return None
     
-    # API Publik Deezer untuk lookup via UPC
     url = f"https://api.deezer.com/album/upc:{upc}"
+    session = get_tidal_meta_session()
     
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
+    try:
+        async with session.get(url, timeout=10) as resp:
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                
+                if 'error' in data:
+                    return None
                     
-                    # Cek apakah ada error (UPC tidak ditemukan di Deezer)
-                    if 'error' in data:
-                        return None
-                        
-                    # Ambil Genre
-                    if 'genres' in data and data['genres']['data']:
-                        # Mengambil genre pertama (biasanya main genre)
-                        return data['genres']['data'][0]['name']
-        except Exception as e:
-            LOGGER.warning(f"Deezer UPC lookup failed: {e}")
+                if 'genres' in data and data['genres'].get('data'):
+                    return data['genres']['data'][0]['name']
+    except Exception as e:
+        LOGGER.warning(f"Deezer UPC lookup failed: {e}")
     return None
+
 
 async def get_itunes_info(artist, title, album, use_album_search=False):
     """
     Mencari metadata tambahan dari iTunes Store dengan strategi pencarian bertingkat.
     """
-    # 1. Bersihkan Judul (Hapus feat, prod, explicit, kurung)
     clean_title = re.sub(r'(?i)\s*[\(\[]\s*(feat|ft|with|prod|explicit|clean|dirty).*?[\)\]]', '', title)
     clean_title = re.sub(r'\s*\(.*?\)', '', clean_title).strip()
     
-    # 2. Tentukan Artis Utama (Primary Artist) untuk menghindari isu "Artist A, Artist B"
     primary_artist = artist.split(',')[0].split('&')[0].strip()
 
-    # 3. Siapkan Variasi Pencarian
-    search_terms = []
-    
-    # Prioritas 1: Primary Artist + Clean Title
-    search_terms.append(f"{primary_artist} {clean_title}")
-    
-    # Prioritas 2: Primary Artist + Original Title (Jika judul asli unik)
+    search_terms = [f"{primary_artist} {clean_title}"]
     if title != clean_title:
         search_terms.append(f"{primary_artist} {title}")
     
-    # Header wajib agar tidak diblokir Apple
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-    
     entity = "album" if use_album_search else "song"
+    session = get_tidal_meta_session()
     
-    async with aiohttp.ClientSession() as session:
-        for term in search_terms:
-            encoded_term = urllib.parse.quote(term)
-            url = f"https://itunes.apple.com/search?term={encoded_term}&entity={entity}&limit=1"
+    for term in search_terms:
+        encoded_term = urllib.parse.quote(term)
+        url = f"https://itunes.apple.com/search?term={encoded_term}&entity={entity}&limit=1"
+        
+        try:
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None) 
+                    if data.get('resultCount', 0) > 0:
+                        return data['results'][0]
+        except Exception as e:
+            LOGGER.warning(f"iTunes lookup error ({term}): {e}")
             
-            try:
-                async with session.get(url, headers=headers, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None) 
-                        if data['resultCount'] > 0:
-                            return data['results'][0]
-            except Exception as e:
-                LOGGER.warning(f"iTunes lookup error ({term}): {e}")
-                
     return None
+
 
 async def get_musicbrainz_info(isrc):
     """Mencari metadata tambahan dari MusicBrainz."""
@@ -98,36 +105,37 @@ async def get_musicbrainz_info(isrc):
     
     url = f"https://musicbrainz.org/ws/2/recording?query=isrc:{isrc}&fmt=json&inc=tags+releases"
     headers = {"User-Agent": "TidalBot/1.0 ( your_email@example.com )"}
+    session = get_tidal_meta_session()
     
-    async with aiohttp.ClientSession() as session:
-        try:
-            # Menggunakan limiter agar tidak di-banned oleh MusicBrainz (Limit 1 Req / 1.5 Detik)
-            async with MBZ_LIMITER:
-                async with session.get(url, headers=headers, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        if data.get('recordings'):
-                            recording = data['recordings'][0]
-                            info = {}
+    try:
+        async with MBZ_LIMITER:
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    if data.get('recordings'):
+                        recording = data['recordings'][0]
+                        info = {}
+                        
+                        if recording.get('releases'):
+                            dates = []
+                            for rel in recording['releases']:
+                                if rel.get('date'):
+                                    dates.append(rel['date'])
+                            if dates:
+                                dates.sort()
+                                info['date'] = dates[0]
+                        
+                        tags = recording.get('tags', [])
+                        if tags:
+                            sorted_tags = sorted(tags, key=lambda x: x.get('count', 0), reverse=True)
+                            genre_list = [t['name'].title() for t in sorted_tags[:2]]
+                            info['genre'] = ', '.join(genre_list)
                             
-                            if recording.get('releases'):
-                                dates = []
-                                for rel in recording['releases']:
-                                    if rel.get('date'): dates.append(rel['date'])
-                                if dates:
-                                    dates.sort()
-                                    info['date'] = dates[0]
-                            
-                            tags = recording.get('tags', [])
-                            if tags:
-                                sorted_tags = sorted(tags, key=lambda x: x.get('count', 0), reverse=True)
-                                genre_list = [t['name'].title() for t in sorted_tags[:2]]
-                                info['genre'] = ', '.join(genre_list)
-                                
-                            return info
-        except Exception as e:
-            LOGGER.warning(f"MusicBrainz lookup failed: {e}")
+                        return info
+    except Exception as e:
+        LOGGER.warning(f"MusicBrainz lookup failed: {e}")
     return None
+
 
 # --- FUNGSI PARSING GENRE ---
 def parse_genre_field(data):
@@ -144,12 +152,14 @@ def parse_genre_field(data):
         names = []
         for item in data:
             if isinstance(item, dict):
-                if item.get('name'): names.append(item['name'])
+                if item.get('name'):
+                    names.append(item['name'])
             else:
                 names.append(str(item))
         return ', '.join(names) if names else None
 
     return str(data)
+
 
 # --- FUNGSI UTAMA ---
 async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False, client=None, user_id=0):
@@ -198,7 +208,7 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
     # --- 2. SIAPKAN GENRE DARI TRACK (TIDAL INTERNAL) ---
     tidal_track_genre = parse_genre_field(t_meta.get('genre'))
     if not tidal_track_genre:
-         tidal_track_genre = parse_genre_field(t_meta.get('genres'))
+        tidal_track_genre = parse_genre_field(t_meta.get('genres'))
 
     # --- 3. ENRICHMENT VIA TIDAL CLIENT ---
     tidal_album_date = None
@@ -211,14 +221,19 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
             album_id = t_meta.get('album', {}).get('id')
             if album_id:
                 full_album = await client.get_album(album_id)
-                if full_album.get('releaseDate'): tidal_album_date = full_album['releaseDate']
+                if full_album.get('releaseDate'):
+                    tidal_album_date = full_album['releaseDate']
                 
                 tidal_album_genre = parse_genre_field(full_album.get('genre'))
-                if not tidal_album_genre: tidal_album_genre = parse_genre_field(full_album.get('genres'))
+                if not tidal_album_genre:
+                    tidal_album_genre = parse_genre_field(full_album.get('genres'))
                 
-                if full_album.get('upc'): metadata['upc'] = full_album['upc']
-                if full_album.get('numberOfTracks'): metadata['totaltracks'] = full_album['numberOfTracks']
-                if full_album.get('numberOfVolumes'): metadata['totalvolume'] = full_album['numberOfVolumes']
+                if full_album.get('upc'):
+                    metadata['upc'] = full_album['upc']
+                if full_album.get('numberOfTracks'):
+                    metadata['totaltracks'] = full_album['numberOfTracks']
+                if full_album.get('numberOfVolumes'):
+                    metadata['totalvolume'] = full_album['numberOfVolumes']
 
             # B. Info Artist
             if not tidal_album_genre and not tidal_track_genre:
@@ -228,8 +243,9 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
                         artist_data = await client.get_artist(artist_id)
                         tidal_artist_genre = parse_genre_field(artist_data.get('genre'))
                         if not tidal_artist_genre:
-                             tidal_artist_genre = parse_genre_field(artist_data.get('genres'))
-                    except Exception: pass
+                            tidal_artist_genre = parse_genre_field(artist_data.get('genres'))
+                    except Exception:
+                        pass
 
             # C. Composer
             credits_data = await client.get_track_contributors(track_id)
@@ -238,9 +254,11 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
                 for item in credits_data['items']:
                     role = item.get('role', '').lower()
                     name = item.get('name', '')
-                    if 'composer' in role: composers.append(name)
+                    if 'composer' in role and name:
+                        composers.append(name)
             
-            if composers: metadata['composer'] = ', '.join(composers)
+            if composers:
+                metadata['composer'] = ', '.join(composers)
 
         except Exception as e:
             LOGGER.warning(f"Tidal Client Enrichment Failed: {e}")
@@ -252,13 +270,12 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
 
     # HANYA cari eksternal jika Tidal internal kosong
     if not tidal_album_genre and not tidal_track_genre and not tidal_artist_genre:
-        
-        # A. Coba DEEZER UPC Lookup (Metode Baru - Sangat Akurat)
-        # Kita gunakan UPC dari Album Tidal
+        # A. Coba DEEZER UPC Lookup
         if metadata.get('upc'):
             try:
                 deezer_genre = await get_deezer_genre_by_upc(metadata['upc'])
-            except Exception: pass
+            except Exception:
+                pass
         
         # B. Coba iTunes (Text Search) - Hanya jika Deezer gagal
         if not deezer_genre:
@@ -266,42 +283,49 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
                 itunes_data = await get_itunes_info(metadata['artist'], metadata['title'], metadata['album'])
                 if not itunes_data:
                     itunes_data = await get_itunes_info(metadata['artist'], metadata['title'], metadata['album'], use_album_search=True)
-            except Exception: pass
+            except Exception:
+                pass
 
         # C. Coba MusicBrainz
         if not deezer_genre and not itunes_data:
             try:
                 mb_data = await get_musicbrainz_info(metadata['isrc'])
-            except Exception: pass
+            except Exception:
+                pass
 
     # --- 5. MERGING GENRE (PRIORITAS FINAL) ---
     final_genre = None
     
-    # 1. Tidal Album (Data Asli)
-    if tidal_album_genre: final_genre = tidal_album_genre
-    # 2. Tidal Track
-    elif tidal_track_genre: final_genre = tidal_track_genre
-    # 3. Deezer UPC (Sangat Akurat untuk Rap/Hip-Hop Global)
-    elif deezer_genre: final_genre = deezer_genre
-    # 4. Tidal Artist
-    elif tidal_artist_genre: final_genre = tidal_artist_genre
-    # 5. iTunes
-    elif itunes_data and itunes_data.get('primaryGenreName'): final_genre = itunes_data['primaryGenreName']
-    # 6. MusicBrainz
-    elif mb_data and mb_data.get('genre'): final_genre = mb_data['genre']
+    if tidal_album_genre:
+        final_genre = tidal_album_genre
+    elif tidal_track_genre:
+        final_genre = tidal_track_genre
+    elif deezer_genre:
+        final_genre = deezer_genre
+    elif tidal_artist_genre:
+        final_genre = tidal_artist_genre
+    elif itunes_data and itunes_data.get('primaryGenreName'):
+        final_genre = itunes_data['primaryGenreName']
+    elif mb_data and mb_data.get('genre'):
+        final_genre = mb_data['genre']
     
     if final_genre: 
         metadata['genre'] = final_genre
 
     # --- 6. MERGING DATES ---
     final_date = None
-    if tidal_album_date: final_date = tidal_album_date
-    if not final_date and t_meta.get('album') and t_meta['album'].get('releaseDate'): final_date = t_meta['album']['releaseDate']
-    if not final_date and t_meta.get('streamStartDate'): final_date = t_meta['streamStartDate'][:10]
+    if tidal_album_date:
+        final_date = tidal_album_date
+    if not final_date and t_meta.get('album') and t_meta['album'].get('releaseDate'):
+        final_date = t_meta['album']['releaseDate']
+    if not final_date and t_meta.get('streamStartDate'):
+        final_date = t_meta['streamStartDate'][:10]
 
     if not final_date:
-        if itunes_data and itunes_data.get('releaseDate'): final_date = itunes_data['releaseDate'][:10]
-        elif mb_data and mb_data.get('date'): final_date = mb_data['date']
+        if itunes_data and itunes_data.get('releaseDate'):
+            final_date = itunes_data['releaseDate'][:10]
+        elif mb_data and mb_data.get('date'):
+            final_date = mb_data['date']
 
     if final_date:
         metadata['release_date'] = final_date
@@ -312,17 +336,18 @@ async def get_track_metadata(track_id, t_meta, r_id, cover=None, thumbnail=False
 
     # Cover Art
     metadata['cover'] = cover if cover else await get_cover(t_meta.get('album', {}).get('cover'), metadata, False, user_id)
-    metadata['thumbnail'] = thumbnail if thumbnail else await get_cover(t_meta.get('album', {}).get('cover'), metadata, True, user_id)
+    metadata['thumbnail'] = thumbnail if thumbnail else metadata['cover']
 
     if not metadata.get('composer') and t_meta.get('composers'):
-        metadata['composer'] = ', '.join([c.get('name', '') for c in t_meta['composers']])
+        metadata['composer'] = ', '.join([c.get('name', '') for c in t_meta['composers'] if c.get('name')])
 
-    # --- [FIX] SUNTIKAN PROVIDER DAN TYPE UNTUK CLOUD UPLOAD ---
+    # --- SUNTIKAN PROVIDER DAN TYPE UNTUK CLOUD UPLOAD ---
     metadata['provider'] = 'Tidal'
     metadata['type'] = 'Track'
-    # -----------------------------------------------------------
+    # -----------------------------------------------------
 
     return metadata
+
 
 async def get_album_metadata(album_id, a_meta, t_meta, r_id, user_id=0):
     """
@@ -343,8 +368,8 @@ async def get_album_metadata(album_id, a_meta, t_meta, r_id, user_id=0):
         metadata['release_date'] = a_meta['releaseDate'] 
         metadata['date'] = a_meta['releaseDate'].split('-')[0] 
     else:
-         metadata['release_date'] = ''
-         metadata['date'] = ''
+        metadata['release_date'] = ''
+        metadata['date'] = ''
     
     metadata['totaltracks'] = a_meta['numberOfTracks']
     metadata['duration'] = a_meta['duration']
@@ -368,38 +393,36 @@ async def get_album_metadata(album_id, a_meta, t_meta, r_id, user_id=0):
     if not album_genre:
         album_genre = parse_genre_field(a_meta.get('genres'))
     
-    # Fallback ke Deezer UPC jika Tidal kosong
     if not album_genre and metadata.get('upc'):
         try:
             album_genre = await get_deezer_genre_by_upc(metadata['upc'])
-        except Exception: pass
+        except Exception:
+            pass
     
-    # Fallback ke iTunes jika Deezer juga kosong
     if not album_genre:
         try:
             itunes_data = await get_itunes_info(metadata['artist'], metadata['title'], metadata['album'], use_album_search=True)
             if itunes_data and itunes_data.get('primaryGenreName'):
                 album_genre = itunes_data['primaryGenreName']
-        except Exception: pass
+        except Exception:
+            pass
             
     if album_genre:
         metadata['genre'] = album_genre
     # -------------------------------------------
 
     metadata['cover'] = await get_cover(a_meta.get('cover'), metadata, False, user_id)
-    metadata['thumbnail'] = await get_cover(a_meta.get('cover'), metadata, True, user_id)
+    metadata['thumbnail'] = metadata['cover']
 
     metadata['tracks'] = []
     for track in t_meta['items']:
         raw_tn = track.get('trackNumber', 1)
         str_tn = str(raw_tn).zfill(2)
 
-        # --- [FIX] GABUNGKAN JUDUL DENGAN VERSI (REMIX/REMASTER) ---
         track_title = track.get('title', 'Unknown Title')
         if track.get('version'):
             track_title += f" ({track['version']})"
         track_title = track_title.replace('/', ' ')
-        # -----------------------------------------------------------
 
         stub_meta = {
             'itemid': track['id'],
@@ -408,7 +431,7 @@ async def get_album_metadata(album_id, a_meta, t_meta, r_id, user_id=0):
             'cover': metadata['cover'], 
             'thumbnail': metadata['thumbnail'], 
             'provider': 'Tidal',
-            'title': track_title, # <-- Gunakan variabel track_title yang baru
+            'title': track_title,
             'artist': get_artists_name(track),
             'tracknumber': str_tn, 
             'upc': metadata['upc']
@@ -433,8 +456,8 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id, user_id=0):
         metadata['release_date'] = str(parsed_date.date())
         metadata['date'] = str(parsed_date.year)
     except (ValueError, KeyError):
-         metadata['release_date'] = ''
-         metadata['date'] = ''
+        metadata['release_date'] = ''
+        metadata['date'] = ''
 
     metadata['totaltracks'] = p_meta['numberOfTracks']
     metadata['duration'] = p_meta['duration']
@@ -443,7 +466,7 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id, user_id=0):
     metadata['type'] = 'playlist' 
 
     metadata['cover'] = await get_cover(p_meta.get('image'), metadata, False, user_id)
-    metadata['thumbnail'] = await get_cover(p_meta.get('image'), metadata, True, user_id)
+    metadata['thumbnail'] = metadata['cover']
 
     metadata['tracks'] = []
     for item in t_meta['items']:
@@ -452,12 +475,10 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id, user_id=0):
             raw_tn = track.get('trackNumber', 1)
             str_tn = str(raw_tn).zfill(2)
 
-            # --- [FIX] GABUNGKAN JUDUL DENGAN VERSI (REMIX/REMASTER) ---
             track_title = track.get('title', 'Unknown Title')
             if track.get('version'):
                 track_title += f" ({track['version']})"
             track_title = track_title.replace('/', ' ')
-            # -----------------------------------------------------------
 
             stub_meta = {
                 'itemid': track['id'],
@@ -466,7 +487,7 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id, user_id=0):
                 'cover': None, 
                 'thumbnail': None,
                 'provider': 'Tidal',
-                'title': track_title, # <-- Gunakan variabel track_title yang baru
+                'title': track_title,
                 'artist': get_artists_name(track),
                 'tracknumber': str_tn 
             }
@@ -476,7 +497,7 @@ async def get_playlist_metadata(playlist_id, p_meta, t_meta, r_id, user_id=0):
     return metadata
 
 
-async def get_artist_metadata(a_meta:dict, r_id, user_id=0):
+async def get_artist_metadata(a_meta: dict, r_id, user_id=0):
     metadata = copy.deepcopy(base_meta)
     metadata['tempfolder'] += f"{r_id}-temp/"
     metadata['artist'] = a_meta['name']
@@ -484,7 +505,7 @@ async def get_artist_metadata(a_meta:dict, r_id, user_id=0):
     metadata['provider'] = 'Tidal'
     metadata['type'] = 'artist'
     metadata['cover'] = await get_cover(a_meta.get('picture'), metadata, False, user_id)
-    metadata['thumbnail'] = await get_cover(a_meta.get('picture'), metadata, True, user_id)
+    metadata['thumbnail'] = metadata['cover']
     return metadata
 
 
@@ -500,9 +521,8 @@ async def get_video_metadata(video_id, v_meta, r_id, client=None, user_id=0):
     metadata['provider'] = 'Tidal'
     metadata['type'] = 'video'
     
-    # Ambil Cover Thumbnail Video
     metadata['cover'] = await get_cover(v_meta.get('imageId'), metadata, False, user_id)
-    metadata['thumbnail'] = await get_cover(v_meta.get('imageId'), metadata, True, user_id)
+    metadata['thumbnail'] = metadata['cover']
     
     return metadata
     
@@ -514,32 +534,35 @@ async def get_itunes_cover_url(metadata: dict, session: aiohttp.ClientSession) -
         url = f"https://itunes.apple.com/search?term={encoded_term}&entity=album&limit=1"
         async with session.get(url, timeout=10) as resp:
             if resp.status == 200:
-                data = await resp.json()
-                if data['resultCount'] > 0:
-                    # Ambil resolusi paling besar (trik API iTunes)
-                    artwork_url = data['results'][0]['artworkUrl100']
-                    return artwork_url.replace('100x100bb', '10000x10000bb')
+                data = await resp.json(content_type=None)
+                if data.get('resultCount', 0) > 0:
+                    artwork_url = data['results'][0].get('artworkUrl100')
+                    if artwork_url:
+                        return artwork_url.replace('100x100bb', '10000x10000bb')
     except Exception as e:
         LOGGER.warning(f"iTunes cover lookup failed: {e}")
     return None
+
 
 async def get_musicbrainz_cover_url(metadata: dict, session: aiohttp.ClientSession) -> str | None:
     try:
         if metadata.get('upc') and metadata['upc'] != "0":
             mb_url = f"https://musicbrainz.org/ws/2/release?query=barcode:{metadata['upc']}&fmt=json"
-            async with session.get(mb_url, headers={'User-Agent': 'TidalBot/1.0'}) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get('releases') and len(data['releases']) > 0:
-                        release_id = data['releases'][0]['id']
-                        caa_api = f"https://coverartarchive.org/release/{release_id}"
-                        async with session.get(caa_api) as caa_resp:
-                            if caa_resp.status == 200:
-                                caa_data = await caa_resp.json()
-                                if caa_data.get('images') and len(caa_data['images']) > 0:
-                                    for img in caa_data['images']:
-                                        if img.get('front'): return img['image']
-                                    return caa_data['images'][0]['image']
+            async with MBZ_LIMITER:
+                async with session.get(mb_url, headers={'User-Agent': 'TidalBot/1.0'}) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        if data.get('releases') and len(data['releases']) > 0:
+                            release_id = data['releases'][0]['id']
+                            caa_api = f"https://coverartarchive.org/release/{release_id}"
+                            async with session.get(caa_api) as caa_resp:
+                                if caa_resp.status == 200:
+                                    caa_data = await caa_resp.json(content_type=None)
+                                    if caa_data.get('images') and len(caa_data['images']) > 0:
+                                        for img in caa_data['images']:
+                                            if img.get('front'):
+                                                return img['image']
+                                        return caa_data['images'][0]['image']
     except Exception as e:
         LOGGER.warning(f"MusicBrainz cover lookup failed: {e}")
     return None
@@ -554,29 +577,26 @@ async def get_cover(cover_id, meta: dict, thumbnail=False, user_id=0):
             else f'https://resources.tidal.com/images/{cover_id.replace("-", "/")}/1280x1280.jpg'
         )
     
-    # Jangan modifikasi thumbnail (untuk efisiensi), hanya modifikasi cover utama
     if thumbnail:
         return await create_cover_file(original_url, meta, thumbnail)
 
-    # Ambil pengaturan preferensi user
     cover_source = bot_set.user_data.get(user_id, {}).get("tidal_cover_source", "original")
     final_url = None
 
     if cover_source in ["itunes", "musicbrainz"]:
-        async with aiohttp.ClientSession() as session:
-            if cover_source == "itunes":
-                final_url = await get_itunes_cover_url(meta, session)
-            elif cover_source == "musicbrainz":
-                final_url = await get_musicbrainz_cover_url(meta, session)
+        session = get_tidal_meta_session()
+        if cover_source == "itunes":
+            final_url = await get_itunes_cover_url(meta, session)
+        elif cover_source == "musicbrainz":
+            final_url = await get_musicbrainz_cover_url(meta, session)
 
-    # Fallback ke original jika gagal
     if not final_url:
         final_url = original_url
 
     return await create_cover_file(final_url, meta, thumbnail)
 
 
-def get_artists_name(meta:dict):
+def get_artists_name(meta: dict):
     artists = []
     if meta.get('artists'): 
         for a in meta['artists']:
