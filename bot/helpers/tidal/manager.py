@@ -201,23 +201,23 @@ class TidalLoginManager:
     # MANAJEMEN AKUN (ADD/REMOVE)
     # ==================================================================
 
-    # --- USER PRIVATE ---
     async def add_user_account(self, user_id: int, auth_data: dict):
         """Menyimpan sesi user baru ke Memory."""
         client = TidalApi()
         try:
             await client.login_from_saved(auth_data)
             
-            # Jika user belum punya pool akun sama sekali, buatkan
             if user_id not in self.user_clients:
                 self.user_clients[user_id] = {'clients': [], 'cycler': None}
                 
-            # Tambahkan ke daftar akun user di memori
             self.user_clients[user_id]['clients'].append(client)
             self.user_clients[user_id]['cycler'] = itertools.cycle(self.user_clients[user_id]['clients'])
             
             return True, "Login Berhasil"
         except Exception as e:
+            # [FIX] Tutup sesi jika login gagal agar tidak bocor
+            try: await client.close()
+            except Exception: pass
             return False, str(e)
 
     async def remove_specific_user_account(self, user_id: int, target_uid: str):
@@ -332,13 +332,15 @@ class TidalLoginManager:
             self.user_data[user_id]['tidal_convert_m4a'] = convert_m4a
 
     def get_user_quality_settings(self, user_id: int) -> tuple[str, str, str, str]:
-        """Mendapatkan kualitas, spasial, mqa, & convert untuk pengguna."""
-        user_dict = self.user_data.get(user_id, {})
+        """Mendapatkan kualitas, spasial, mqa, & convert untuk pengguna (Prioritas RAM bot_set)."""
+        from bot.settings import bot_set
+        mem_dict = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
+        local_dict = self.user_data.get(user_id, {})
         
-        user_qual = user_dict.get('tidal_qual', self.quality)
-        user_spatial = user_dict.get('tidal_spatial', self.spatial)
-        user_mqa_fix = user_dict.get('tidal_mqa_fix', self.mqa_fix)
-        user_convert_m4a = user_dict.get('tidal_convert_m4a', self.convert_m4a)
+        user_qual = mem_dict.get('tidal_qual') or local_dict.get('tidal_qual') or self.quality
+        user_spatial = mem_dict.get('tidal_spatial') or local_dict.get('tidal_spatial') or self.spatial
+        user_mqa_fix = mem_dict.get('tidal_mqa_fix') or local_dict.get('tidal_mqa_fix') or self.mqa_fix
+        user_convert_m4a = mem_dict.get('tidal_convert_m4a') or local_dict.get('tidal_convert_m4a') or self.convert_m4a
         
         return user_qual, user_spatial, user_mqa_fix, user_convert_m4a
     
