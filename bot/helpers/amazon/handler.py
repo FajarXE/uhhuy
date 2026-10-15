@@ -354,7 +354,6 @@ async def start_album(album_asin: str, user: dict, url: str):
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
         
-    # [FIX 1] Kunci klien ke dalam user dict agar start_track tidak pindah ke akun region lain di tengah jalan!
     user['amazon_api'] = client
 
     LOGGER.info(f"Amazon: Mengambil info Album {album_asin} (Akun Region: {client.region.upper()})")
@@ -384,9 +383,6 @@ async def start_album(album_asin: str, user: dict, url: str):
     album_artist = "Unknown Artist"
     album_cover = ""
 
-    # [FIX 2] Siapkan kandidat ASIN:
-    # Prioritas 1: ASIN asli dari URL (aman untuk UK/US maupun akun yang cocok dengan domain link).
-    # Prioritas 2: Global ASIN (otomatis terpakai jika link berasal dari negara lain misal JP/DE/FR tapi akun yang dipakai UK/US).
     global_asin = await get_global_asin(url, current_asin=album_asin)
     asin_candidates = [album_asin]
     if global_asin and global_asin != album_asin:
@@ -397,7 +393,7 @@ async def start_album(album_asin: str, user: dict, url: str):
             lookup_payload = {
                 "customerId": customer_id,
                 "asins": [candidate_asin],
-                "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+                "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability", "albumArtist", "fullAlbumDetails"],
                 "requestedContent": req_content, 
                 "musicTerritory": music_territory, 
                 "deviceId": device_id,
@@ -421,8 +417,10 @@ async def start_album(album_asin: str, user: dict, url: str):
                     elif resp.status != 200:
                         continue
                     
-                    data = json.loads(resp_text)
+                    data = json.loads(resp_text) or {}
                     for album in data.get("albumList", []):
+                        if not isinstance(album, dict):
+                            continue
                         album_title = album.get("title", album_title)
                         album_artist = album.get("primaryArtistName", album_artist)
                         album_cover = album.get("image", album_cover)
