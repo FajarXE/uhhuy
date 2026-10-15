@@ -26,7 +26,7 @@ from .settings import bot_set
 
 # --- Blok Impor Qobuz ---
 try:
-    from .helpers.qobuz.qopy import QoClient
+    from .helpers.qobuz.qopy import QoClient, qobuz_manager
 except ImportError:
     logging.critical("Gagal mengimpor QoClient!")
     sys.exit(1)
@@ -65,6 +65,8 @@ khinsider_manager = safe_import('bot.helpers.khinsider.manager', 'khinsider_mana
 amazon_manager = safe_import('bot.helpers.amazon.manager', 'amazon_manager')
 genie_manager = safe_import('bot.helpers.genie.manager', 'genie_manager')
 audiomack_manager = safe_import('bot.helpers.audiomack.manager', 'audiomack_manager')
+
+_IS_SHUTDOWN_DONE = False
 
 
 # --- [DEBUG] EXCEPTION HANDLER ---
@@ -174,6 +176,18 @@ async def start_services():
         logging.warning(f"Main: Gagal membersihkan Aria2: {e}")
     
     await bot_set.set_language()
+
+    # --- [FIX] HUBUNGKAN KE TELEGRAM LEBIH DULU SEBELUM LOGIN PULUHAN AKUN PROVIDER ---
+    # Memberikan jalur socket jaringan yang bersih untuk pembuatan Auth Key MTProto (in_memory)
+    logging.info("Main: Menghubungkan ke Telegram...")
+    await aio.start()
+    
+    me = await aio.get_me()
+    logging.info(f"------------------------------------------------")
+    logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
+    logging.info(f"------------------------------------------------")
+    # ----------------------------------------------------------------------------------
+
     await load_all_bot_qobuz_clients()
 
     managers = [
@@ -184,7 +198,8 @@ async def start_services():
         (highresaudio_manager, "HIGHRESAUDIO"), (moov_manager, "Moov"),
         (jiosaavn_manager, "JioSaavn"), (gaana_manager, "Gaana"), 
         (bandcamp_manager, "Bandcamp"), (livephish_manager, "LivePhish"), 
-        (beatstars_manager, "BeatStars"), (khinsider_manager, "Khinsider"), (amazon_manager, "Amazon Music"), (genie_manager, "Genie"), (audiomack_manager, "Audiomack")
+        (beatstars_manager, "BeatStars"), (khinsider_manager, "Khinsider"), (amazon_manager, "Amazon Music"), 
+        (genie_manager, "Genie"), (audiomack_manager, "Audiomack")
     ]
 
     for mgr, name in managers:
@@ -218,14 +233,6 @@ async def start_services():
     except Exception as e:
         logging.warning(f"Main: Gagal memuat sinyal batal: {e}")
     # --------------------------
-
-    logging.info("Main: Menghubungkan ke Telegram...")
-    await aio.start()
-    
-    me = await aio.get_me()
-    logging.info(f"------------------------------------------------")
-    logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
-    logging.info(f"------------------------------------------------")
 
     # --- [FIX] PERBAIKAN IMPORT utils KE ui_manager ---
     logging.info("Main: Memuat State Radar UI dari Database...")
@@ -301,18 +308,28 @@ async def start_services():
     await stop_event.wait()
     
     logging.info("Main: Menerima sinyal stop, mematikan layanan...")
-    await aio.stop()
     await shutdown_all_services()
 
 
 async def shutdown_all_services():
+    global _IS_SHUTDOWN_DONE
+    if _IS_SHUTDOWN_DONE:
+        return
+    _IS_SHUTDOWN_DONE = True
+
+    try:
+        if getattr(aio, 'is_connected', False):
+            await aio.stop()
+    except Exception:
+        pass
+
     tasks = []
     for client in BOT_QOBUZ_CLIENTS.values():
         if client and hasattr(client, 'close_session'):
             tasks.append(client.close_session())
     
     managers_list = [
-        deezer_manager, beatport_manager, tidal_manager, kkbox_manager,
+        qobuz_manager, deezer_manager, beatport_manager, tidal_manager, kkbox_manager,
         soundcloud_manager, idagio_manager, nugs_manager, bugs_manager, highresaudio_manager, moov_manager,
         jiosaavn_manager, gaana_manager, bandcamp_manager, livephish_manager, beatstars_manager, khinsider_manager, amazon_manager, genie_manager, audiomack_manager
     ]
@@ -328,7 +345,7 @@ async def shutdown_all_services():
         logging.warning(f"Main: Peringatan saat mengatur penutupan Aria2: {e}")
     # ---------------------------------------------
 
-    # --- PENAMBAHAN GRACEFUL SHUTDOWN CLOUD UPLOADER & METADATA ---
+    # --- PENAMBAHAN GRACEFUL SHUTDOWN CLOUD UPLOADER, METADATA & LYRICS ---
     try:
         from bot.modules.direct_uploader import close_upload_session
         tasks.append(close_upload_session())
@@ -337,7 +354,7 @@ async def shutdown_all_services():
         tasks.append(close_all_cover_sessions())
     except Exception as e:
         logging.warning(f"Main: Peringatan penutupan layanan HTTP: {e}")
-    # ---------------------------------------------------------
+    # ----------------------------------------------------------------------
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -347,7 +364,6 @@ async def shutdown_all_services():
         from bot.helpers.database.mongo_async import database
         import inspect
         
-        # [FIX] Prioritaskan metode close() atau tutup objek AsyncIOMotorClient (_db), bukan database.client
         if hasattr(database, 'close'):
             if inspect.iscoroutinefunction(database.close):
                 await database.close()
@@ -365,8 +381,9 @@ async def shutdown_all_services():
     # --- PENAMBAHAN GRACEFUL SHUTDOWN GUNICORN ---
     try:
         from bot import gunicorn_process
-        gunicorn_process.terminate()
-        logging.info("Main: Proses Gunicorn berhasil dimatikan.")
+        if gunicorn_process:
+            gunicorn_process.terminate()
+            logging.info("Main: Proses Gunicorn berhasil dimatikan.")
     except Exception: 
         pass
     # ---------------------------------------------
@@ -406,7 +423,7 @@ if __name__ == "__main__":
         logging.critical(f"Main: ERROR FATAL UTAMA: {e}")
         traceback.print_exc()
     finally:
-        # [FIX] Pastikan seluruh sesi aiohttp (seperti Aria2) ditutup meskipun terjadi crash saat startup
+        # [FIX] Pastikan seluruh sesi aiohttp ditutup meskipun terjadi crash saat startup
         try:
             loop.run_until_complete(shutdown_all_services())
         except Exception:
