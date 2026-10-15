@@ -384,6 +384,13 @@ class TidalLoginManager:
                 await asyncio.gather(*tasks)
             except Exception as e:
                 LOGGER.error(f"Tidal Manager: Error saat shutdown: {e}")
+
+        # [FIX] Tutup sesi HTTP bersama milik metadata Tidal
+        try:
+            from .metadata import close_tidal_meta_session
+            await close_tidal_meta_session()
+        except Exception:
+            pass
             
         self.clients = []
         self.user_clients = {}
