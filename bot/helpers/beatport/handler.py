@@ -88,6 +88,7 @@ async def start_artist(artist_id: str, user: dict):
 
     artist_folder = sanitize_filepath(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{artist_meta['provider']}/{artist_meta['title']}")
     artist_meta['folderpath'] = artist_folder
+    artist_meta['albums'] = []
 
     upload_album = True
     playlist_zip, album_zip, artist_zip, art_poster = fetch_zip_settings(user)
@@ -103,7 +104,9 @@ async def start_artist(artist_id: str, user: dict):
         if not rel_id: 
             continue
         try:
-            await start_album(rel_id, user, upload=upload_album)
+            alb_meta = await start_album(rel_id, user, upload=upload_album, basefolder=artist_folder)
+            if alb_meta:
+                artist_meta['albums'].append(alb_meta)
             successful_albums.append(rel_id)
         except Exception as e:
             LOGGER.warning(f"Beatport: Gagal mengunduh rilis {rel_id} milik {artist_meta['title']}: {e}")
@@ -143,8 +146,8 @@ async def convert_flac_to_pcm(source_path: str, target_format: str) -> str:
     return source_path
 
 async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=True, filepath=None, disable_link=False):
+    import hashlib
     user_id = user.get('user_id')
-    client = beatport_manager.get_client(user_id)
     target_fmt = beatport_manager.get_user_quality(user_id).lower()
     
     if not track_meta:
@@ -156,15 +159,9 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         filepath = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{track_meta['provider']}/{track_meta['albumartist']}/{track_meta['album']}"
         filepath = sanitize_filepath(filepath)
 
-    try:
-        if client and random.random() < 0.7:
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-    except Exception: 
-        pass 
-
     def _map_qual_to_ext(q: str) -> str:
         q_l = q.lower()
-        if q_l in ['lossless', 'wav', 'aiff']: 
+        if q_l in ['lossless', 'wav', 'aiff', 'flac']: 
             return 'flac'
         return 'm4a'
 
@@ -174,30 +171,39 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
             track_meta['download_url'] = new_url
             if qual:
                 track_meta['extension'] = _map_qual_to_ext(qual)
-                track_meta['quality'] = target_fmt.upper() if target_fmt in ['wav', 'aiff'] else qual.capitalize()
+                if qual in ['lossless', 'wav', 'aiff'] and target_fmt in ['wav', 'aiff']:
+                    track_meta['quality'] = target_fmt.upper()
+                else:
+                    track_meta['quality'] = "FLAC" if qual == "lossless" else ("AAC 256" if qual == "high" else "AAC 128")
         else: 
             return False
 
     track_meta['folderpath'] = filepath
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
     
-    # Ekstensi download fisik (tetap flac/m4a untuk stream API)
-    download_ext = _map_qual_to_ext(target_fmt)
+    # [FIX] Gunakan extension aktual hasil resolusi stream (bukan memaksa target_fmt jika terjadi fallback ke m4a)
+    download_ext = track_meta.get('extension') or _map_qual_to_ext(target_fmt)
     filepath += f"/{sanitize_filepath(raw_filename)}.{download_ext}"
     track_meta['filepath'] = filepath
 
     # Ekstensi visual untuk papan radar progress
-    display_ext = target_fmt if target_fmt in ['wav', 'aiff'] else download_ext
+    display_ext = target_fmt if (target_fmt in ['wav', 'aiff'] and download_ext == 'flac') else download_ext
     display_title = f"{sanitize_filepath(raw_filename)}.{display_ext}"
 
     headers_dict = {"User-Agent": APP_USER_AGENT, "Accept": "*/*", "Referer": "https://www.beatport.com/"}
-    details_aria = {'msg': None, 'headers': headers_dict} if not upload else {
-        'msg': user['bot_msg'], 
-        'title': display_title,
-        'display_title': display_title,
-        'type': 'Track', 
-        'headers': headers_dict
-    }
+    if not upload or 'bot_msg' not in user:
+        details_aria = {'msg': None, 'headers': headers_dict}
+    else:
+        task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+        details_aria = {
+            'msg': user['bot_msg'], 
+            'title': display_title,
+            'display_title': display_title,
+            'type': 'Track',
+            'action': 'Download',
+            'task_id': task_id,
+            'headers': headers_dict
+        }
 
     if os.path.exists(filepath): 
         os.remove(filepath)
@@ -205,12 +211,16 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     err = await download_file(track_meta['download_url'], filepath, retries=1, details=details_aria)
     
     if err or not os.path.exists(filepath) or os.path.getsize(filepath) < 10000:
+        # Jika dihentikan karena sinyal cancel pengguna, jangan di-retry
+        if err and "DIBATALKAN" in str(err):
+            return False
         LOGGER.warning(f"Beatport: Aria2 gagal/403 untuk {track_meta['title']}. Menyegarkan URL...")
         new_url, qual = await refresh_track_url(item_id, track_meta, user_id)
         if new_url:
             track_meta['download_url'] = new_url
             if qual:
                 new_ext = _map_qual_to_ext(qual)
+                track_meta['extension'] = new_ext
                 if not filepath.endswith(f".{new_ext}"):
                     filepath = filepath.rsplit('.', 1)[0] + f".{new_ext}"
                     track_meta['filepath'] = filepath
@@ -237,7 +247,7 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
         LOGGER.warning(f"Gagal set metadata: {e}")
         try: 
             os.remove(filepath)
-        except: 
+        except Exception: 
             pass
         return False
 
@@ -246,14 +256,20 @@ async def start_track(item_id: str, user: dict, track_meta: dict | None, upload=
     
     return track_meta
 
-async def start_album(album_id: str, user: dict, upload=True):
-    try: album_meta = await process_album_metadata(album_id, user['r_id'], user)
-    except Exception as e: raise Exception(f"Gagal metadata album Beatport: {e}")
+async def start_album(album_id: str, user: dict, upload=True, basefolder=None):
+    try: 
+        album_meta = await process_album_metadata(album_id, user['r_id'], user)
+    except Exception as e: 
+        raise Exception(f"Gagal metadata album Beatport: {e}")
 
-    album_folder = sanitize_filepath(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{album_meta['artist']}/{album_meta['title']}")
+    if basefolder:
+        album_folder = sanitize_filepath(f"{basefolder}/{album_meta['title']}")
+    else:
+        album_folder = sanitize_filepath(f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{album_meta['provider']}/{album_meta['artist']}/{album_meta['title']}")
     album_meta['folderpath'] = album_folder
 
-    if upload: album_meta['poster_msg'] = await post_art_poster(user, album_meta)
+    if upload: 
+        album_meta['poster_msg'] = await post_art_poster(user, album_meta)
     
     tasks = []
     for track in album_meta['tracks']:
@@ -271,21 +287,27 @@ async def start_album(album_id: str, user: dict, upload=True):
 
     album_meta['tracks'] = successful_tracks
     album_meta['totaltracks'] = len(successful_tracks)
-    if not successful_tracks: raise Exception("Tidak ada lagu yang berhasil diunduh.")
+    if not successful_tracks: 
+        raise Exception("Tidak ada lagu yang berhasil diunduh.")
 
     try:
         cover_src = album_meta.get('cover')
         if cover_src:
+            os.makedirs(album_meta['folderpath'], exist_ok=True)
             target = os.path.join(album_meta['folderpath'], "cover.jpg")
             if not os.path.exists(target):
-                if os.path.exists(cover_src): shutil.copy(cover_src, target)
+                if os.path.exists(cover_src): 
+                    shutil.copy(cover_src, target)
                 elif cover_src.startswith('http'):
                     details_aria = {'msg': None}
                     await download_file(cover_src, target, retries=1, details=details_aria)
-    except: pass
+    except Exception: 
+        pass
 
     if upload: 
         await album_upload(album_meta, user)
+        
+    return album_meta
 
 async def start_playlist(playlist_id: str, user: dict, extra: dict, upload=True):
     try: play_meta = await process_playlist_metadata(playlist_id, user['r_id'], user, extra)
