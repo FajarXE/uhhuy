@@ -204,25 +204,22 @@ class AmazonApi:
                         
                         try:
                             from bot.helpers.amazon.manager import amazon_manager
+                            cust_id = self.tokens.get('customerId')
                             if hasattr(amazon_manager, 'clients'):
                                 for c in amazon_manager.clients:
-                                    if c.tokens.get('customerId') == self.tokens.get('customerId'): c.tokens.update(self.tokens)
+                                    if c.tokens.get('customerId') == cust_id:
+                                        c.tokens.update(self.tokens)
                             if hasattr(amazon_manager, 'user_clients'):
-                                for uid, c in amazon_manager.user_clients.items():
-                                    if c.tokens.get('customerId') == self.tokens.get('customerId'): c.tokens.update(self.tokens)
-                            for save_func in ['save_data', 'save_config', 'save_database', 'save']:
-                                if hasattr(amazon_manager, save_func):
-                                    getattr(amazon_manager, save_func)()
-                                    break
-                        except: pass
+                                # [FIX] user_clients berisi list objek AmazonApi per user_id
+                                for uid, c_list in amazon_manager.user_clients.items():
+                                    for c in c_list:
+                                        if c.tokens.get('customerId') == cust_id:
+                                            c.tokens.update(self.tokens)
+                            if hasattr(amazon_manager, 'persist_refreshed_token'):
+                                await amazon_manager.persist_refreshed_token(cust_id, self.tokens)
+                        except Exception:
+                            pass
                         return True
-                    else:
-                        err_txt = await resp.text()
-                        if resp.status in [400, 401, 403]: raise Exception("AUTH_EXPIRED")
-                        return False
-            except Exception as e:
-                if str(e) == "AUTH_EXPIRED": raise e
-                return False
 
     async def fetch_master_cover(self, album_title, album_asin):
         try:
@@ -275,30 +272,24 @@ class AmazonApi:
             LOGGER.debug(f"Amazon Search API Cover fallback failed: {e}")
         return None
 
-    # --- PENGAMBIL COVER ITUNES (STUDIO MASTER) ---
     async def fetch_itunes_cover(self, artist, album):
         try:
-            # Bersihkan teks agar pencarian iTunes lebih akurat
             clean_artist = re.sub(r'\(.*?\)', '', artist).strip()
             clean_album = re.sub(r'\(.*?\)', '', album).strip()
             term = quote(f"{clean_artist} {clean_album}")
             
             url = f"https://itunes.apple.com/search?term={term}&entity=album&limit=1"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get('resultCount', 0) > 0:
-                            artwork = data['results'][0].get('artworkUrl100')
-                            if artwork:
-                                # Trik 10000x10000bb memaksa CDN Apple memberikan resolusi
-                                # murni yang paling maksimal (tanpa upscale!)
-                                return artwork.replace('100x100bb.jpg', '10000x10000bb.jpg')
+            # [FIX] Gunakan self.session tanpa membuat ClientSession baru setiap lagu
+            async with self.session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    if data.get('resultCount', 0) > 0:
+                        artwork = data['results'][0].get('artworkUrl100')
+                        if artwork:
+                            return artwork.replace('100x100bb.jpg', '10000x10000bb.jpg')
         except Exception as e:
-            from bot.logger import LOGGER
             LOGGER.debug(f"iTunes cover fallback failed: {e}")
         return None
-    # -------------------------------------------------------------
 
     async def get_playback_info(self, asin: str, target_quality: str = "UHD"):
         for attempt in range(2):
@@ -347,6 +338,7 @@ class AmazonApi:
                         raise Exception(f"Akses API Ditolak (HTTP {resp.status}): {resp_text}")
                         # --------------------------------------------
                     
+                    lookup_data = {}  # <-- [FIX WAJIB] Cegah UnboundLocalError jika status != 200
                     if resp.status == 200:
                         lookup_data = json.loads(resp_text)
                     
