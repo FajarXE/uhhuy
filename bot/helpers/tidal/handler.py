@@ -5,6 +5,9 @@ import base64
 import os
 import shutil 
 import asyncio 
+import hashlib
+import time
+import zipfile
 from datetime import datetime 
 
 from pathvalidate import sanitize_filepath
@@ -24,6 +27,7 @@ from .utils import ffmpeg_convert_and_tag
 from ..metadata import set_metadata, get_audio_extension
 from ..uploder import *
 from ..message import send_message, edit_message 
+from ..ui_manager import progress_message, GLOBAL_CANCEL_DICT
 
 try:
     from bot.helpers.lyrics.manager import lyrics_manager
@@ -38,7 +42,7 @@ from config import Config
 
 
 # 1. Update fungsi start_tidal untuk mengarahkan rute 'video'
-async def start_tidal(url:str, user:dict):
+async def start_tidal(url: str, user: dict):
     item_id, type_ = await parse_url(url)
     if not type_:
         raise Exception("Invalid Tidal URL")
@@ -73,7 +77,11 @@ async def start_video(video_id: str, user: dict, upload=True):
     raw_ts_path = sanitize_filepath(f"{filepath}/{filename}.ts")
     final_mp4_path = sanitize_filepath(f"{filepath}/{filename}.mp4")
     
-    session = client.tv_session 
+    # [FIX] Fallback aman jika tv_session bernilai None
+    session = client.tv_session or (client.saved[0] if client.saved else None)
+    if not session:
+        raise Exception("Tidak ada sesi Tidal aktif untuk mengunduh video.")
+        
     try:
         stream_data = await client.get_video_stream_url(video_id, session)
         segment_urls, quality_str = await parse_m3u8_video(stream_data['manifest'], session.auth_headers())
@@ -81,12 +89,9 @@ async def start_video(video_id: str, user: dict, upload=True):
         raise e
     
     # --- PERSIAPAN TASK PROGRESS ---
-    import hashlib
-    import time 
-    from bot.helpers.ui_manager import progress_message
-    
     details = None
-    if upload and 'bot_msg' in user:
+    task_id = None
+    if upload and 'bot_msg' in user and user['bot_msg']:
         task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         details = {
             'msg': user['bot_msg'],
@@ -108,6 +113,10 @@ async def start_video(video_id: str, user: dict, upload=True):
         nonlocal completed_segments, total_bytes, last_ui_update
         t_path = f"{raw_ts_path}.{index}"
         async with sem:
+            # [FIX] Cek sinyal pembatalan pengguna sebelum mengunduh segmen berikutnya
+            if task_id and task_id in GLOBAL_CANCEL_DICT:
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+                
             err = await download_file(url, t_path)
             if err:
                 raise Exception(f"Gagal mengunduh bagian video: {err}")
@@ -130,13 +139,21 @@ async def start_video(video_id: str, user: dict, upload=True):
     try:
         temp_files = await asyncio.gather(*tasks)
     except Exception as e:
+        # Bersihkan potongan segmen .ts jika gagal atau dibatalkan
+        for i in range(total_segments):
+            seg_f = f"{raw_ts_path}.{i}"
+            if os.path.exists(seg_f):
+                try: os.remove(seg_f)
+                except Exception: pass
         raise e
         
     await merge_tracks(temp_files, raw_ts_path)
     await convert_ts_to_mp4(raw_ts_path, final_mp4_path)
     
-    try: os.remove(raw_ts_path)
-    except OSError: pass
+    try:
+        os.remove(raw_ts_path)
+    except OSError:
+        pass
     
     # --- LOGIKA VIDEO-ZIP YANG SUDAH DIBERSIHKAN ---
     user_settings = bot_set.user_data.get(user['user_id'], {})
@@ -152,18 +169,22 @@ async def start_video(video_id: str, user: dict, upload=True):
     # -----------------------------------------------
     
     if is_video_zip:
-        import zipfile
         zip_path = f"{filepath}/{filename}.zip"
         
         if details:
             details['action'] = 'Zipping'
             await progress_message(1, 1, details) 
             
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zipf:
-            zipf.write(final_mp4_path, os.path.basename(final_mp4_path))
+        # [FIX] Jalankan pembuatan ZIP di background thread agar event loop tidak freeze
+        def _zip_video_sync():
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zipf:
+                zipf.write(final_mp4_path, os.path.basename(final_mp4_path))
+        await asyncio.to_thread(_zip_video_sync)
             
-        try: os.remove(final_mp4_path)
-        except: pass
+        try:
+            os.remove(final_mp4_path)
+        except Exception:
+            pass
         
         video_meta['filepath'] = zip_path
         video_meta['extension'] = 'zip'
@@ -186,22 +207,27 @@ async def start_video(video_id: str, user: dict, upload=True):
     # ----------------------------------------
     
     if upload:
-        from bot.helpers.uploder import telegram_upload
-        await telegram_upload(video_meta, user)
+        # [FIX] Gunakan track_upload agar mendukung mode Cloud (Gofile/Terabox/Pixeldrain/Rclone) maupun Telegram
+        await track_upload(video_meta, user)
 
     return video_meta
         
 
-async def start_track(track_id:int, user:dict, track_meta:dict | None,
+async def start_track(
+    track_id: int, user: dict, track_meta: dict | None,
     upload=True, basefolder=None, session=None, 
     quality=None, disable_link=False, disable_msg=False
-  ):
-    
+):
     client: TidalApi = user['tidal_api']
+    
+    # [FIX PENTING] Simpan flag apakah ini unduhan track tunggal sebelum track_meta ditimpa
+    is_single_track = (track_meta is None)
 
     try:
         track_data = await client.get_track(track_id)
     except Exception as e:
+        if is_single_track:
+            raise e
         LOGGER.error(f"start_track (get_track) gagal: {e}")
         return None
 
@@ -243,16 +269,15 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         if 'Asset is not ready for playback' in str(e):
             error = f'Region-locked: Track [{track_id}] is not available in your region'
             
-        # --- [FIX] PAKSA PINDAH AKUN JIKA ERROR REGION LOCK ---
-        if track_meta is None:
+        # --- [FIX] PAKSA PINDAH AKUN JIKA ERROR REGION LOCK PADA TRACK TUNGGAL ---
+        if is_single_track:
             # Jika unduhan lagu tunggal, lempar error agar memicu pergantian akun di download.py
             raise Exception(error)
         else:
             # Jika bagian dari playlist/album, cukup lewati lagu ini agar lagu lain tetap terunduh
             LOGGER.error(error)
             return None
-        # ------------------------------------------------------
-    
+        # -------------------------------------------------------------------------
 
     if stream_data is not None:
         track_meta['quality'] = await get_quality(stream_data)
@@ -295,14 +320,9 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         track_meta['filepath'] = filepath  
 
         # --- [FIX UTAMA] SUNTIKAN RADAR ARIA-STYLE ---
-        import hashlib
-        import time 
-        import os
-        from bot.helpers.ui_manager import progress_message
-        
         details = None
-        if upload and 'bot_msg' in user:
-            task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
+        task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16] if ('bot_msg' in user and user['bot_msg']) else None
+        if upload and task_id:
             details = {
                 'msg': user['bot_msg'],
                 'title': track_meta.get('title', 'Unknown'),
@@ -313,7 +333,7 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
             }
         # ----------------------------------------
 
-        if type(urls) == list:
+        if isinstance(urls, list):
             sem = asyncio.Semaphore(16) 
             
             total_segments = len(urls[0])
@@ -325,6 +345,10 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
                 nonlocal completed_segments, total_bytes, last_ui_update
                 t_path = f"{filepath}.{index}"
                 async with sem:
+                    # [FIX] Cek sinyal pembatalan pengguna
+                    if task_id and task_id in GLOBAL_CANCEL_DICT:
+                        raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+                        
                     err = await download_file(url, t_path) 
                     if err:
                         raise Exception(f"Gagal mengunduh kepingan audio {index}: {err}")
@@ -348,7 +372,19 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
             tasks = [fetch_audio_chunk(i, url) for i, url in enumerate(urls[0])]
             try:
                 temp_files = await asyncio.gather(*tasks)
+            except asyncio.CancelledError as ce:
+                for i in range(total_segments):
+                    seg_f = f"{filepath}.{i}"
+                    if os.path.exists(seg_f):
+                        try: os.remove(seg_f)
+                        except Exception: pass
+                raise ce
             except Exception as e:
+                for i in range(total_segments):
+                    seg_f = f"{filepath}.{i}"
+                    if os.path.exists(seg_f):
+                        try: os.remove(seg_f)
+                        except Exception: pass
                 LOGGER.error(f"Gagal mendownload segmen audio: {e}")
                 return None
                 
@@ -365,12 +401,14 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         # ========================================================
         # [PENEMPATAN MQA IDENTIFIER]
         if track_meta['extension'] == 'flac':
-            mqa_info = await asyncio.to_thread(MqaIdentifier, filepath)
-            
-            if mqa_info.is_mqa:
-                LOGGER.info(f"Tidal: MQA Terdeteksi! Sample Rate Asli: {mqa_info.get_original_sample_rate()}kHz")
-                track_meta['mqa_details'] = mqa_info
-                track_meta['is_mqa_studio'] = mqa_info.is_mqa_studio
+            try:
+                mqa_info = await asyncio.to_thread(MqaIdentifier, filepath)
+                if mqa_info.is_mqa:
+                    LOGGER.info(f"Tidal: MQA Terdeteksi! Sample Rate Asli: {mqa_info.get_original_sample_rate()}kHz")
+                    track_meta['mqa_details'] = mqa_info
+                    track_meta['is_mqa_studio'] = mqa_info.is_mqa_studio
+            except Exception as e:
+                LOGGER.debug(f"Tidal: Gagal memeriksa MQA ({e})")
         # ========================================================
         
         try:
@@ -378,40 +416,37 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
         except Exception:
             user_convert_m4a = "OFF" 
         
-        # --- [FIX] PERBAIKAN KONVERSI HALU ---
+        # --- [FIX] PERBAIKAN KONVERSI & PENGAMBILAN LIRIK ---
         actual_quality = track_meta.get('quality', '')
         is_high_tier = actual_quality in ['LOSSLESS', 'MAX', 'HI_RES', 'HI_RES_LOSSLESS']
         is_m4a_file = (track_meta.get('extension') == 'm4a')
-        # -------------------------------------
-
-        if lyrics_manager:
-            try:
-                lyrics_text = await lyrics_manager.fetch_lyrics(track_meta, user['user_id'])
-                if lyrics_text:
-                    track_meta['lyrics'] = lyrics_text 
-                    LOGGER.info("Lirik berhasil diambil.")
-            except Exception as e:
-                from bot.logger import LOGGER
-                LOGGER.error(f"Gagal mengambil lirik: {e}")
 
         if is_high_tier and is_m4a_file and user_convert_m4a == "ON":
-            # Perbaiki teks log agar mencetak kualitas asli, bukan yang diminta
-            from bot.logger import LOGGER
-            LOGGER.info(f"Mengonversi M4A (Tier {actual_quality}) ke FLAC untuk user {user['user_id']} Sesuai pengaturan.")
+            # Ambil lirik di sini hanya jika akan dikonversi via FFmpeg (karena set_metadata di bawah juga mengambil lirik)
+            if lyrics_manager:
+                try:
+                    lyrics_text = await lyrics_manager.fetch_lyrics(track_meta, user['user_id'])
+                    if lyrics_text:
+                        track_meta['lyrics'] = lyrics_text 
+                        LOGGER.info("Lirik berhasil diambil untuk konversi FFmpeg.")
+                except Exception as e:
+                    LOGGER.error(f"Gagal mengambil lirik: {e}")
+
+            LOGGER.info(f"Mengonversi M4A (Tier {actual_quality}) ke FLAC untuk user {user['user_id']} sesuai pengaturan.")
             await ffmpeg_convert_and_tag(filepath, track_meta)
             track_meta['filepath'] = track_meta['filepath'] + '.flac'
-            try: os.remove(filepath)
-            except OSError: pass
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
         else:
             if is_high_tier and is_m4a_file and user_convert_m4a == "OFF":
-                from bot.logger import LOGGER
                 LOGGER.info(f"File Lossless/Max format M4A terdeteksi, tapi convert OFF (User {user['user_id']}).")
             
             new_filepath = track_meta['filepath'] + f".{track_meta['extension']}"
             os.rename(filepath, new_filepath)
             track_meta['filepath'] = new_filepath
             
-        from bot.logger import LOGGER
         LOGGER.info(f"Menjalankan FINAL set_metadata (Mutagen) untuk: {track_meta['filepath']}")
         await set_metadata(track_meta, user['user_id']) 
 
@@ -421,7 +456,7 @@ async def start_track(track_id:int, user:dict, track_meta:dict | None,
     return track_meta
 
 
-async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
+async def start_album(album_id: int, user: dict, upload=True, basefolder=None):
     client: TidalApi = user['tidal_api']
     
     try:
@@ -463,7 +498,7 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
     except Exception as e:
         # --- [FIX] LEMPAR ERROR JIKA TERKENA REGION LOCK ---
         if 'Asset is not ready' in str(e):
-            raise Exception(f"Region-locked: Album tidak tersedia di akun ini.")
+            raise Exception("Region-locked: Album tidak tersedia di akun ini.")
         # ---------------------------------------------------
         LOGGER.error(f"Gagal mendapatkan info kualitas untuk album {album_id}: {e}")
         session, quality = (None, "LOSSLESS") 
@@ -505,13 +540,18 @@ async def start_album(album_id:int, user:dict, upload=True, basefolder=None):
     results = await run_concurrent_tasks(tasks, update_details, limit=Config.MAX_WORKERS)
     
     album_meta['tracks'] = [track for track in results if track]
+    album_meta['totaltracks'] = len(album_meta['tracks'])
+    if not album_meta['tracks']:
+        raise Exception(f"Tidak ada lagu yang berhasil diunduh untuk album {album_meta['title']}.")
     
     # Zipping dan upload diurus secara otomatis oleh uploader.py
     if upload:
         await album_upload(album_meta, user)
+        
+    return album_meta
 
 
-async def start_playlist(playlist_id:str, user:dict, upload=True, basefolder=None):
+async def start_playlist(playlist_id: str, user: dict, upload=True, basefolder=None):
     client: TidalApi = user['tidal_api']
     
     try:
@@ -559,7 +599,7 @@ async def start_playlist(playlist_id:str, user:dict, upload=True, basefolder=Non
     except Exception as e:
         # --- [FIX] LEMPAR ERROR JIKA TERKENA REGION LOCK ---
         if 'Asset is not ready' in str(e):
-            raise Exception(f"Region-locked: Playlist tidak tersedia di akun ini.")
+            raise Exception("Region-locked: Playlist tidak tersedia di akun ini.")
         # ---------------------------------------------------
         LOGGER.error(f"Gagal mendapatkan info kualitas untuk playlist {playlist_id}: {e}")
         session, quality = (None, "LOSSLESS")
@@ -601,24 +641,28 @@ async def start_playlist(playlist_id:str, user:dict, upload=True, basefolder=Non
     if getattr(bot_set, 'playlist_conc', True):
         limit_pekerja = Config.MAX_WORKERS
     else:
-        limit_pekerja = 1 # Sequential (Kerjakan 1 per 1)
+        limit_pekerja = 1  # Sequential (Kerjakan 1 per 1)
         
     results = await run_concurrent_tasks(tasks, update_details, limit=limit_pekerja)
     
     playlist_meta['tracks'] = [track for track in results if track]
+    playlist_meta['totaltracks'] = len(playlist_meta['tracks'])
+    if not playlist_meta['tracks']:
+        raise Exception("Tidak ada lagu yang berhasil diunduh untuk playlist ini.")
     
     # Zipping dan upload diurus secara otomatis oleh uploader.py
     if upload:
         await playlist_upload(playlist_meta, user)
 
 
-async def start_artist(artist_id:int, user:dict):
+async def start_artist(artist_id: int, user: dict):
     client: TidalApi = user['tidal_api']
 
     artist_data = await client.get_artist(artist_id)
     artist_meta = await get_artist_metadata(artist_data, user['r_id'], user_id=user['user_id'])
     artist_meta['folderpath'] = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/{artist_meta['provider']}/{artist_meta['artist']}"
     artist_meta['folderpath'] = sanitize_filepath(artist_meta['folderpath']) 
+    artist_meta['albums'] = []
     
     try:
         artist_albums = await client.get_artist_albums(artist_id)
@@ -642,8 +686,16 @@ async def start_artist(artist_id:int, user:dict):
         upload_album = False
 
     for album in albums:
-        await start_album(album['id'], user, upload_album, artist_meta['folderpath'])
+        try:
+            alb_res = await start_album(album['id'], user, upload_album, artist_meta['folderpath'])
+            if alb_res:
+                artist_meta['albums'].append(alb_res)
+        except Exception as e:
+            LOGGER.warning(f"Tidal: Gagal mengunduh album {album.get('id')} milik {artist_meta['artist']}: {e}")
+            continue
 
     if not upload_album:
+        if not artist_meta['albums']:
+            raise Exception("Tidak ada album yang berhasil diunduh untuk artis ini.")
         # Zipping dan upload diurus secara otomatis oleh uploader.py
         await artist_upload(artist_meta, user)
