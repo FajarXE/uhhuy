@@ -218,7 +218,9 @@ class BeatportLoginManager:
         return self.user_data[user_id]['beatport_qual']
 
     def get_user_quality(self, user_id: int) -> str:
-        # Gunakan .get() berantai agar tidak KeyError jika user_id belum terdaftar
+        from bot.settings import bot_set
+        if user_id in bot_set.user_data and bot_set.user_data[user_id].get('beatport_qual'):
+            return str(bot_set.user_data[user_id]['beatport_qual']).lower()
         return self.user_data.get(user_id, {}).get('beatport_qual', getattr(self, 'quality', 'lossless'))
 
     async def shutdown(self):
