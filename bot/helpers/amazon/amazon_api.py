@@ -367,45 +367,58 @@ class AmazonApi:
                     
                     lookup_data = {}
                     if resp.status == 200:
-                        lookup_data = json.loads(resp_text)
+                        try:
+                            lookup_data = json.loads(resp_text) or {}
+                        except Exception:
+                            lookup_data = {}
                     
                     track_data_obj = None
-                    if 'trackList' in lookup_data and lookup_data['trackList']:
+                    if lookup_data.get('trackList'):
                         track_data_obj = lookup_data['trackList'][0]
-                    elif 'albumList' in lookup_data and lookup_data['albumList']:
-                        album_tracks = lookup_data['albumList'][0].get('tracks', [])
+                    elif lookup_data.get('albumList') and lookup_data['albumList'][0]:
+                        album_tracks = lookup_data['albumList'][0].get('tracks') or []
                         if album_tracks:
                             track_data_obj = album_tracks[0]
 
                     album_main_obj = {}
-                    if 'albumList' in lookup_data and lookup_data['albumList']:
+                    if lookup_data.get('albumList') and isinstance(lookup_data['albumList'][0], dict):
                         album_main_obj = lookup_data['albumList'][0]
-                    elif track_data_obj and track_data_obj.get('album', {}).get('asin'):
+                    elif isinstance(track_data_obj, dict) and isinstance(track_data_obj.get('album'), dict) and track_data_obj['album'].get('asin'):
                         alb_payload = lookup_payload.copy()
                         alb_payload['asins'] = [track_data_obj['album']['asin']]
                         try:
                             async with self.session.post(lookup_url, json=alb_payload, headers=lookup_headers) as alb_resp:
                                 if alb_resp.status == 200:
-                                    alb_data = await alb_resp.json()
-                                    if 'albumList' in alb_data and alb_data['albumList']:
+                                    alb_data = (await alb_resp.json()) or {}
+                                    if alb_data.get('albumList') and isinstance(alb_data['albumList'][0], dict):
                                         album_main_obj = alb_data['albumList'][0]
                         except Exception:
                             pass
 
-                    if track_data_obj:
-                        title = track_data_obj.get('title', asin)
-                        artist = track_data_obj.get('artist', {}).get('name', 'Unknown Artist')
-                        album_obj = track_data_obj.get('album', {}) if isinstance(track_data_obj.get('album'), dict) else {}
+                    if isinstance(track_data_obj, dict):
+                        title = track_data_obj.get('title') or asin
                         
-                        album = album_main_obj.get('title') or album_obj.get('title', 'Unknown Album')
-                        image = album_main_obj.get('image') or album_obj.get('image', '')
-                        albumartist = album_main_obj.get('primaryArtistName') or album_obj.get('primaryArtistName', artist)
-                        tracktotal = album_main_obj.get('trackCount') or album_obj.get('trackCount', 1)
+                        # [FIX] Gunakan `or {}` agar aman jika JSON berisi null (None)
+                        artist_obj = track_data_obj.get('artist')
+                        if not isinstance(artist_obj, dict):
+                            artist_obj = {}
+                        artist = artist_obj.get('name') or track_data_obj.get('artistName') or 'Unknown Artist'
                         
-                        prod_details = album_main_obj.get('productDetails', {})
-                        genre = prod_details.get('primaryGenreName', '')
-                        copyright = prod_details.get('copyright', '')
-                        label = album_main_obj.get('label') or album_obj.get('label', '')
+                        album_obj = track_data_obj.get('album')
+                        if not isinstance(album_obj, dict):
+                            album_obj = {}
+                        
+                        album = album_main_obj.get('title') or album_obj.get('title') or 'Unknown Album'
+                        image = album_main_obj.get('image') or album_obj.get('image') or ''
+                        albumartist = album_main_obj.get('primaryArtistName') or album_obj.get('primaryArtistName') or artist
+                        tracktotal = album_main_obj.get('trackCount') or album_obj.get('trackCount') or 1
+                        
+                        prod_details = album_main_obj.get('productDetails')
+                        if not isinstance(prod_details, dict):
+                            prod_details = {}
+                        genre = prod_details.get('primaryGenreName') or ''
+                        copyright = prod_details.get('copyright') or ''
+                        label = album_main_obj.get('label') or album_obj.get('label') or ''
                         
                         date_ms = (
                             album_main_obj.get('originalReleaseDate') 
@@ -415,14 +428,17 @@ class AmazonApi:
                         )
                         if date_ms:
                             from datetime import datetime, timedelta
-                            release_date = (datetime(1970, 1, 1) + timedelta(seconds=date_ms / 1000)).strftime('%Y-%m-%d')
+                            try:
+                                release_date = (datetime(1970, 1, 1) + timedelta(seconds=float(date_ms) / 1000)).strftime('%Y-%m-%d')
+                            except Exception:
+                                release_date = ""
 
-                        tracknumber = track_data_obj.get('trackNum', 1)
-                        discnumber = track_data_obj.get('discNum', 1)
-                        isrc = track_data_obj.get('isrc', '')
+                        tracknumber = track_data_obj.get('trackNum') or 1
+                        discnumber = track_data_obj.get('discNum') or 1
+                        isrc = track_data_obj.get('isrc') or ''
                         
                         writers = track_data_obj.get('songWriters')
-                        composer = ', '.join(writers) if isinstance(writers, list) else ''
+                        composer = ', '.join([str(w) for w in writers if w]) if isinstance(writers, list) else ''
 
                         album_asin = album_main_obj.get('asin') or album_obj.get('asin')
                         master_cover = await self.fetch_itunes_cover(albumartist or artist, album)
@@ -434,9 +450,7 @@ class AmazonApi:
                             image = master_cover
                             
                         if image:
-                            if 'mzstatic.com' in image or 'itunes.apple.com' in image:
-                                pass
-                            else:
+                            if 'mzstatic.com' not in image and 'itunes.apple.com' not in image:
                                 image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
             
             # --- 2. PENCARIAN FILE AUDIO (MPD) ---
@@ -488,17 +502,19 @@ class AmazonApi:
                         if resp.status != 200: 
                             raise Exception(f"Gagal MPD ({resp.status}): {resp_text}")
                         
-                        dmls_data = json.loads(resp_text)
+                        dmls_data = json.loads(resp_text) or {}
                         if not dmls_data.get("contentResponseList"):
                             raise Exception("Amazon menolak file.")
-                        item_resp = dmls_data["contentResponseList"][0]
+                        item_resp = dmls_data["contentResponseList"][0] or {}
                         if item_resp.get("error"):
                             raise Exception(f"Ditolak Amazon: {item_resp.get('error')}")
-                        mpd_text = item_resp.get("manifest", "")
+                        mpd_text = item_resp.get("manifest") or ""
                         break
 
             if not mpd_text:
-                continue 
+                if attempt == 0:
+                    continue
+                raise Exception(f"Gagal mendapatkan manifest MPD untuk ASIN {asin}.")
 
             # --- 3. FILTERING KUALITAS & FISIK ---
             target_rank = {"LD": 1, "SD": 2, "HD": 3, "UHD": 4, "EC-3": 5, "AC-4": 6, "MHA1": 7, "MHM1": 8}.get(target_quality.upper(), 4)
@@ -563,6 +579,8 @@ class AmazonApi:
                 'publisher': label, 'release_date': release_date, 'cover': image, 
                 'url': best_url, 'kid': best_kid, 'codec': best_codec
             }
+
+        raise Exception(f"Gagal mengambil informasi pemutaran untuk ASIN {asin} setelah 2 percobaan.")
 
     async def get_license(self, challenge_b64, track_asin):
         for attempt in range(2):
