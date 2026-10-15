@@ -1,5 +1,6 @@
 # [FILE: bot/tgclient.py]
 
+import asyncio
 from config import Config
 from pyrogram import Client
 from .logger import LOGGER
@@ -23,7 +24,23 @@ class Bot(Client):
         )
 
     async def start(self):
-        await super().start()
+        # [FIX] Auto-Retry saat membuat koneksi MTProto ke Data Center Telegram
+        max_retries = 5
+        for attempt in range(1, max_retries + 1):
+            try:
+                await super().start()
+                break
+            except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+                if attempt == max_retries:
+                    LOGGER.critical(f"BOT : Gagal terhubung ke server Telegram setelah {max_retries} percobaan!")
+                    raise e
+                wait_time = attempt * 3
+                LOGGER.warning(
+                    f"BOT : Koneksi ke DC Telegram terputus (Percobaan {attempt}/{max_retries}). "
+                    f"Mencoba lagi dalam {wait_time} detik..."
+                )
+                await asyncio.sleep(wait_time)
+
         LOGGER.info("BOT : Started Successfully")
 
         try:
@@ -46,7 +63,7 @@ class Bot(Client):
         if hasattr(bot_set, 'clients') and bot_set.clients:
             for client in bot_set.clients:
                 try:
-                    if hasattr(client, 'session') and client.session:
+                    if hasattr(client, 'session') and client.session and not client.session.closed:
                         await client.session.close()
                 except Exception:
                     pass
