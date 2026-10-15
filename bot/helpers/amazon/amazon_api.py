@@ -115,6 +115,18 @@ class AmazonApi:
 
     def load_tokens(self, saved_tokens):
         self.tokens.update(saved_tokens)
+        
+        # [FIX] Ekstrak marketplaceId & accessToken dari service_token seperti di amazonmusic_manifest.py
+        if self.tokens.get("service_token") and isinstance(self.tokens["service_token"], str):
+            try:
+                st_json = json.loads(self.tokens["service_token"])
+                if not self.tokens.get("x-amz-access-token") and st_json.get("accessToken"):
+                    self.tokens["x-amz-access-token"] = st_json["accessToken"]
+                if not self.tokens.get("marketplaceId") and st_json.get("marketplaceId"):
+                    self.tokens["marketplaceId"] = st_json["marketplaceId"]
+            except Exception:
+                pass
+
         access_token = self.tokens.get("x-amz-access-token", "")
         extracted = self._extract_jwt_data(access_token)
         for k, v in extracted.items():
@@ -323,12 +335,16 @@ class AmazonApi:
             device_id = self.tokens.get('device_id')
             access_token = self.tokens.get('x-amz-access-token')
             customer_id = self.tokens.get('customerId')
-            device_type_id = self.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
+            
+            # [FIX 1] Wajib gunakan A1I3OANZGDNGEE agar cocok dengan header AndroidTV (persis seperti get_license & manifest CLI)
+            device_type_id = self.tokens.get('deviceTypeId') or "A1I3OANZGDNGEE"
             
             if not customer_id:
                 raise Exception("Missing 'customerId' di memori. Login ulang diperlukan.")
-            marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
-            music_territory = "GB" if self.region.lower() == "uk" else self.region.upper()
+                
+            # [FIX 2] Prioritaskan marketplaceId & musicTerritory dari token akun asli
+            marketplace_id = self.tokens.get('marketplaceId') or self.marketplaces.get(self.region, "ATVPDKIKX0DER")
+            music_territory = self.tokens.get('musicTerritory') or ("GB" if self.region.lower() == "uk" else self.region.upper())
             
             lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
             lookup_payload = {
@@ -504,11 +520,13 @@ class AmazonApi:
                         
                         dmls_data = json.loads(resp_text) or {}
                         if not dmls_data.get("contentResponseList"):
-                            raise Exception("Amazon menolak file.")
+                            raise Exception(f"Amazon menolak file (Empty contentResponseList): {resp_text[:300]}")
                         item_resp = dmls_data["contentResponseList"][0] or {}
                         if item_resp.get("error"):
                             raise Exception(f"Ditolak Amazon: {item_resp.get('error')}")
                         mpd_text = item_resp.get("manifest") or ""
+                        if not mpd_text:
+                            LOGGER.warning(f"Amazon DMLS mengembalikan manifest kosong untuk {asin}. Respons: {resp_text[:300]}")
                         break
 
             if not mpd_text:
