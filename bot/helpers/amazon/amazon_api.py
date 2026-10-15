@@ -16,6 +16,7 @@ import aiolimiter
 # Batasi 10 request setiap 5 detik
 AMZN_LIMITER = aiolimiter.AsyncLimiter(10, 5)
 
+
 class AmazonApi:
     def __init__(self, region="us"):
         self.region = region.lower()
@@ -53,7 +54,11 @@ class AmazonApi:
             "EU": ["fr", "de", "uk", "it", "es", "in"], 
             "FE": ["jp", "au", "nz"]
         }
-        api_urls = {"NA": "na.tvmesk.skill.music.a2z.com", "EU": "eu.tvmesk.skill.music.a2z.com", "FE": "fe.tvmesk.skill.music.a2z.com"}
+        api_urls = {
+            "NA": "na.tvmesk.skill.music.a2z.com",
+            "EU": "eu.tvmesk.skill.music.a2z.com",
+            "FE": "fe.tvmesk.skill.music.a2z.com"
+        }
         
         self.base_url = self.base_urls.get(self.region, self.base_urls["us"])
         self.api_location = next((loc for loc, regs in api_locations.items() if self.region in regs), "NA")
@@ -83,7 +88,8 @@ class AmazonApi:
         self.session.headers.update(self.default_headers)
 
     def _extract_jwt_data(self, token_str):
-        if not token_str or token_str.count(".") < 2: return {}
+        if not token_str or token_str.count(".") < 2:
+            return {}
         try:
             payload = token_str.split(".")[1]
             payload += "=" * (-len(payload) % 4)
@@ -91,23 +97,29 @@ class AmazonApi:
             
             res = {}
             c_id = re.search(r'"customerId"\s*:\s*"([^"]+)"', decoded)
-            if c_id: res["customerId"] = c_id.group(1)
+            if c_id:
+                res["customerId"] = c_id.group(1)
             d_id = re.search(r'"deviceId"\s*:\s*"([^"]+)"', decoded)
-            if d_id: res["device_id"] = d_id.group(1)
+            if d_id:
+                res["device_id"] = d_id.group(1)
             dt_id = re.search(r'"deviceType(?:Id)?"\s*:\s*"([^"]+)"', decoded)
-            if dt_id: res["deviceTypeId"] = dt_id.group(1)
+            if dt_id:
+                res["deviceTypeId"] = dt_id.group(1)
             
             cl_id = re.search(r'"aud"\s*:\s*"([^"]+)"', decoded) or re.search(r'"appId"\s*:\s*"([^"]+)"', decoded)
-            if cl_id: res["client_id"] = cl_id.group(1)
+            if cl_id:
+                res["client_id"] = cl_id.group(1)
             return res
-        except: return {}
+        except Exception:
+            return {}
 
     def load_tokens(self, saved_tokens):
         self.tokens.update(saved_tokens)
         access_token = self.tokens.get("x-amz-access-token", "")
         extracted = self._extract_jwt_data(access_token)
         for k, v in extracted.items():
-            if not self.tokens.get(k): self.tokens[k] = v
+            if not self.tokens.get(k):
+                self.tokens[k] = v
 
     async def get_tv_device_code(self):
         self.tokens["device_id"] = os.urandom(8).hex()
@@ -117,7 +129,8 @@ class AmazonApi:
             "x-amzn-device-id": self.tokens["device_id"],
         }
         async with self.session.post(f"https://{self.api_url}/api/showHome", json={"userHash": ""}, headers=headers) as resp:
-            if resp.status != 200: raise Exception(f"HTTP {resp.status}: {await resp.text()}")
+            if resp.status != 200:
+                raise Exception(f"HTTP {resp.status}: {await resp.text()}")
             codepair_json = await resp.json()
             code_pair = codepair_json["methods"][0]["template"]
             public_code = code_pair.get("code", "")
@@ -134,7 +147,8 @@ class AmazonApi:
         }
         payload = json.dumps({"code": register_code}, separators=(",", ":"))
         async with self.session.post(f"https://{self.api_url}/api/showHome", headers=headers, data=payload) as resp:
-            if resp.status != 200: return False
+            if resp.status != 200:
+                return False
             register_json = await resp.json()
             
             service_token, video_player_token = None, None
@@ -149,20 +163,24 @@ class AmazonApi:
                 self.tokens["service_token"] = service_token
                 self.tokens["x-amz-access-token"] = token_data.get("accessToken")
                 self.tokens["refresh_token"] = token_data.get("refreshToken") 
-                if "clientId" in token_data: self.tokens["client_id"] = token_data["clientId"]
-                if self.tokens["x-amz-access-token"]: self.tokens.update(self._extract_jwt_data(self.tokens["x-amz-access-token"]))
+                if "clientId" in token_data:
+                    self.tokens["client_id"] = token_data["clientId"]
+                if self.tokens["x-amz-access-token"]:
+                    self.tokens.update(self._extract_jwt_data(self.tokens["x-amz-access-token"]))
                 
                 if video_player_token and not self.tokens.get("customerId"):
                     try:
                         v_tok = json.loads(video_player_token).get("token", video_player_token)
-                    except: v_tok = video_player_token
+                    except Exception:
+                        v_tok = video_player_token
                     self.tokens.update(self._extract_jwt_data(v_tok))
                 
                 return self.tokens
         return False
 
     async def refresh_access_token(self):
-        if not hasattr(self, 'refresh_lock'): self.refresh_lock = asyncio.Lock()
+        if not hasattr(self, 'refresh_lock'):
+            self.refresh_lock = asyncio.Lock()
         old_access_token = self.tokens.get("x-amz-access-token")
         
         async with self.refresh_lock:
@@ -195,12 +213,14 @@ class AmazonApi:
                                 transferred_service_token = item["authentication"]
                                 break
                                 
-                        if not transferred_service_token: raise Exception("Tidak ada token.")
+                        if not transferred_service_token:
+                            raise Exception("Tidak ada token.")
 
                         transfer_token_data = json.loads(transferred_service_token)
                         self.tokens["service_token"] = transferred_service_token
                         self.tokens["x-amz-access-token"] = transfer_token_data.get("accessToken")
-                        if transfer_token_data.get("marketplaceId"): self.tokens["marketplaceId"] = transfer_token_data["marketplaceId"]
+                        if transfer_token_data.get("marketplaceId"):
+                            self.tokens["marketplaceId"] = transfer_token_data["marketplaceId"]
                         
                         try:
                             from bot.helpers.amazon.manager import amazon_manager
@@ -210,16 +230,24 @@ class AmazonApi:
                                     if c.tokens.get('customerId') == cust_id:
                                         c.tokens.update(self.tokens)
                             if hasattr(amazon_manager, 'user_clients'):
-                                # [FIX] user_clients berisi list objek AmazonApi per user_id
                                 for uid, c_list in amazon_manager.user_clients.items():
-                                    for c in c_list:
-                                        if c.tokens.get('customerId') == cust_id:
-                                            c.tokens.update(self.tokens)
+                                    if isinstance(c_list, list):
+                                        for c in c_list:
+                                            if c.tokens.get('customerId') == cust_id:
+                                                c.tokens.update(self.tokens)
                             if hasattr(amazon_manager, 'persist_refreshed_token'):
                                 await amazon_manager.persist_refreshed_token(cust_id, self.tokens)
                         except Exception:
                             pass
                         return True
+                    else:
+                        if resp.status in [400, 401, 403]:
+                            raise Exception("AUTH_EXPIRED")
+                        return False
+            except Exception as e:
+                if str(e) == "AUTH_EXPIRED":
+                    raise e
+                return False
 
     async def fetch_master_cover(self, album_title, album_asin):
         try:
@@ -279,7 +307,6 @@ class AmazonApi:
             term = quote(f"{clean_artist} {clean_album}")
             
             url = f"https://itunes.apple.com/search?term={term}&entity=album&limit=1"
-            # [FIX] Gunakan self.session tanpa membuat ClientSession baru setiap lagu
             async with self.session.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10) as resp:
                 if resp.status == 200:
                     data = await resp.json(content_type=None)
@@ -298,7 +325,8 @@ class AmazonApi:
             customer_id = self.tokens.get('customerId')
             device_type_id = self.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
             
-            if not customer_id: raise Exception("Missing 'customerId' di memori. Login ulang diperlukan.")
+            if not customer_id:
+                raise Exception("Missing 'customerId' di memori. Login ulang diperlukan.")
             marketplace_id = self.marketplaces.get(self.region, "ATVPDKIKX0DER")
             music_territory = "GB" if self.region.lower() == "uk" else self.region.upper()
             
@@ -324,21 +352,20 @@ class AmazonApi:
             albumartist, tracknumber, discnumber, tracktotal = "Unknown Artist", 1, 1, 1
             isrc, composer, genre, copyright, release_date, label = "", "", "", "", "", ""
             
-            # --- BUNGKUS DENGAN LIMITER ---
             async with AMZN_LIMITER:
                 async with self.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
                     resp_text = await resp.text()
                     if (resp.status == 403 or (resp.status == 400 and "INVALID_TOKEN" in resp_text)) and attempt == 0:
                         try:
-                            if await self.refresh_access_token(): continue
+                            if await self.refresh_access_token():
+                                continue
                         except Exception as e:
-                            if str(e) == "AUTH_EXPIRED": raise Exception("Sesi kedaluwarsa permanen. Silakan login kembali.")
+                            if str(e) == "AUTH_EXPIRED":
+                                raise Exception("Sesi kedaluwarsa permanen. Silakan login kembali.")
                         
-                        # --- FIX: Tampilkan error asli dari Amazon ---
                         raise Exception(f"Akses API Ditolak (HTTP {resp.status}): {resp_text}")
-                        # --------------------------------------------
                     
-                    lookup_data = {}  # <-- [FIX WAJIB] Cegah UnboundLocalError jika status != 200
+                    lookup_data = {}
                     if resp.status == 200:
                         lookup_data = json.loads(resp_text)
                     
@@ -347,7 +374,8 @@ class AmazonApi:
                         track_data_obj = lookup_data['trackList'][0]
                     elif 'albumList' in lookup_data and lookup_data['albumList']:
                         album_tracks = lookup_data['albumList'][0].get('tracks', [])
-                        if album_tracks: track_data_obj = album_tracks[0]
+                        if album_tracks:
+                            track_data_obj = album_tracks[0]
 
                     album_main_obj = {}
                     if 'albumList' in lookup_data and lookup_data['albumList']:
@@ -361,7 +389,8 @@ class AmazonApi:
                                     alb_data = await alb_resp.json()
                                     if 'albumList' in alb_data and alb_data['albumList']:
                                         album_main_obj = alb_data['albumList'][0]
-                        except: pass
+                        except Exception:
+                            pass
 
                     if track_data_obj:
                         title = track_data_obj.get('title', asin)
@@ -378,7 +407,12 @@ class AmazonApi:
                         copyright = prod_details.get('copyright', '')
                         label = album_main_obj.get('label') or album_obj.get('label', '')
                         
-                        date_ms = album_main_obj.get('originalReleaseDate') or album_obj.get('originalReleaseDate') or album_main_obj.get('merchantReleaseDate') or album_obj.get('merchantReleaseDate')
+                        date_ms = (
+                            album_main_obj.get('originalReleaseDate') 
+                            or album_obj.get('originalReleaseDate') 
+                            or album_main_obj.get('merchantReleaseDate') 
+                            or album_obj.get('merchantReleaseDate')
+                        )
                         if date_ms:
                             from datetime import datetime, timedelta
                             release_date = (datetime(1970, 1, 1) + timedelta(seconds=date_ms / 1000)).strftime('%Y-%m-%d')
@@ -387,18 +421,12 @@ class AmazonApi:
                         discnumber = track_data_obj.get('discNum', 1)
                         isrc = track_data_obj.get('isrc', '')
                         
-                        # --- FIX COMPOSER NULL EXCEPTION ---
                         writers = track_data_obj.get('songWriters')
                         composer = ', '.join(writers) if isinstance(writers, list) else ''
 
-                        # --- STRATEGI PENEMBUSAN COVER MASTER (ITUNES FIRST) ---
                         album_asin = album_main_obj.get('asin') or album_obj.get('asin')
-                        master_cover = None
-                        
-                        # 1. PRIORITAS UTAMA: RAMPAS DARI ITUNES API!
                         master_cover = await self.fetch_itunes_cover(albumartist or artist, album)
                         
-                        # 2. Jika gagal di iTunes, baru Fallback ke Tenzing Amazon Search
                         if not master_cover and album_asin and album:
                             master_cover = await self.fetch_master_cover(album, album_asin)
                             
@@ -406,11 +434,9 @@ class AmazonApi:
                             image = master_cover
                             
                         if image:
-                            # 3. Proses Akhir Resolusi
                             if 'mzstatic.com' in image or 'itunes.apple.com' in image:
-                                pass # Biarkan URL iTunes 10000x10000bb bekerja (Otomatis Max Res)
+                                pass
                             else:
-                                # Jika terpaksa pakai Amazon, ambil file mentah (RAW)
                                 image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
             
             # --- 2. PENCARIAN FILE AUDIO (MPD) ---
@@ -421,13 +447,8 @@ class AmazonApi:
                 "appInfo": {"musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {asin})"},
                 "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
                 "musicDashVersionList": ["SIREN_KATANA"],
-                
-                # --- FIX: Izin Lisensi PSSH Khusus Atmos ---
                 "contentProtectionList": ["GROUP_PSSH", "TRACK_PSSH"],
-                
                 "customerInfo": {"marketplaceId": marketplace_id, "territoryId": music_territory, "customerId": customer_id},
-                
-                # --- FIX: Paksa Amazon Mencarikan ASIN versi Spasial (Atmos/360RA) ---
                 "try3dAsinSubstitution": True, 
                 "tryAsinSubstitution": True
             }
@@ -440,51 +461,44 @@ class AmazonApi:
                 "x-amzn-hardware-device-type-id": device_type_id
             }
             
-            # === IMPLEMENTASI RETRY (ANTI 502/RATE LIMIT) ===
             mpd_text = ""
-            for dmls_attempt in range(4): # Maksimal 4 kali percobaan (0, 1, 2, 3)
-                
-                # --- BUNGKUS DENGAN LIMITER ---
+            for dmls_attempt in range(4):
                 async with AMZN_LIMITER:
                     async with self.session.post(dmls_url, json=dmls_payload, headers=dmls_headers) as resp:
                         resp_text = await resp.text()
                         
-                        # 1. Penanganan Token Kedaluwarsa (Diserahkan ke loop utama)
                         if (resp.status == 403 or (resp.status == 400 and "INVALID_TOKEN" in resp_text)) and attempt == 0:
                             try:
-                                # Jika berhasil refresh, BREAK dari loop DMLS agar loop utama mengulang dari awal
-                                if await self.refresh_access_token(): break 
+                                if await self.refresh_access_token():
+                                    break 
                             except Exception as e:
-                                if str(e) == "AUTH_EXPIRED": raise Exception("Sesi kedaluwarsa permanen.")
+                                if str(e) == "AUTH_EXPIRED":
+                                    raise Exception("Sesi kedaluwarsa permanen.")
                             raise Exception(f"Gagal mengambil MPD (HTTP {resp.status}): {resp_text}")
                             
-                        # 2. Penanganan Bad Gateway / Rate Limit CloudFront (502, 503, 504, 429)
                         if resp.status in [429, 502, 503, 504]:
                             if dmls_attempt < 3:
-                                wait_time = 2 ** (dmls_attempt + 1) # Jeda eksponensial: 2s, 4s, 8s
+                                wait_time = 2 ** (dmls_attempt + 1)
                                 LOGGER.warning(f"Amazon MPD Limit ({resp.status}). Retry {dmls_attempt+1}/3 dalam {wait_time}s untuk {asin}...")
                                 await asyncio.sleep(wait_time)
                                 continue
                             else:
                                 raise Exception(f"Gagal MPD ({resp.status}) setelah {dmls_attempt+1} percobaan. Terlalu banyak traffic.")
                         
-                        # 3. HTTP Error Lainnya
                         if resp.status != 200: 
                             raise Exception(f"Gagal MPD ({resp.status}): {resp_text}")
                         
-                        # 4. Berhasil Mengekstrak Data
                         dmls_data = json.loads(resp_text)
-                        if not dmls_data.get("contentResponseList"): raise Exception("Amazon menolak file.")
+                        if not dmls_data.get("contentResponseList"):
+                            raise Exception("Amazon menolak file.")
                         item_resp = dmls_data["contentResponseList"][0]
-                        if item_resp.get("error"): raise Exception(f"Ditolak Amazon: {item_resp.get('error')}")
+                        if item_resp.get("error"):
+                            raise Exception(f"Ditolak Amazon: {item_resp.get('error')}")
                         mpd_text = item_resp.get("manifest", "")
-                        break # Sukses, keluar dari loop retry DMLS
+                        break
 
-            # Jika mpd_text kosong, berarti terjadi refresh token di atas. 
-            # Kita 'continue' untuk memicu loop utama (attempt) agar mengulang pembuatan header.
             if not mpd_text:
                 continue 
-            # ================================================
 
             # --- 3. FILTERING KUALITAS & FISIK ---
             target_rank = {"LD": 1, "SD": 2, "HD": 3, "UHD": 4, "EC-3": 5, "AC-4": 6, "MHA1": 7, "MHM1": 8}.get(target_quality.upper(), 4)
@@ -507,12 +521,10 @@ class AmazonApi:
                         rep_codec = html.unescape(codec_match.group(1).strip()).lower() if codec_match else "flac"
                         sr = int(sr_match.group(1)) if sr_match else 44100
                         
-                        # --- FIX: Pemisahan SD (Rank 2) dan LD (Rank 1) ---
                         if "mp4a" in rep_codec or "opus" in rep_codec: 
                             rep_rank = 1 if bw <= 165000 else 2 
-                        # --------------------------------------------------
-                        elif "flac" in rep_codec: rep_rank = 4 if (sr > 48000 or bw > 1200000) else 3
-                        # Pemisahan Identitas Mutlak
+                        elif "flac" in rep_codec:
+                            rep_rank = 4 if (sr > 48000 or bw > 1200000) else 3
                         elif "ec-3" in rep_codec: rep_rank = 5
                         elif "ac-4" in rep_codec: rep_rank = 6
                         elif "mha1" in rep_codec: rep_rank = 7
@@ -523,27 +535,26 @@ class AmazonApi:
             
             best_bw, best_url, best_codec, best_kid = 0, "", "flac", ""
             
-            # --- FIX: Pemilihan Format Spesifik Mutlak ---
             if target_rank >= 5:
-                # Jika mencari format Spasial tertentu, cari HANYA rank tersebut. 
-                # Jika track tidak memilikinya, fallback ke FLAC/UHD (Rank <= 4)
                 filtered_reps = [r for r in valid_reps if r["rank"] == target_rank]
                 if not filtered_reps:
                     filtered_reps = [r for r in valid_reps if r["rank"] <= 4]
             else:
-                # Murni format UHD/HD/SD (Blokir total format Spasial)
                 filtered_reps = [r for r in valid_reps if r["rank"] <= target_rank]
             
-            if not filtered_reps: filtered_reps = valid_reps
+            if not filtered_reps:
+                filtered_reps = valid_reps
                 
             if filtered_reps:
                 best_rep = max(filtered_reps, key=lambda x: x["bw"])
                 best_url, best_kid, best_codec = best_rep["url"], best_rep["kid"], best_rep["codec"]
             else:
                 url_match = re.search(r"<BaseURL(?:[^>]*)>([\s\S]*?)</BaseURL>", mpd_text, re.IGNORECASE)
-                if url_match: best_url = html.unescape(url_match.group(1).strip())
+                if url_match:
+                    best_url = html.unescape(url_match.group(1).strip())
                 kid_match = re.search(r'default_KID=["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
-                if kid_match: best_kid = kid_match.group(1).strip()
+                if kid_match:
+                    best_kid = kid_match.group(1).strip()
                     
             return {
                 'title': title, 'artist': artist, 'album': album, 'albumartist': albumartist,
@@ -556,10 +567,7 @@ class AmazonApi:
     async def get_license(self, challenge_b64, track_asin):
         for attempt in range(2):
             url = f"{self.base_url}{self.api_location}/api/dmls/getLicenseForPlaybackV2"
-            
-            # --- [FIX PAYLOAD] Paksa gunakan ID Android TV persis seperti CLI ---
             device_type_id = "A1I3OANZGDNGEE"
-            # --------------------------------------------------------------------
             
             payload = {
                 "deviceToken": {"deviceTypeId": device_type_id, "deviceId": self.tokens.get('device_id')},
@@ -575,23 +583,22 @@ class AmazonApi:
                 "x-amzn-hardware-device-type-id": device_type_id
             }
             
-            # --- BUNGKUS DENGAN LIMITER DI SINI ---
             async with AMZN_LIMITER:
                 async with self.session.post(url, json=payload, headers=headers) as resp:
                     resp_text = await resp.text()
                     if (resp.status == 403 or (resp.status == 400 and "INVALID_TOKEN" in resp_text)) and attempt == 0:
                         try:
-                            if await self.refresh_access_token(): continue
-                        except: pass
+                            if await self.refresh_access_token():
+                                continue
+                        except Exception:
+                            pass
                         raise Exception("Gagal meminta lisensi DRM (Token Expired).")
                         
                     if resp.status != 200: 
-                        # --- [FIX ERROR UNMASKING] BONGKAR ALASAN ASLI DARI AMAZON ---
                         raise Exception(f"License API failed ({resp.status}): {resp_text}")
                         
                     data = json.loads(resp_text)
                     
-                    # Cek apakah Amazon memblokir perangkat (Blocklisted)
                     if data.get("__type", "").endswith("DrmLicenseDeniedException"):
                         denial_reason = data.get("denialReason", "UNKNOWN_REASON")
                         raise Exception(f"Lisensi Ditolak Amazon. Alasan: {denial_reason}")
@@ -602,4 +609,5 @@ class AmazonApi:
                     return data["license"]
 
     async def close(self):
-        if not self.session.closed: await self.session.close()
+        if not self.session.closed:
+            await self.session.close()
