@@ -419,19 +419,30 @@ async def start_album(album_asin: str, user: dict, url: str):
                     
                     data = json.loads(resp_text) or {}
                     
-                    # 1. Cek dari albumList (Standar)
-                    for album in data.get("albumList", []):
-                        if not isinstance(album, dict):
-                            continue
-                        album_title = album.get("title", album_title)
-                        album_artist = album.get("primaryArtistName", album_artist)
-                        album_cover = album.get("image", album_cover)
-                        
-                        for track in album.get("tracks", []):
-                            if isinstance(track, dict) and track.get("asin"):
-                                track_asins.append(track["asin"])
-                                
-                    # 2. Cek dari containerList (Format alternatif album/playlist Amazon)
+                    # 1. Cek langsung dari trackList utama (Sangat penting untuk album jenis tertentu)
+                    for track in data.get("trackList", []):
+                        if isinstance(track, dict) and track.get("asin"):
+                            track_asins.append(track["asin"])
+                            # Ambil judul album/artis dari metadata track jika belum ada
+                            if album_title == "Unknown Album" and isinstance(track.get("album"), dict):
+                                album_title = track["album"].get("title", album_title)
+                            if album_artist == "Unknown Artist" and isinstance(track.get("artist"), dict):
+                                album_artist = track["artist"].get("name", album_artist)
+
+                    # 2. Cek dari albumList (Standar)
+                    if not track_asins:
+                        for album in data.get("albumList", []):
+                            if not isinstance(album, dict):
+                                continue
+                            album_title = album.get("title", album_title)
+                            album_artist = album.get("primaryArtistName", album_artist)
+                            album_cover = album.get("image", album_cover)
+                            
+                            for track in album.get("tracks", []):
+                                if isinstance(track, dict) and track.get("asin"):
+                                    track_asins.append(track["asin"])
+                                    
+                    # 3. Cek dari containerList (Format alternatif)
                     if not track_asins:
                         for container in data.get("containerList", []):
                             if not isinstance(container, dict):
@@ -444,27 +455,16 @@ async def start_album(album_asin: str, user: dict, url: str):
                                 if isinstance(track, dict) and track.get("asin"):
                                     track_asins.append(track["asin"])
 
-                    # 3. Cek dari itemList
+                    # 4. Cek dari itemList
                     if not track_asins:
                         for item in data.get("itemList", []):
                             if isinstance(item, dict) and item.get("asin"):
                                 track_asins.append(item["asin"])
-
-                    # 4. Fallback ke trackList
-                    if not track_asins:
-                        for track in data.get("trackList", []):
-                            if isinstance(track, dict) and track.get("asin"):
-                                track_asins.append(track["asin"])
                                 
                 track_asins = list(dict.fromkeys(track_asins))
                 if track_asins:
                     LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu (ASIN: {candidate_asin}, Region: {music_territory}, Mode: {req_content})")
                     break
-            except Exception as e:
-                LOGGER.error(f"Amazon Lookup Error: {e}")
-                continue
-        if track_asins:
-            break
             
     if not track_asins:
         raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk album {album_asin}. Pastikan link valid.")
