@@ -122,7 +122,8 @@ class BeatportAPI:
                 if not location or 'code=' not in location:
                      raise BeatportError("Gagal mendapatkan Auth Code dari header location.")
                 
-                code = location.split('code=')[1]
+                # [FIX] Buang parameter query lain (seperti &state=...) jika ada
+                code = location.split('code=')[1].split('&')[0]
 
         data_token = {
             "client_id": self.client_id,
@@ -190,6 +191,14 @@ class BeatportAPI:
                             raise ConnectionError(f"Server Error: {r.status}")
 
                         if r.status == 401:
+                            if attempt < max_retries - 1:
+                                try:
+                                    await self.refresh()
+                                    continue
+                                except Exception:
+                                    if self.email and self.password_cache:
+                                        await self.login(self.email, self.password_cache)
+                                        continue
                             raise BeatportError("Unauthorized (401)")
                         
                         if r.status == 403:
