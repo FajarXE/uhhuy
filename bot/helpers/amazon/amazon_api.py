@@ -270,7 +270,7 @@ class AmazonApi:
                 "customerIdentity": {
                     "customerId": self.tokens.get('customerId'),
                     "deviceId": self.tokens.get('device_id'),
-                    "deviceType": self.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y",
+                    "deviceType": self.tokens.get('deviceTypeId') or "A1I3OANZGDNGEE",
                     "sessionId": "123-1234567-5555555",
                 },
                 "features": {
