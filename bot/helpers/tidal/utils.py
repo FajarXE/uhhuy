@@ -96,8 +96,8 @@ async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
 
 async def convert_ts_to_mp4(ts_path: str, output_path: str):
     """Membungkus ulang (muxing) file .ts hasil gabungan ke .mp4 tanpa re-encode visual."""
-    cmd = f'ffmpeg -y -i "{ts_path}" -c copy -bsf:a aac_adtstoasc "{output_path}"'
-    task = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    cmd = ['ffmpeg', '-y', '-i', ts_path, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', output_path]
+    task = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
     await task.wait()
 
 
@@ -126,11 +126,11 @@ async def get_stream_session(track_data: dict, user: dict):
 
     # Pilih Session berdasarkan format
     session = {
-            'flac_hires': client.mobile_hires,
-            '360ra': client.mobile_hires if client.mobile_hires else client.mobile_atmos,
-            'ac4': client.mobile_atmos,
-            'ac3': client.tv_session,
-            None: client.tv_session, 
+        'flac_hires': client.mobile_hires,
+        '360ra': client.mobile_hires if client.mobile_hires else client.mobile_atmos,
+        'ac4': client.mobile_atmos,
+        'ac3': client.tv_session,
+        None: client.tv_session, 
     }[formats]
 
     # Handle kasus khusus Atmos di session mobile
@@ -138,13 +138,18 @@ async def get_stream_session(track_data: dict, user: dict):
         if client.mobile_hires:
             session = client.mobile_hires
 
+    # [FIX] Fallback aman jika session spesifik (misal tv_session atau mobile_hires) bernilai None
+    if session is None and client.saved:
+        session = client.saved[0]
+        if formats == 'flac_hires' and session == client.tv_session:
+            formats = None
+
     # Logika Fallback Kualitas
     if formats == 'flac_hires':
-        quality = 'HI_RES' 
+        quality = 'HI_RES_LOSSLESS'
     elif formats in ['360ra', 'ac3', 'ac4']:
-        quality = 'DOLBY_ATMOS' if 'DOLBY' in str(formats) else 'LOW' 
+        quality = 'LOW'
     else:
-        # Jika user minta MAX (HI_RES) TAPI lagu TIDAK punya tag HIRES_LOSSLESS
         if qual == 'HI_RES' and 'HIRES_LOSSLESS' not in media_tags:
             quality = 'LOSSLESS' 
         else:
