@@ -117,26 +117,22 @@ class MqaIdentifier:
                 return list(iter_data(wf.readframes(framerate)))
 
     def detect(self, flac_file_path: str or Path) -> bool:
-        """
-        Detects if the FLAC file is a MQA file and also detects if it's MQA Studio (blue) and the originalSampleRate
+        try:
+            samples = self._decode_flac_samples(flac_file_path)
+        except Exception:
+            return False
 
-        :param flac_file_path: Path to the flac file
-        :return: True if MQA got detected and False if not
-        """
-        # get the samples from the FLAC decoder
-        samples = self._decode_flac_samples(flac_file_path)
-        # samples[::2] are left channel and samples[1::2] right channel samples
         channel_samples = list(zip(samples[::2], samples[1::2]))
+        total_len = len(channel_samples)
 
-        # dictionary to save all the buffers for 16, 17 and 18 bit shifts
         buffer = {16: 0, 17: 0, 18: 0}
         for i, sample in enumerate(channel_samples):
-            # sample[0] is the left channel sample and sample[1] the right channel sample
-            # perform a XOR with both samples and bitshift it by 16, 17 and 18
             buffer = {key: value | (sample[0] ^ sample[1]) >> key & 1 for key, value in buffer.items()}
 
-            # int.from_bytes(bytes.fromhex('0be0498c88'), 'big')
             if MAGIC in buffer.values():
+                # [FIX] Pastikan sisa sampel cukup untuk membaca 34 bit ke depan agar tidak IndexError
+                if i + 34 >= total_len:
+                    break
                 # found MQA sync word
                 self.is_mqa = True
 
