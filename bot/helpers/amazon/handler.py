@@ -418,6 +418,8 @@ async def start_album(album_asin: str, user: dict, url: str):
                         continue
                     
                     data = json.loads(resp_text) or {}
+                    
+                    # 1. Cek dari albumList (Standar)
                     for album in data.get("albumList", []):
                         if not isinstance(album, dict):
                             continue
@@ -429,6 +431,26 @@ async def start_album(album_asin: str, user: dict, url: str):
                             if isinstance(track, dict) and track.get("asin"):
                                 track_asins.append(track["asin"])
                                 
+                    # 2. Cek dari containerList (Format alternatif album/playlist Amazon)
+                    if not track_asins:
+                        for container in data.get("containerList", []):
+                            if not isinstance(container, dict):
+                                continue
+                            album_title = container.get("title", album_title)
+                            album_artist = container.get("author", container.get("primaryArtistName", album_artist))
+                            album_cover = container.get("image", album_cover)
+                            
+                            for track in container.get("tracks", []):
+                                if isinstance(track, dict) and track.get("asin"):
+                                    track_asins.append(track["asin"])
+
+                    # 3. Cek dari itemList
+                    if not track_asins:
+                        for item in data.get("itemList", []):
+                            if isinstance(item, dict) and item.get("asin"):
+                                track_asins.append(item["asin"])
+
+                    # 4. Fallback ke trackList
                     if not track_asins:
                         for track in data.get("trackList", []):
                             if isinstance(track, dict) and track.get("asin"):
