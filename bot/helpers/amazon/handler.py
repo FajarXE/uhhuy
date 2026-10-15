@@ -189,13 +189,16 @@ async def start_amazon(url: str, user: dict):
 
 
 async def start_playlist(playlist_asin: str, user: dict, url: str):
-    playlist_asin = await get_global_asin(url, current_asin=playlist_asin)
-    LOGGER.info(f"Amazon: Mengambil info Playlist {playlist_asin}")
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id, url=url)
     
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
+        
+    # [FIX 1] Kunci klien ke dalam user dict agar start_track memakai akun yang sama
+    user['amazon_api'] = client
+
+    LOGGER.info(f"Amazon: Mengambil info Playlist {playlist_asin} (Akun Region: {client.region.upper()})")
 
     device_id = client.tokens.get('device_id')
     device_type_id = client.tokens.get('deviceTypeId') or "A1I3OANZGDNGEE"
@@ -204,7 +207,7 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
 
     lookup_base = client.base_url
     api_loc = client.api_location
-    music_territory = "GB" if client.region.lower() == "uk" else client.region.upper()
+    music_territory = "GB" if client.region.lower() == "uk" else ("AU" if client.region.lower() in ["au", "nz"] else client.region.upper())
     lookup_url = f"{lookup_base}{api_loc}/api/muse/legacy/lookup"
     
     import uuid
@@ -221,52 +224,61 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
     playlist_title = "Unknown Playlist"
     playlist_owner = "Amazon Music"
     playlist_cover = ""
-    
-    for req_content in ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]:
-        lookup_payload = {
-            "customerId": customer_id,
-            "asins": [playlist_asin],
-            "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-            "requestedContent": req_content, 
-            "musicTerritory": music_territory, 
-            "deviceId": device_id,
-            "deviceType": device_type_id
-        }
-        
-        try:
-            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-                resp_text = await resp.text()
-                
-                if resp.status in [400, 401, 403]:
-                    LOGGER.info("Amazon: Token API Playlist kedaluwarsa, mencoba refresh...")
-                    if await client.refresh_access_token():
-                        lookup_headers["x-amz-access-token"] = client.tokens.get('x-amz-access-token')
-                        async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as retry_resp:
-                            resp_text = await retry_resp.text()
-                            if retry_resp.status != 200:
-                                continue
-                    else:
-                        continue
-                elif resp.status != 200:
-                    continue
 
-                data = json.loads(resp_text)
-                for pl in data.get("playlistList", []):
-                    playlist_title = pl.get("title", playlist_title)
-                    playlist_owner = pl.get("author", pl.get("owner", playlist_owner))
-                    playlist_cover = pl.get("image", playlist_cover)
+    # [FIX 2] Coba ASIN asli dari URL lebih dulu; jika kosong baru fallback ke ASIN Global
+    global_asin = await get_global_asin(url, current_asin=playlist_asin)
+    asin_candidates = [playlist_asin]
+    if global_asin and global_asin != playlist_asin:
+        asin_candidates.append(global_asin)
+    
+    for candidate_asin in asin_candidates:
+        for req_content in ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]:
+            lookup_payload = {
+                "customerId": customer_id,
+                "asins": [candidate_asin],
+                "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+                "requestedContent": req_content, 
+                "musicTerritory": music_territory, 
+                "deviceId": device_id,
+                "deviceType": device_type_id
+            }
+            
+            try:
+                async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
+                    resp_text = await resp.text()
                     
-                    for track in pl.get("tracks", []):
-                        if isinstance(track, dict) and track.get("asin"):
-                            track_asins.append(track["asin"])
-                            
-            track_asins = list(dict.fromkeys(track_asins))
-            if track_asins:
-                LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu Playlist dari Region {music_territory} ({req_content})")
-                break
-        except Exception as e:
-            LOGGER.error(f"Amazon Lookup Error: {e}")
-            continue
+                    if resp.status in [400, 401, 403]:
+                        LOGGER.info("Amazon: Token API Playlist kedaluwarsa, mencoba refresh...")
+                        if await client.refresh_access_token():
+                            lookup_headers["x-amz-access-token"] = client.tokens.get('x-amz-access-token')
+                            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as retry_resp:
+                                resp_text = await retry_resp.text()
+                                if retry_resp.status != 200:
+                                    continue
+                        else:
+                            continue
+                    elif resp.status != 200:
+                        continue
+
+                    data = json.loads(resp_text)
+                    for pl in data.get("playlistList", []):
+                        playlist_title = pl.get("title", playlist_title)
+                        playlist_owner = pl.get("author", pl.get("owner", playlist_owner))
+                        playlist_cover = pl.get("image", playlist_cover)
+                        
+                        for track in pl.get("tracks", []):
+                            if isinstance(track, dict) and track.get("asin"):
+                                track_asins.append(track["asin"])
+                                
+                track_asins = list(dict.fromkeys(track_asins))
+                if track_asins:
+                    LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu Playlist (ASIN: {candidate_asin}, Region: {music_territory}, Mode: {req_content})")
+                    break
+            except Exception as e:
+                LOGGER.error(f"Amazon Lookup Error: {e}")
+                continue
+        if track_asins:
+            break
             
     if not track_asins:
         raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk playlist {playlist_asin}. Pastikan link valid.")
@@ -336,13 +348,16 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
 
 
 async def start_album(album_asin: str, user: dict, url: str):
-    album_asin = await get_global_asin(url, current_asin=album_asin)
-    LOGGER.info(f"Amazon: Mengambil info Album {album_asin}")
     user_id = user.get('user_id')
     client = user.get('amazon_api') or amazon_manager.get_client(user_id, url=url)
     
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
+        
+    # [FIX 1] Kunci klien ke dalam user dict agar start_track tidak pindah ke akun region lain di tengah jalan!
+    user['amazon_api'] = client
+
+    LOGGER.info(f"Amazon: Mengambil info Album {album_asin} (Akun Region: {client.region.upper()})")
 
     device_id = client.tokens.get('device_id')
     device_type_id = client.tokens.get('deviceTypeId') or "A1I3OANZGDNGEE"
@@ -351,7 +366,7 @@ async def start_album(album_asin: str, user: dict, url: str):
     
     lookup_base = client.base_url
     api_loc = client.api_location
-    music_territory = "GB" if client.region.lower() == "uk" else client.region.upper()
+    music_territory = "GB" if client.region.lower() == "uk" else ("AU" if client.region.lower() in ["au", "nz"] else client.region.upper())
     lookup_url = f"{lookup_base}{api_loc}/api/muse/legacy/lookup"
     
     import uuid
@@ -368,57 +383,68 @@ async def start_album(album_asin: str, user: dict, url: str):
     album_title = "Unknown Album"
     album_artist = "Unknown Artist"
     album_cover = ""
+
+    # [FIX 2] Siapkan kandidat ASIN:
+    # Prioritas 1: ASIN asli dari URL (aman untuk UK/US maupun akun yang cocok dengan domain link).
+    # Prioritas 2: Global ASIN (otomatis terpakai jika link berasal dari negara lain misal JP/DE/FR tapi akun yang dipakai UK/US).
+    global_asin = await get_global_asin(url, current_asin=album_asin)
+    asin_candidates = [album_asin]
+    if global_asin and global_asin != album_asin:
+        asin_candidates.append(global_asin)
     
-    for req_content in ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]:
-        lookup_payload = {
-            "customerId": customer_id,
-            "asins": [album_asin],
-            "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
-            "requestedContent": req_content, 
-            "musicTerritory": music_territory, 
-            "deviceId": device_id,
-            "deviceType": device_type_id
-        }
-        
-        try:
-            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
-                resp_text = await resp.text()
-                
-                if resp.status in [400, 401, 403]:
-                    LOGGER.info("Amazon: Token API Album kedaluwarsa, mencoba refresh...")
-                    if await client.refresh_access_token():
-                        lookup_headers["x-amz-access-token"] = client.tokens.get('x-amz-access-token')
-                        async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as retry_resp:
-                            resp_text = await retry_resp.text()
-                            if retry_resp.status != 200:
-                                continue
-                    else:
-                        continue
-                elif resp.status != 200:
-                    continue
-                
-                data = json.loads(resp_text)
-                for album in data.get("albumList", []):
-                    album_title = album.get("title", album_title)
-                    album_artist = album.get("primaryArtistName", album_artist)
-                    album_cover = album.get("image", album_cover)
+    for candidate_asin in asin_candidates:
+        for req_content in ["MUSIC_SUBSCRIPTION", "FULL_CATALOG"]:
+            lookup_payload = {
+                "customerId": customer_id,
+                "asins": [candidate_asin],
+                "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability"],
+                "requestedContent": req_content, 
+                "musicTerritory": music_territory, 
+                "deviceId": device_id,
+                "deviceType": device_type_id
+            }
+            
+            try:
+                async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as resp:
+                    resp_text = await resp.text()
                     
-                    for track in album.get("tracks", []):
-                        if isinstance(track, dict) and track.get("asin"):
-                            track_asins.append(track["asin"])
-                            
-                if not track_asins:
-                    for track in data.get("trackList", []):
-                        if isinstance(track, dict) and track.get("asin"):
-                            track_asins.append(track["asin"])
-                            
-            track_asins = list(dict.fromkeys(track_asins))
-            if track_asins:
-                LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu dari Region {music_territory} ({req_content})")
-                break
-        except Exception as e:
-            LOGGER.error(f"Amazon Lookup Error: {e}")
-            continue
+                    if resp.status in [400, 401, 403]:
+                        LOGGER.info("Amazon: Token API Album kedaluwarsa, mencoba refresh...")
+                        if await client.refresh_access_token():
+                            lookup_headers["x-amz-access-token"] = client.tokens.get('x-amz-access-token')
+                            async with client.session.post(lookup_url, json=lookup_payload, headers=lookup_headers) as retry_resp:
+                                resp_text = await retry_resp.text()
+                                if retry_resp.status != 200:
+                                    continue
+                        else:
+                            continue
+                    elif resp.status != 200:
+                        continue
+                    
+                    data = json.loads(resp_text)
+                    for album in data.get("albumList", []):
+                        album_title = album.get("title", album_title)
+                        album_artist = album.get("primaryArtistName", album_artist)
+                        album_cover = album.get("image", album_cover)
+                        
+                        for track in album.get("tracks", []):
+                            if isinstance(track, dict) and track.get("asin"):
+                                track_asins.append(track["asin"])
+                                
+                    if not track_asins:
+                        for track in data.get("trackList", []):
+                            if isinstance(track, dict) and track.get("asin"):
+                                track_asins.append(track["asin"])
+                                
+                track_asins = list(dict.fromkeys(track_asins))
+                if track_asins:
+                    LOGGER.info(f"Amazon: Berhasil mendapat {len(track_asins)} lagu (ASIN: {candidate_asin}, Region: {music_territory}, Mode: {req_content})")
+                    break
+            except Exception as e:
+                LOGGER.error(f"Amazon Lookup Error: {e}")
+                continue
+        if track_asins:
+            break
             
     if not track_asins:
         raise Exception(f"Amazon tidak mengembalikan daftar lagu untuk album {album_asin}. Pastikan link valid.")
@@ -507,7 +533,7 @@ async def start_track(
     if not client:
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
 
-    LOGGER.info(f"Amazon: Mengambil info untuk lagu {asin}")
+    LOGGER.info(f"Amazon: Mengambil info untuk lagu {asin} (Akun Region: {client.region.upper()})")
     
     try:
         user_data = bot_set.user_data.get(user_id, {})
@@ -523,7 +549,20 @@ async def start_track(
         else: target_q = "SD" 
             
         LOGGER.info(f"Amazon: Target batas maksimal kualitas: {target_q}")
-        manifest_data = await client.get_playback_info(asin, target_quality=target_q)
+        try:
+            manifest_data = await client.get_playback_info(asin, target_quality=target_q)
+        except Exception as first_err:
+            # Jika unduhan track tunggal lintas-negara gagal (CONTENT_NOT_ELIGIBLE), coba ekstrak Global ASIN dari URL
+            if upload and "CONTENT_NOT_ELIGIBLE" in str(first_err) and "trackAsin=" not in url:
+                global_t_asin = await get_global_asin(url, current_asin=asin)
+                if global_t_asin and global_t_asin != asin:
+                    LOGGER.info(f"Amazon: Mencoba ulang track dengan Global ASIN {global_t_asin}...")
+                    asin = global_t_asin
+                    manifest_data = await client.get_playback_info(asin, target_quality=target_q)
+                else:
+                    raise first_err
+            else:
+                raise first_err
 
     except Exception as e:
         err_str = str(e)
@@ -586,7 +625,7 @@ async def start_track(
         'type': 'track'
     })
 
-    # [FIX] Unduh URL Cover menjadi file gambar lokal agar Mutagen & Album ZIP tidak kehilangan cover!
+    # [FIX] Unduh URL Cover menjadi file gambar lokal agar Mutagen & Album ZIP memiliki sampul fisik
     raw_cover_url = manifest_data.get('cover', '')
     if raw_cover_url and str(raw_cover_url).startswith('http'):
         local_cover = await create_cover_file(raw_cover_url, track_meta)
