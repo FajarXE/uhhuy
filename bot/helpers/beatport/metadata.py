@@ -6,6 +6,7 @@ import aiohttp
 import os
 import asyncio
 import random
+from datetime import datetime  # <-- [FIX WAJIB UNTUK TAG WAV/AIFF]
 from config import Config 
 
 # Import Mutagen untuk Tagging Lokal
@@ -327,8 +328,9 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
     elif album_data.get("image", {}).get("dynamic_uri"):
         bp_cover = await _generate_artwork_url(album_data.get("image").get("dynamic_uri"))
     
-    metadata['cover'] = await _process_cover(metadata, bp_cover)
-    metadata['thumbnail'] = await create_cover_file(await _generate_artwork_url(bp_cover, 80), metadata, True)
+    cover_path = await _process_cover(metadata, bp_cover)
+    metadata['cover'] = cover_path
+    metadata['thumbnail'] = cover_path
 
     pref_qual = beatport_manager.get_user_quality(user_id)
     metadata['target_format'] = pref_qual
@@ -437,8 +439,9 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
     metadata['quality'] = pref_qual.capitalize()
 
     bp_cover = await _generate_artwork_url(album_data.get("image", {}).get("dynamic_uri"))
-    metadata['cover'] = await _process_cover(metadata, bp_cover)
-    metadata['thumbnail'] = await create_cover_file(await _generate_artwork_url(bp_cover, 80), metadata, True)
+    cover_path = await _process_cover(metadata, bp_cover)
+    metadata['cover'] = cover_path
+    metadata['thumbnail'] = cover_path
 
     metadata['tracks'] = []
     album_explicit = False
@@ -517,8 +520,9 @@ async def process_artist_metadata(artist_id: str, r_id: str, user: dict):
 
     img_uri = artist_data.get("image", {}).get("dynamic_uri")
     bp_cover = await _generate_artwork_url(img_uri)
-    metadata['cover'] = await _process_cover(metadata, bp_cover)
-    metadata['thumbnail'] = await create_cover_file(await _generate_artwork_url(bp_cover, 80), metadata, True)
+    cover_path = await _process_cover(metadata, bp_cover)
+    metadata['cover'] = cover_path
+    metadata['thumbnail'] = cover_path
 
     metadata['releases'] = releases
     if not releases:
