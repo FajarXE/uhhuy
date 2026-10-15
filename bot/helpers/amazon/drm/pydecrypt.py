@@ -2334,26 +2334,8 @@ def fp_print_progress(index, total, start_time):
     sys.stdout.flush()
 
 
-def fp_decrypt_sample(buffer, sample_start, sample_size, sample_aux, track, key):
-    iv, subsamples = sample_aux
-    scheme = track["scheme"].lower()
-    crypt_blocks = track["crypt_blocks"]
-    skip_blocks = track["skip_blocks"]
-    if not subsamples:
-        if scheme in ("cenc", "cens"):
-            fp_decrypt_ctr_range(buffer, sample_start, sample_size, key, iv)
-        else:
-            fp_decrypt_cbc_pattern_range(buffer, sample_start, sample_size, key, iv, crypt_blocks, skip_blocks)
-        return
-    cursor = sample_start
-    for clear_size, encrypted_size in subsamples:
-        cursor += clear_size
-        if encrypted_size > 0:
-            if scheme in ("cenc", "cens"):
-                fp_decrypt_ctr_range(buffer, cursor, encrypted_size, key, iv)
-            else:
-                fp_decrypt_cbc_pattern_range(buffer, cursor, encrypted_size, key, iv, crypt_blocks, skip_blocks)
-        cursor += encrypted_size
+def fp_print_progress(index, total, start_time):
+    pass
 
 
 def fp_collect_fragments(data, tracks):
