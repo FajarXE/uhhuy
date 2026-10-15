@@ -198,7 +198,7 @@ async def start_playlist(playlist_asin: str, user: dict, url: str):
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
 
     device_id = client.tokens.get('device_id')
-    device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
+    device_type_id = client.tokens.get('deviceTypeId') or "A1I3OANZGDNGEE"
     customer_id = client.tokens.get('customerId')
     access_token = client.tokens.get('x-amz-access-token')
 
@@ -345,7 +345,7 @@ async def start_album(album_asin: str, user: dict, url: str):
         raise Exception("Tidak ada klien Amazon Music yang aktif.")
 
     device_id = client.tokens.get('device_id')
-    device_type_id = client.tokens.get('deviceTypeId') or "A1KAXIG6VXSG8Y"
+    device_type_id = client.tokens.get('deviceTypeId') or "A1I3OANZGDNGEE"
     customer_id = client.tokens.get('customerId')
     access_token = client.tokens.get('x-amz-access-token')
     
