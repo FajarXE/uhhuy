@@ -9,6 +9,7 @@ from .amazon_api import AmazonApi
 from bot.helpers.database.mongo_async import database
 from bot.settings import bot_set
 
+
 class AmazonManager:
     def __init__(self):
         self.clients = []
@@ -20,12 +21,14 @@ class AmazonManager:
     async def initialize_clients(self):
         LOGGER.info("Amazon: Menginisialisasi klien Global...")
         for old_client in self.clients:
-            try: await old_client.close()
-            except: pass
+            try:
+                await old_client.close()
+            except Exception:
+                pass
         self.clients = []
         
         try:
-            all_settings = await database.get_variable()
+            all_settings = await database.get_variable() or {}
             self.quality = all_settings.get('AMAZON_QUALITY', 'HD')
             accounts_list = all_settings.get("AMAZON_ACCOUNTS_LIST", [])
         except Exception:
@@ -42,10 +45,42 @@ class AmazonManager:
                 self.clients.append(client)
             except Exception as e:
                 LOGGER.error(f"Amazon: Gagal meload akun Global: {e}")
+                await client.close()
 
         if self.clients:
             self._client_cycler = itertools.cycle(self.clients)
             LOGGER.info(f"Amazon: {len(self.clients)} Klien Global aktif.")
+
+    async def persist_refreshed_token(self, customer_id: str, new_tokens: dict):
+        """Menyimpan token yang baru di-refresh ke RAM dan MongoDB agar permanen."""
+        if not customer_id:
+            return
+        try:
+            # 1. Cek di Global Accounts
+            all_settings = await database.get_variable() or {}
+            global_list = all_settings.get("AMAZON_ACCOUNTS_LIST", [])
+            updated_global = False
+            for acc in global_list:
+                if acc.get('tokens', {}).get('customerId') == customer_id:
+                    acc['tokens'].update(new_tokens)
+                    updated_global = True
+            if updated_global:
+                await database.set_variable("AMAZON_ACCOUNTS_LIST", global_list)
+
+            # 2. Cek di Private User Accounts
+            for uid, u_data in list(bot_set.user_data.items()):
+                if not isinstance(u_data, dict):
+                    continue
+                u_accs = u_data.get('amazon_accounts', [])
+                updated_user = False
+                for acc in u_accs:
+                    if acc.get('tokens', {}).get('customerId') == customer_id:
+                        acc['tokens'].update(new_tokens)
+                        updated_user = True
+                if updated_user:
+                    await database.save_user_settings(uid, {'amazon_accounts': u_accs})
+        except Exception as e:
+            LOGGER.debug(f"Amazon: Gagal menyimpan refresh token ke DB: {e}")
 
     async def add_user_account(self, user_id: int, account_data: dict):
         region = account_data.get('region', 'us')
@@ -66,8 +101,10 @@ class AmazonManager:
             new_clients = []
             for c in self.user_clients[user_id]:
                 if c.tokens.get('customerId') == target_uid:
-                    try: await c.close()
-                    except: pass
+                    try:
+                        await c.close()
+                    except Exception:
+                        pass
                 else:
                     new_clients.append(c)
             
@@ -76,20 +113,24 @@ class AmazonManager:
                 self.user_cyclers[user_id] = itertools.cycle(new_clients)
             else:
                 del self.user_clients[user_id]
-                if user_id in self.user_cyclers: del self.user_cyclers[user_id]
+                self.user_cyclers.pop(user_id, None)
         LOGGER.info(f"Amazon: Akun {target_uid} dihapus untuk user {user_id}")
 
     async def remove_user_account(self, user_id: int):
         if user_id in self.user_clients:
             for c in self.user_clients[user_id]:
-                try: await c.close()
-                except: pass
+                try:
+                    await c.close()
+                except Exception:
+                    pass
             del self.user_clients[user_id]
-            if user_id in self.user_cyclers: del self.user_cyclers[user_id]
+            self.user_cyclers.pop(user_id, None)
             
         user_data = bot_set.user_data.get(user_id, {})
-        if 'amazon_account' in user_data: user_data['amazon_account'] = None
-        if 'amazon_accounts' in user_data: user_data['amazon_accounts'] = []
+        if 'amazon_account' in user_data:
+            user_data['amazon_account'] = None
+        if 'amazon_accounts' in user_data:
+            user_data['amazon_accounts'] = []
             
         await database.save_user_settings(user_id, {'amazon_accounts': [], 'amazon_account': None})
         LOGGER.info(f"Amazon: Semua private session dihapus untuk user {user_id}")
@@ -106,7 +147,6 @@ class AmazonManager:
         """Mengambil client cerdas dengan Filter Region berdasarkan URL."""
         target_region = None
         if url:
-            # Pisahkan domain dan jalurnya
             parsed_url = urllib.parse.urlparse(url)
             domain = parsed_url.netloc.lower()
             url_path = parsed_url.path.lower()
@@ -116,13 +156,12 @@ class AmazonManager:
             elif 'amazon.de' in domain: target_region = 'de'
             elif 'amazon.com.mx' in domain: target_region = 'mx'
             elif 'amazon.com.br' in domain: target_region = 'br'
-            elif 'amazon.com.au' in domain: target_region = 'nz' # AU dan NZ berbagi server
+            elif 'amazon.com.au' in domain: target_region = 'au'  # [FIX] Gunakan 'au' agar cocok dengan pengecekan di bawah
             elif 'amazon.ca' in domain: target_region = 'ca'
             elif 'amazon.it' in domain: target_region = 'it'
             elif 'amazon.es' in domain: target_region = 'es'
             elif 'amazon.in' in domain: target_region = 'in'
             elif 'amazon.fr' in domain: target_region = 'fr'
-            # Cek domain .ar ATAU jika ada unsur '-ar' (seperti /en-ar atau /es-ar) di jalurnya
             elif 'amazon.com.ar' in domain or '-ar' in url_path: target_region = 'ar'
             elif 'amazon.com' in domain: target_region = 'us'
 
@@ -146,16 +185,13 @@ class AmazonManager:
 
             clients = self.user_clients.get(user_id, [])
             if clients:
-                # --- SMART REGION MATCHING (PRIVATE) ---
                 if target_region:
-                    # FIX FATAL: URL AU dan NZ sama-sama memakai .com.au (target 'au').
-                    # Jika targetnya 'au', bot HARUS mengizinkan akun 'au' maupun 'nz'!
                     matching_clients = [
                         c for c in clients 
-                        if c.region.lower() == target_region or (target_region == 'au' and c.region.lower() in ['au', 'nz'])
+                        if c.region.lower() == target_region or (target_region in ['au', 'nz'] and c.region.lower() in ['au', 'nz'])
                     ]
                     if matching_clients:
-                        return random.choice(matching_clients) # Load Balance
+                        return random.choice(matching_clients)
                 
                 return next(self.user_cyclers[user_id])
         
@@ -164,10 +200,9 @@ class AmazonManager:
             return None
             
         if target_region:
-            # Terapkan logika AU/NZ yang sama untuk akun Global
             matching_global = [
                 c for c in self.clients 
-                if c.region.lower() == target_region or (target_region == 'au' and c.region.lower() in ['au', 'nz'])
+                if c.region.lower() == target_region or (target_region in ['au', 'nz'] and c.region.lower() in ['au', 'nz'])
             ]
             if matching_global:
                 return random.choice(matching_global)
@@ -175,18 +210,26 @@ class AmazonManager:
         return next(self._client_cycler)
 
     async def setup_quality(self, user_id, quality):
+        if user_id not in bot_set.user_data:
+            bot_set.user_data[user_id] = {}
+        bot_set.user_data[user_id]['amazon_qual'] = quality
         await database.save_user_settings(user_id, {'amazon_qual': quality})
 
     async def shutdown(self):
         for client in self.clients:
-            try: await client.close()
-            except: pass
+            try:
+                await client.close()
+            except Exception:
+                pass
         for clients_list in self.user_clients.values():
             for client in clients_list:
-                try: await client.close()
-                except: pass
+                try:
+                    await client.close()
+                except Exception:
+                    pass
         self.clients = []
         self.user_clients = {}
         self.user_cyclers = {}
+
 
 amazon_manager = AmazonManager()
