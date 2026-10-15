@@ -116,40 +116,44 @@ class AmazonApi:
     def load_tokens(self, saved_tokens):
         self.tokens.update(saved_tokens)
         
-        # [FIX] Ekstrak marketplaceId & accessToken dari service_token seperti di amazonmusic_manifest.py
+        # 1. Ekstrak marketplaceId & accessToken dari service_token (persis amazonmusic_manifest.py)
         if self.tokens.get("service_token") and isinstance(self.tokens["service_token"], str):
             try:
                 st_json = json.loads(self.tokens["service_token"])
                 if not self.tokens.get("x-amz-access-token") and st_json.get("accessToken"):
                     self.tokens["x-amz-access-token"] = st_json["accessToken"]
-                if not self.tokens.get("marketplaceId") and st_json.get("marketplaceId"):
+                if st_json.get("marketplaceId"):
                     self.tokens["marketplaceId"] = st_json["marketplaceId"]
             except Exception:
                 pass
 
+        # 2. Ekstrak dari x-amz-access-token
         access_token = self.tokens.get("x-amz-access-token", "")
         extracted = self._extract_jwt_data(access_token)
         for k, v in extracted.items():
             if not self.tokens.get(k):
                 self.tokens[k] = v
 
-    async def get_tv_device_code(self):
-        self.tokens["device_id"] = os.urandom(8).hex()
-        headers = {
-            "x-amzn-request-id": str(uuid.uuid4()),
-            "x-amzn-timestamp": str(int(time.time() * 1000)),
-            "x-amzn-device-id": self.tokens["device_id"],
+        # 3. Sinkronkan region objek dengan marketplaceId asli dari token jika ada
+        mp_id = self.tokens.get("marketplaceId")
+        if mp_id == "A1F83G8C2ARO7P":
+            self.region = "uk"
+        elif mp_id == "ATVPDKIKX0DER" and self.region not in ["us", "ar"]:
+            self.region = "us"
+            
+        self.base_url = self.base_urls.get(self.region, self.base_urls["us"])
+        api_locations = {
+            "NA": ["br", "mx", "us", "ca", "ar"], 
+            "EU": ["fr", "de", "uk", "it", "es", "in"], 
+            "FE": ["jp", "au", "nz"]
         }
-        async with self.session.post(f"https://{self.api_url}/api/showHome", json={"userHash": ""}, headers=headers) as resp:
-            if resp.status != 200:
-                raise Exception(f"HTTP {resp.status}: {await resp.text()}")
-            codepair_json = await resp.json()
-            code_pair = codepair_json["methods"][0]["template"]
-            public_code = code_pair.get("code", "")
-            poll_url = code_pair["onPollingIntervalElapsed"][0]["url"]
-            register_code = unquote(poll_url.rsplit("code=", 1)[-1])
-            activation_url = self.base_url.replace("music.", "") + "code"
-            return public_code, register_code, activation_url
+        api_urls = {
+            "NA": "na.tvmesk.skill.music.a2z.com",
+            "EU": "eu.tvmesk.skill.music.a2z.com",
+            "FE": "fe.tvmesk.skill.music.a2z.com"
+        }
+        self.api_location = next((loc for loc, regs in api_locations.items() if self.region in regs), "NA")
+        self.api_url = api_urls.get(self.api_location)
 
     async def poll_tv_auth(self, register_code):
         headers = {
@@ -174,13 +178,16 @@ class AmazonApi:
                 token_data = json.loads(service_token)
                 self.tokens["service_token"] = service_token
                 self.tokens["x-amz-access-token"] = token_data.get("accessToken")
-                self.tokens["refresh_token"] = token_data.get("refreshToken") 
+                self.tokens["refresh_token"] = token_data.get("refreshToken")
+                if token_data.get("marketplaceId"):
+                    self.tokens["marketplaceId"] = token_data["marketplaceId"]
                 if "clientId" in token_data:
                     self.tokens["client_id"] = token_data["clientId"]
                 if self.tokens["x-amz-access-token"]:
                     self.tokens.update(self._extract_jwt_data(self.tokens["x-amz-access-token"]))
                 
-                if video_player_token and not self.tokens.get("customerId"):
+                if video_player_token:
+                    self.tokens["x-amzn-video-player-token"] = video_player_token
                     try:
                         v_tok = json.loads(video_player_token).get("token", video_player_token)
                     except Exception:
@@ -335,20 +342,21 @@ class AmazonApi:
             device_id = self.tokens.get('device_id')
             access_token = self.tokens.get('x-amz-access-token')
             customer_id = self.tokens.get('customerId')
-            
-            # [FIX 1] Wajib gunakan A1I3OANZGDNGEE agar cocok dengan header AndroidTV (persis seperti get_license & manifest CLI)
             device_type_id = self.tokens.get('deviceTypeId') or "A1I3OANZGDNGEE"
             
             if not customer_id:
                 raise Exception("Missing 'customerId' di memori. Login ulang diperlukan.")
                 
-            # [FIX 2] Prioritaskan marketplaceId & musicTerritory dari token akun asli
             marketplace_id = self.tokens.get('marketplaceId') or self.marketplaces.get(self.region, "ATVPDKIKX0DER")
-            music_territory = self.tokens.get('musicTerritory') or ("GB" if self.region.lower() == "uk" else self.region.upper())
+            if self.region.lower() == "uk" or marketplace_id == "A1F83G8C2ARO7P":
+                music_territory = "GB"
+            elif self.region.lower() in ["au", "nz"] or marketplace_id == "A15PK738MTQHSO":
+                music_territory = "AU"
+            else:
+                music_territory = self.tokens.get('musicTerritory') or self.region.upper()
             
             lookup_url = f"{self.base_url}{self.api_location}/api/muse/legacy/lookup"
             lookup_payload = {
-                "customerId": customer_id,
                 "asins": [asin],
                 "features": ["popularity", "expandTracklist", "trackLibraryAvailability", "collectionLibraryAvailability", "albumArtist", "fullAlbumDetails"],
                 "requestedContent": "MUSIC_SUBSCRIPTION",
@@ -414,7 +422,6 @@ class AmazonApi:
                     if isinstance(track_data_obj, dict):
                         title = track_data_obj.get('title') or asin
                         
-                        # [FIX] Gunakan `or {}` agar aman jika JSON berisi null (None)
                         artist_obj = track_data_obj.get('artist')
                         if not isinstance(artist_obj, dict):
                             artist_obj = {}
@@ -469,16 +476,33 @@ class AmazonApi:
                             if 'mzstatic.com' not in image and 'itunes.apple.com' not in image:
                                 image = re.sub(r'\._[^.]+\.(jpg|jpeg|png)$', r'.\1', image, flags=re.IGNORECASE)
             
-            # --- 2. PENCARIAN FILE AUDIO (MPD) ---
+            # --- 2. PENCARIAN FILE AUDIO (MPD) - IDENTIK DENGAN MANIFEST CLI ---
             dmls_url = f"{self.base_url}{self.api_location}/api/dmls/"
             dmls_payload = {
-                "customerId": customer_id,
-                "deviceToken": {"deviceTypeId": device_type_id, "deviceId": device_id},
-                "appInfo": {"musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {asin})"},
-                "contentIdList": [{"identifier": asin, "identifierType": "ASIN"}],
-                "musicDashVersionList": ["SIREN_KATANA"],
-                "contentProtectionList": ["GROUP_PSSH", "TRACK_PSSH"],
-                "customerInfo": {"marketplaceId": marketplace_id, "territoryId": music_territory, "customerId": customer_id},
+                "deviceToken": {
+                    "deviceTypeId": device_type_id,
+                    "deviceId": device_id
+                },
+                "appInfo": {
+                    "musicAgent": f"Harley/3.12.11.183 Harley/24.10.1 ({uuid.uuid4()} {asin})"
+                },
+                "contentIdList": [
+                    {
+                        "identifier": asin,
+                        "identifierType": "ASIN"
+                    }
+                ],
+                "musicDashVersionList": [
+                    "SIREN_KATANA"
+                ],
+                "contentProtectionList": [
+                    "GROUP_PSSH",
+                    "TRACK_PSSH"
+                ],
+                "customerInfo": {
+                    "marketplaceId": marketplace_id,
+                    "territoryId": music_territory
+                },
                 "try3dAsinSubstitution": True, 
                 "tryAsinSubstitution": True
             }
@@ -486,9 +510,7 @@ class AmazonApi:
                 "X-Amz-RequestId": str(uuid.uuid4()),
                 "X-Amz-Target": "com.amazon.digitalmusiclocator.DigitalMusicLocatorServiceExternal.getDashManifestsV2",
                 "x-amz-access-token": access_token,
-                "Content-Encoding": "amz-1.0",
-                "x-amzn-device-type-id": device_type_id,
-                "x-amzn-hardware-device-type-id": device_type_id
+                "Content-Encoding": "amz-1.0"
             }
             
             mpd_text = ""
@@ -520,13 +542,15 @@ class AmazonApi:
                         
                         dmls_data = json.loads(resp_text) or {}
                         if not dmls_data.get("contentResponseList"):
-                            raise Exception(f"Amazon menolak file (Empty contentResponseList): {resp_text[:300]}")
+                            raise Exception(f"Amazon menolak file: {resp_text[:300]}")
                         item_resp = dmls_data["contentResponseList"][0] or {}
                         if item_resp.get("error"):
                             raise Exception(f"Ditolak Amazon: {item_resp.get('error')}")
+                        status_code = item_resp.get("contentResponseStatusCode", "")
+                        if status_code and status_code != "OK":
+                            status_msg = item_resp.get("contentResponseStatusMessage", status_code)
+                            raise Exception(f"Amazon DMLS [{status_code}]: {status_msg} (ASIN: {asin}, Region Akun: {self.region.upper()})")
                         mpd_text = item_resp.get("manifest") or ""
-                        if not mpd_text:
-                            LOGGER.warning(f"Amazon DMLS mengembalikan manifest kosong untuk {asin}. Respons: {resp_text[:300]}")
                         break
 
             if not mpd_text:
