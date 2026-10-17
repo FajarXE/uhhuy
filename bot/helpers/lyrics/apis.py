@@ -5,15 +5,16 @@ import aiohttp
 import asyncio
 import logging
 import aiolimiter
+import random # Tambahkan import ini
 from datetime import datetime
 
 LOGGER = logging.getLogger(__name__)
 
 # --- KONTROL RATE LIMIT (ANTI-BAN LYRICS API) ---
 MX_LIMITER = aiolimiter.AsyncLimiter(10, 5)
-LRC_LIMITER = aiolimiter.AsyncLimiter(10, 5)
+# Pengetatan khusus untuk LRCLib (2 request per 4 detik)
+LRC_LIMITER = aiolimiter.AsyncLimiter(2, 4) 
 GENIUS_LIMITER = aiolimiter.AsyncLimiter(10, 5) 
-# ------------------------------------------------
 
 # =======================================================
 # FUNGSI VALIDASI CERDAS UNTUK LRCLIB & GENIUS
@@ -187,8 +188,12 @@ class LRCLibAPI:
                                 retry_after = int(r.headers.get('Retry-After', 5))
                             except ValueError:
                                 retry_after = 5
-                            LOGGER.warning(f"LRCLib Rate Limit {r.status}. Retrying in {retry_after}s...")
-                            await asyncio.sleep(retry_after)
+                                
+                            # Tambahkan Exponential Backoff + Jitter untuk mencegah "Thundering Herd"
+                            delay = retry_after + (1.5 ** attempt) + random.uniform(0.1, 1.0)
+                            
+                            LOGGER.warning(f"LRCLib Rate Limit {r.status}. Retrying {attempt+1}/3 in {delay:.2f}s...")
+                            await asyncio.sleep(delay)
                             continue
                         elif r.status == 404:
                             return None 
