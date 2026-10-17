@@ -593,6 +593,10 @@ async def start_track(asin: str, user: dict, url: str, upload=True, forced_track
         LOGGER.info(f"Amazon: Target batas maksimal kualitas: {target_q}")
         manifest_data = await client.get_playback_info(asin, target_quality=target_q)
 
+        # Tambahkan validasi ini
+        if not manifest_data:
+            raise Exception("Data manifest kosong. Lagu mungkin tidak tersedia.")
+
     except Exception as e:
         err_str = str(e)
         if "Akses ditolak" in err_str or "EXPIRED_TOKEN" in err_str:
