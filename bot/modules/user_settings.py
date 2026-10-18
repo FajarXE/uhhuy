@@ -1572,7 +1572,8 @@ async def uset_cb(client, query, datatype=""):
     if data[1] == "deezer" or datatype == "deezer":
         text = f"Choose Deezer Audio Quality bellow:"
         quality = {
-            "FLAC": "FLAC",
+            "FLAC_24": "FLAC 24-bit",
+            "FLAC": "FLAC 16-bit",
             "MP3_320": "MP3 320",
             "MP3_128": "MP3 128"
         }
@@ -2049,7 +2050,8 @@ async def uset_deezer(client, query):
     if not await check_user(msg=m):
         return
     qual_map_display = {
-        "FLAC": "FLAC",
+        "FLAC 24-bit": "FLAC_24",
+        "FLAC 16-bit": "FLAC",
         "MP3 320": "MP3_320",
         "MP3 128": "MP3_128"
     }
