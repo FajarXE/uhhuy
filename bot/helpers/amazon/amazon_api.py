@@ -560,6 +560,9 @@ class AmazonApi:
                 'publisher': label, 'release_date': release_date, 'cover': image, 
                 'url': best_url, 'kid': best_kid, 'codec': best_codec
             }
+        
+        # Tambahkan baris ini di luar loop 'for attempt in range(2):'
+        raise Exception("Gagal mendapatkan manifest MPD (Lagu mungkin diblokir region atau tidak tersedia di paket langganan).")
 
     async def get_license(self, challenge_b64, track_asin):
         for attempt in range(2):
