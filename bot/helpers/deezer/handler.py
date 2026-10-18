@@ -82,7 +82,7 @@ async def start_track(item_id: int, user: dict, track_meta: dict | None, upload=
     raw_filename = await format_string(Config.TRACK_NAME_FORMAT, track_meta, user)
     safe_filename = sanitize_filepath(raw_filename)
 
-    track_meta['extension'] = 'flac' if track_meta['quality'] == 'FLAC' else 'mp3'
+    track_meta['extension'] = 'flac' if track_meta['quality'] in ['FLAC', 'FLAC_24'] else 'mp3'
     filepath += f"/{safe_filename}.{track_meta['extension']}"
     track_meta['filepath'] = filepath
 
