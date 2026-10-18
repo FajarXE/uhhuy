@@ -714,10 +714,20 @@ async def get_quality(meta:dict, deezerapi: DeezerAPI, user_id: int):
     countries = meta.get('AVAILABLE_COUNTRIES', {}).get('STREAM_ADS')
     if not countries or deezerapi.country not in countries:
         raise DeezerError("Deezer : Track not available in your country")
+        
     preferred_quality = deezer_manager.get_user_quality(user_id)
-    formats = ['FLAC', 'MP3_320', 'MP3_128'] if preferred_quality == "FLAC" else \
+    
+    # --- [MODIFIKASI: Tambahkan FLAC_24 ke dalam rantai fallback] ---
+    formats = ['FLAC_24', 'FLAC', 'MP3_320', 'MP3_128'] if preferred_quality == "FLAC_24" else \
+              ['FLAC', 'MP3_320', 'MP3_128'] if preferred_quality == "FLAC" else \
               ['MP3_320', 'MP3_128'] if preferred_quality == "MP3_320" else ['MP3_128']
+              
     for f in formats:
-        if f in deezerapi.available_formats and meta.get(f'FILESIZE_{f}', '0') != '0': return f
-    if 'MP3_128' in deezerapi.available_formats and meta.get('FILESIZE_MP3_128', '0') != '0': return 'MP3_128'
+        # Gunakan str() untuk menghindari error tipe data jika API mengembalikan angka integer
+        if f in deezerapi.available_formats and str(meta.get(f'FILESIZE_{f}', '0')) != '0': 
+            return f
+            
+    if 'MP3_128' in deezerapi.available_formats and str(meta.get('FILESIZE_MP3_128', '0')) != '0': 
+        return 'MP3_128'
+        
     raise DeezerError(f"Deezer: Format {preferred_quality} not available.")
