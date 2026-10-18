@@ -104,6 +104,12 @@ class DeezerAPI:
             for k, v in format_dict.items():
                 if resp['results']['USER']['OPTIONS'][k]:
                     self.available_formats.append(v)
+            
+            # --- [TAMBAHAN UNTUK HI-RES 24-BIT] ---
+            if 'FLAC' in self.available_formats:
+                self.available_formats.append('FLAC_24')
+            # --------------------------------------
+            
             self.user = resp['results'] 
         
         return resp['results']
