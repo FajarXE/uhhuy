@@ -796,7 +796,8 @@ def dz_button(quality: dict, user_id: int = None):
     row = []
     
     display_text_map = {
-        "FLAC": "FLAC",
+        "FLAC_24": "FLAC 24-bit",
+        "FLAC": "FLAC 16-bit",
         "MP3_320": "MP3 320",
         "MP3_128": "MP3 128"
     }
