@@ -475,7 +475,8 @@ async def soundcloud_quality_cb(c, cb:CallbackQuery):
 async def deezer_cb(c, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
         quality = {
-            "FLAC": "FLAC",
+            "FLAC_24": "FLAC 24-bit",
+            "FLAC": "FLAC 16-bit",
             "MP3_320": "MP3 320",
             "MP3_128": "MP3 128"
         }
@@ -490,7 +491,8 @@ async def deezer_cb(c, cb:CallbackQuery):
 async def deezer_quality_cb(c, cb:CallbackQuery):
     if await check_user(cb.from_user.id, restricted=True):
         qual_map_display = {
-            "FLAC": "FLAC",
+            "FLAC 24-bit": "FLAC_24",
+            "FLAC 16-bit": "FLAC",
             "MP3 320": "MP3_320",
             "MP3 128": "MP3_128"
         }
