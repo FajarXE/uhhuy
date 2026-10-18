@@ -29,7 +29,7 @@ class DeezerLoginManager:
         try:
             all_settings = await database.get_variable()
             db_quality = all_settings.get('DEEZER_QUALITY') if all_settings else None
-            if db_quality in ["FLAC", "MP3_320", "MP3_128"]:
+            if db_quality in ["FLAC_24", "FLAC", "MP3_320", "MP3_128"]:
                 self.quality = db_quality
         except Exception as e:
             LOGGER.error(f"Deezer Manager: Gagal memuat kualitas DB: {e}")
@@ -68,7 +68,7 @@ class DeezerLoginManager:
     # --- PENGATURAN KUALITAS ---
     async def setup_quality(self, user_id: int, qual: str = None):
         if user_id not in self.user_data: self.user_data[user_id] = {}
-        if qual in ["FLAC", "MP3_320", "MP3_128"]:
+        if qual in ["FLAC_24", "FLAC", "MP3_320", "MP3_128"]:
             self.user_data[user_id]['deezer_qual'] = qual
             # Simpan juga ke MongoDB permanen agar sinkron dengan qopy/settings
             await database.save_user_settings(user_id, {'deezer_qual': qual})
