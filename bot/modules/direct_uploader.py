@@ -766,19 +766,37 @@ class DirectUpload:
                                 GLOBAL_TASKS[task_id]['timestamp'] = time.time()
                                 GLOBAL_TASKS[task_id]['action'] = 'Uploading'
                                 GLOBAL_TASKS[task_id]['machine'] = 'Transfer.it CLI'
+                                GLOBAL_TASKS[task_id]['processed_label'] = 'Processed_bytes' # FIX Label
                                 
-                                match = re.search(r'(\d+)/(\d+)\s+MiB', line_str)
+                                # Regex yang disempurnakan untuk menangkap Bytes DAN Speed
+                                match = re.search(r'(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s+MiB.*?([\d.]+)\s*([a-zA-Z]+/s)', line_str)
+                                if not match:
+                                    # Fallback jika Regex pertama gagal (hanya tangkap MB)
+                                    match = re.search(r'(\d+)/(\d+)\s+MiB', line_str)
+                                
                                 if match:
-                                    sent = int(match.group(1)) * 1024 * 1024
-                                    total = int(match.group(2)) * 1024 * 1024
-                                    GLOBAL_TASKS[task_id]['processed'] = f"{match.group(1)} MiB of {match.group(2)} MiB"
+                                    # Cek apakah mendapatkan data kecepatan (Speed)
+                                    if len(match.groups()) >= 4:
+                                        sent_mb = float(match.group(1))
+                                        total_mb = float(match.group(2))
+                                        speed_val = match.group(3)
+                                        speed_unit = match.group(4)
+                                        
+                                        GLOBAL_TASKS[task_id]['processed'] = f"{sent_mb:.2f} MB of {total_mb:.2f} MB"
+                                        GLOBAL_TASKS[task_id]['speed'] = f"{speed_val} {speed_unit}"
+                                    else:
+                                        sent_mb = float(match.group(1))
+                                        total_mb = float(match.group(2))
+                                        GLOBAL_TASKS[task_id]['processed'] = f"{sent_mb:.2f} MB of {total_mb:.2f} MB"
                                     
-                                    if total > 0:
-                                        pct = (sent / total) * 100
+                                    if total_mb > 0:
+                                        pct = (sent_mb / total_mb) * 100
+                                        
                                         # --- LOGIKA PROGRESS BAR 3 TAHAP ---
                                         blocks = 12
                                         fill_val = (pct / 100) * blocks
-                                        filled_blocks = math.floor(fill_val)
+                                        # Menggunakan int() untuk menggantikan math.floor() agar tidak error
+                                        filled_blocks = int(fill_val) 
                                         remainder = fill_val - filled_blocks
                                         
                                         p_bar = ""
@@ -788,9 +806,9 @@ class DirectUpload:
                                             else: p_bar += "□"
                                             
                                         GLOBAL_TASKS[task_id]['progress_bar'] = p_bar
-                                        # -----------------------------------
                                         GLOBAL_TASKS[task_id]['percentage'] = f"{pct:.2f}%"
                 except Exception as e:
+                    from bot.logger import LOGGER
                     LOGGER.debug(f"Transfer.it stderr parser error: {e}")
 
             # Jalankan pembacaan stderr di background
@@ -824,6 +842,7 @@ class DirectUpload:
                 os.remove(state_file)
             raise
         except Exception as e:
+            from bot.logger import LOGGER
             LOGGER.error(f"Transfer.it Subprocess Error: {e}")
             if os.path.exists(state_file):
                 os.remove(state_file)
