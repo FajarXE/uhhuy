@@ -2,72 +2,83 @@
 
 import re
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, CallbackQuery
 from pyrogram.enums import ChatType
 from bot.helpers.aria2_helper import aria2_cancel, ACTIVE_DOWNLOADS
-# --- [FIX] Mengimpor dari ui_manager alih-alih utils ---
 from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
 from bot.settings import bot_set
-from bot.helpers.database.mongo_async import database # <-- [TAMBAHAN IMPORT]
+from bot.helpers.database.mongo_async import database
 
+# Handler untuk Teks Perintah (Jika user masih mengetik manual /cancel_...)
 @Client.on_message(filters.regex(r"^/cancel_([a-zA-Z0-9]+)"))
 async def cancel_task_handler(client: Client, message: Message):
-    user_id = message.from_user.id
+    gid = message.text.split('_')[1]
+    await process_cancel(client, message, gid, message.from_user.id)
+
+# Handler untuk Tombol Merah Kurigram (InlineKeyboardButton)
+@Client.on_callback_query(filters.regex(r"^cancel_([a-zA-Z0-9]+)"))
+async def cancel_task_callback(client: Client, query: CallbackQuery):
+    # Ekstrak task_id dari tombol yang diklik
+    gid = query.data.split('_')[1]
+    await process_cancel(client, query.message, gid, query.from_user.id, is_callback=True, query_obj=query)
+
+async def process_cancel(client, message, gid, user_id, is_callback=False, query_obj=None):
     if not bot_set.bot_public and user_id not in bot_set.auth_users and user_id not in bot_set.admins:
+        if is_callback:
+            await query_obj.answer("❌ Access Denied.", show_alert=True)
         return
     
-    gid = message.matches[0].group(1)
     is_admin = user_id in bot_set.admins
     
-    # --- PENGECEKAN KEPEMILIKAN TASK (SECURITY FIX) ---
+    # --- PENGECEKAN KEPEMILIKAN TASK ---
     if gid in GLOBAL_TASKS:
         task_owner = GLOBAL_TASKS[gid].get('user_id')
         if not is_admin and task_owner and str(task_owner) != str(user_id):
-            await message.reply("❌ **Akses Ditolak:** Anda hanya bisa membatalkan tugas Anda sendiri.")
+            if is_callback:
+                await query_obj.answer("❌ Access Denied: You can only cancel your own tasks.", show_alert=True)
+            else:
+                await message.reply("❌ **Access Denied:** You can only cancel your own tasks.")
             return
-    # --------------------------------------------------
+            
+    cancel_success_msg = ""
     
     if gid in ACTIVE_DOWNLOADS:
         filename = ACTIVE_DOWNLOADS[gid]
         success = await aria2_cancel(gid)
         if success:
-            await message.reply(f"🛑 **Unduhan Dibatalkan:**\n`{filename}`")
+            cancel_success_msg = f"🛑 Download Canceled:\n{filename}"
         else:
-            await message.reply("❌ **Gagal membatalkan unduhan Aria2.**")
+            cancel_success_msg = "❌ Failed to cancel Aria2 download."
             
-    # --- FIX: Validasi apakah ID ada di daftar task global ---
     elif gid in GLOBAL_TASKS:
         GLOBAL_CANCEL_DICT.add(gid)
-        await database.add_cancel_task(gid) # <-- [SINKRONISASI KE DATABASE]
-        await message.reply(f"🛑 **Sinyal Batal Dikirim!**\nProses akan segera dihentikan.")
+        await database.add_cancel_task(gid)
+        cancel_success_msg = "🛑 Cancel Signal Sent!\nThe process will be stopped shortly."
         
-    # --- FIX: Jika ID tidak ada di Aria2 maupun di Task Global ---
     else:
-        # Cara absolut mengecek Private Chat (berlaku di semua fork Pyrogram)
+        cancel_success_msg = "❌ Task not found or already completed."
+        
+    # Kirim pop-up Toast Notification jika klik dari tombol, kirim pesan text jika manual
+    if is_callback:
+        await query_obj.answer(cancel_success_msg, show_alert=True)
+    else:
         if message.from_user and message.chat.id == message.from_user.id:
-            await message.reply("❌ **Task tidak ditemukan atau sudah selesai.**")
+            await message.reply(cancel_success_msg)
 
-# --- TOMBOL PANIK / CLEAR BOARD (TANPA ANTREAN) ---
+# --- TOMBOL PANIK / CLEAR BOARD ---
 @Client.on_message(filters.command(["clear_queue", "force_unlock", "clear_board"]))
 async def force_unlock_handler(client: Client, message: Message):
     user_id = message.from_user.id
     if user_id not in bot_set.admins:
-        await message.reply("❌ **Akses Ditolak:** Hanya Admin yang bisa mereset sistem.")
+        await message.reply("❌ **Access Denied:** Only Admin can reset the system.")
         return
         
-    # --- [FIX] Membersihkan memori dari ui_manager ---
     import bot.helpers.ui_manager as ui_manager
-    
-    # 1. Bersihkan sisa task hantu di Papan Global
     ui_manager.GLOBAL_TASKS.clear()
-    
-    # 2. Bersihkan sinyal batal yang nyangkut
     ui_manager.GLOBAL_CANCEL_DICT.clear()
-    await database.clear_all_cancels() # <-- [SINKRONISASI KE DATABASE]
+    await database.clear_all_cancels()
     
-    # 3. Bunuh paksa semua unduhan Aria2 yang nyangkut di latar belakang
     from bot.helpers.aria2_helper import aria2_purge_all
     await aria2_purge_all()
     
-    await message.reply("✅ **Sistem Papan Global Berhasil Direset!**\nSemua task hantu dan unduhan yang macet telah dibersihkan.")
-# ------------------------------------------------
+    await message.reply("✅ **Global Board System has been successfully reset!**\nAll ghost tasks and stalled downloads have been cleared.")
