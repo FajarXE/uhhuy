@@ -106,24 +106,24 @@ async def get_status_text(page=1, limit=5):
         unique_short_id = t['cancel_id'][:6]
         user_id_val = str(t.get('user_id', 'Unknown'))
         
-        # Trik Zero-Width Space (\u200B) untuk memblokir auto-link Telegram (agar judul & ID tetap putih)
+        # Trik Zero-Width Space (\u200B) untuk memblokir auto-link Telegram
         safe_title = str(t['title']).replace(".", ".\u200B").replace("://", "://\u200B")
         safe_user_id = user_id_val[:4] + "\u200B" + user_id_val[4:] if len(user_id_val) > 4 else user_id_val
         
         # Header Utama
         text += f"**{blue_text}**: {safe_title}\n"
-        text += f"Since: {t['since']}\n\n"
+        text += f"**Since**: {t['since']}\n\n"
         
         # Blok Processed (Biru, Bold, Titik dua putih)
         blue_bot_processed = f"[Bot Processed](https://t.me/{Config.BOT_USERNAME})"
         text += f"┎ **{blue_bot_processed}**:\n"
-        text += f"┠ Progress [{t['progress_bar']}] {t['percentage']}\n"
-        text += f"┠ {t['processed_label']}: {t['processed']}\n"
-        text += f"┠ Current_Speed: {t['speed']}\n"
-        text += f"┠ Machine_type: {t['machine']}\n"
-        text += f"┠ Destination_mode: {t['mode']}\n"
-        text += f"┠ User_ID: {safe_user_id}\n"
-        text += f"┖ Cancel_ID: {unique_short_id}\n"
+        text += f"┠ **Progress** [{t['progress_bar']}] {t['percentage']}\n"
+        text += f"┠ **{t['processed_label']}**: {t['processed']}\n"
+        text += f"┠ **Current_Speed**: {t['speed']}\n"
+        text += f"┠ **Machine_type**: {t['machine']}\n"
+        text += f"┠ **Destination_mode**: {t['mode']}\n"
+        text += f"┠ **User_ID**: {safe_user_id}\n"
+        text += f"┖ **Cancel_ID**: {unique_short_id}\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n" # Spasi antar task
@@ -147,10 +147,10 @@ async def get_status_text(page=1, limit=5):
     # Blok Statistics (Biru, Bold, Titik dua putih)
     blue_stats = f"[Bot Statistics](https://t.me/{Config.BOT_USERNAME})"
     text += f"\n┎ **{blue_stats}**:\n"
-    text += f"┠ CPU: {stats['cpu']:.1f}% | FREE: {stats['free_storage']:.2f} GB\n"
-    text += f"┠ RAM: {stats['ram']:.1f}% | UPTIME: {stats['uptime']}\n"
-    text += f"┠ DISK: {stats['disk_percent']:.0f}% | OF: {stats['disk_total']}\n"
-    text += f"┠ DL: {stats['net_dl']}  | UP: {stats['net_up']}\n"
+    text += f"┠ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
+    text += f"┠ **RAM**: {stats['ram']:.1f}% | **UPTIME**: {stats['uptime']}\n"
+    text += f"┠ **DISK**: {stats['disk_percent']:.0f}% | **OF**: {stats['disk_total']}\n"
+    text += f"┠ **DL**: {stats['net_dl']}  | **UP**: {stats['net_up']}\n"
     text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
 
     nav_row = []
