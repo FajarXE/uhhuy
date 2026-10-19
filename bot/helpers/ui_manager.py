@@ -104,20 +104,25 @@ async def get_status_text(page=1, limit=5):
         # Trik Hyperlink agar teks Action & Type menjadi BIRU
         blue_text = f"[{i:02d}. {t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
         unique_short_id = t['cancel_id'][:6]
-        user_id_val = t.get('user_id', 'Unknown')
+        user_id_val = str(t.get('user_id', 'Unknown'))
+        
+        # Trik Zero-Width Space (\u200B) untuk memblokir auto-link Telegram (agar judul & ID tetap putih)
+        safe_title = str(t['title']).replace(".", ".\u200B").replace("://", "://\u200B")
+        safe_user_id = user_id_val[:4] + "\u200B" + user_id_val[4:] if len(user_id_val) > 4 else user_id_val
         
         # Header Utama
-        text += f"**{blue_text}**: {t['title']}\n"
+        text += f"**{blue_text}**: {safe_title}\n"
         text += f"Since: {t['since']}\n\n"
         
-        # Blok Processed (Sesuai format yang diminta)
-        text += f"┎ **Bot Processed**:\n"
+        # Blok Processed (Biru, Bold, Titik dua putih)
+        blue_bot_processed = f"[Bot Processed](https://t.me/{Config.BOT_USERNAME})"
+        text += f"┎ **{blue_bot_processed}**:\n"
         text += f"┠ Progress [{t['progress_bar']}] {t['percentage']}\n"
         text += f"┠ {t['processed_label']}: {t['processed']}\n"
         text += f"┠ Current_Speed: {t['speed']}\n"
         text += f"┠ Machine_type: {t['machine']}\n"
         text += f"┠ Destination_mode: {t['mode']}\n"
-        text += f"┠ User_ID: {user_id_val}\n"
+        text += f"┠ User_ID: {safe_user_id}\n"
         text += f"┖ Cancel_ID: {unique_short_id}\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
@@ -139,7 +144,7 @@ async def get_status_text(page=1, limit=5):
 
     stats = _get_system_stats()
     
-    # Blok Statistics Baru
+    # Blok Statistics (Biru, Bold, Titik dua putih)
     blue_stats = f"[Bot Statistics](https://t.me/{Config.BOT_USERNAME})"
     text += f"\n┎ **{blue_stats}**:\n"
     text += f"┠ CPU: {stats['cpu']:.1f}% | FREE: {stats['free_storage']:.2f} GB\n"
