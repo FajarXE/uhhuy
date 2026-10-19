@@ -97,11 +97,12 @@ async def get_status_text(page=1, limit=5):
         text += f"┠ **Machine_type**: {t['machine']}\n"
         text += f"┠ **Destination_mode**: {t['mode']}\n"
         
-        # Trik Diff untuk User_ID (Hijau) dan Cancel_ID (Merah)
+        # User_ID dan Cancel_ID dikembalikan ke teks biasa agar rapi (Tanpa kotak Diff)
         user_label = t.get('user_label', t.get('user_id', 'Unknown'))
         unique_short_id = t['cancel_id'][:6]
         
-        text += f"```diff\n+ ┠ User_ID: {user_label}\n- ┖ Cancel_ID: {unique_short_id}\n```"
+        text += f"┠ **User_ID**: {user_label}\n"
+        text += f"┖ **Cancel_ID**: `{unique_short_id}`\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n\n" # Spasi antar task
@@ -123,9 +124,9 @@ async def get_status_text(page=1, limit=5):
 
     stats = _get_system_stats()
     
-    # Bot Stats (Hyperlink Biru)
-    blue_stats = f"[Bot Stats:](https://t.me/{Config.BOT_USERNAME})"
-    text += f"\n┎ **{blue_stats}**\n"
+    # Bot Stats (Tanda titik dua ditaruh di luar tautan agar tetap putih)
+    blue_stats = f"[Bot Stats](https://t.me/{Config.BOT_USERNAME})"
+    text += f"\n┎ **{blue_stats}**:\n"
     text += f"┠ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
     text += f"┠ **RAM**: {stats['ram']:.1f}% | **UPTIME**: {stats['uptime']}\n"
     text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
@@ -200,13 +201,19 @@ async def progress_message(done, total, details):
     
     task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16] if details.get('msg') else details.get('task_id', 'unknown')
     
-    # Menangkap Nama dan ID Pengguna
+    # Menangkap Nama dan ID Pengguna dengan lebih kuat
     try:
-        chat = details['msg'].chat
-        user_id_val = chat.id
-        user_name_val = chat.first_name if chat.first_name else "User"
-        user_label = f"{user_name_val} | {user_id_val}"
+        msg_obj = details['msg']
+        user_id_val = msg_obj.chat.id
         
+        if msg_obj.from_user and msg_obj.from_user.first_name:
+            user_name_val = msg_obj.from_user.first_name
+        elif msg_obj.chat and msg_obj.chat.first_name:
+            user_name_val = msg_obj.chat.first_name
+        else:
+            user_name_val = "User"
+            
+        user_label = f"{user_name_val} | {user_id_val}"
         dest_mode = bot_set.user_data.get(user_id_val, {}).get('upload_mode', bot_set.upload_mode)
     except: 
         user_id_val = 0
