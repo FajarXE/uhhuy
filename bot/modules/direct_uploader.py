@@ -723,11 +723,14 @@ class DirectUpload:
         # 5. Share File
         return await self.terabox_share(remote_file_path, cookie_raw)
 
-    # Tambahkan ini di dalam kelas DirectUpload (di bawah metode _upload_viking_aiohttp)
+    # ============================
+    # TRANSFERIT HANDLER (AIOHTTP)
+    # ============================
     async def _upload_transferit_subprocess(self, filepath, details):
         import sys, tempfile, re
         
         filename = os.path.basename(filepath)
+        is_dir = os.path.isdir(filepath) # Mendeteksi apakah yang diupload berupa folder atau file tunggal
         state_file = os.path.join(tempfile.gettempdir(), f"tf_{os.urandom(4).hex()}.json")
         script_path = os.path.join(os.getcwd(), "transferit_upload.py")
         
@@ -747,9 +750,20 @@ class DirectUpload:
                     from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
                     import time
                     
+                    seen_files = [] # Variabel pelacak urutan file
+                    
                     while True:
                         line = await process.stderr.readline()
                         if not line:
+                            # Jika output berhenti (EOF), artinya data sudah terkirim.
+                            # Ubah status UI ke Finalizing sambil menunggu server merakit link.
+                            task_id = details.get('task_id') if details else None
+                            if task_id and task_id in GLOBAL_TASKS:
+                                GLOBAL_TASKS[task_id]['action'] = 'Finalizing'
+                                GLOBAL_TASKS[task_id]['processed'] = 'Generating Link...'
+                                GLOBAL_TASKS[task_id]['speed'] = '0 B/s'
+                                GLOBAL_TASKS[task_id]['progress_bar'] = '■■■■■■■■■■■■'
+                                GLOBAL_TASKS[task_id]['percentage'] = '100.00%'
                             break
                             
                         if details and 'task_id' in details:
@@ -765,20 +779,60 @@ class DirectUpload:
                             if task_id and task_id in GLOBAL_TASKS:
                                 GLOBAL_TASKS[task_id]['timestamp'] = time.time()
                                 GLOBAL_TASKS[task_id]['action'] = 'Uploading'
-                                GLOBAL_TASKS[task_id]['machine'] = 'Transfer.it CLI'
+                                GLOBAL_TASKS[task_id]['machine'] = 'Transferit CLI' # Ubah nama mesin menjadi Transferit CLI
+                                GLOBAL_TASKS[task_id]['processed_label'] = 'Processed_bytes'
                                 
-                                match = re.search(r'(\d+)/(\d+)\s+MiB', line_str)
+                                # 1. INTIP NAMA FILE: Tangkap nama file yang sedang diunggah mesin
+                                file_match = re.search(r'POST\s+(.*?):', line_str)
+                                if file_match:
+                                    current_file = os.path.basename(file_match.group(1))
+                                    if current_file not in seen_files:
+                                        seen_files.append(current_file)
+                                        
+                                    if is_dir:
+                                        # Jika bentuknya Folder, tampilkan label [File X]
+                                        idx = seen_files.index(current_file) + 1
+                                        GLOBAL_TASKS[task_id]['title'] = f"[File {idx}] {current_file}"
+                                    else:
+                                        # Jika bentuknya File Tunggal (.zip, dll), langsung tampilkan nama filenya
+                                        GLOBAL_TASKS[task_id]['title'] = current_file
+                                
+                                # 2. TANGKAP PROGRESS: Perhitungan Kecepatan dan Persentase
+                                match = re.search(r'(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s+MiB.*?([\d.]+)\s*([a-zA-Z]+/s)', line_str)
+                                if not match:
+                                    match = re.search(r'(\d+)/(\d+)\s+MiB', line_str)
+                                
                                 if match:
-                                    sent = int(match.group(1)) * 1024 * 1024
-                                    total = int(match.group(2)) * 1024 * 1024
-                                    GLOBAL_TASKS[task_id]['processed'] = f"{match.group(1)} MiB of {match.group(2)} MiB"
+                                    if len(match.groups()) >= 4:
+                                        sent_mb = float(match.group(1))
+                                        total_mb = float(match.group(2))
+                                        speed_val = match.group(3)
+                                        speed_unit = match.group(4)
+                                        
+                                        GLOBAL_TASKS[task_id]['processed'] = f"{sent_mb:.2f} MB of {total_mb:.2f} MB"
+                                        GLOBAL_TASKS[task_id]['speed'] = f"{speed_val} {speed_unit}"
+                                    else:
+                                        sent_mb = float(match.group(1))
+                                        total_mb = float(match.group(2))
+                                        GLOBAL_TASKS[task_id]['processed'] = f"{sent_mb:.2f} MB of {total_mb:.2f} MB"
                                     
-                                    if total > 0:
-                                        pct = (sent / total) * 100
-                                        filled = int((pct / 100) * 12)
-                                        GLOBAL_TASKS[task_id]['progress_bar'] = "■" * filled + "□" * (12 - filled)
+                                    if total_mb > 0:
+                                        pct = (sent_mb / total_mb) * 100
+                                        blocks = 12
+                                        fill_val = (pct / 100) * blocks
+                                        filled_blocks = int(fill_val) 
+                                        remainder = fill_val - filled_blocks
+                                        
+                                        p_bar = ""
+                                        for b in range(blocks):
+                                            if b < filled_blocks: p_bar += "■"
+                                            elif b == filled_blocks and remainder > 0.05: p_bar += "▥"
+                                            else: p_bar += "□"
+                                            
+                                        GLOBAL_TASKS[task_id]['progress_bar'] = p_bar
                                         GLOBAL_TASKS[task_id]['percentage'] = f"{pct:.2f}%"
                 except Exception as e:
+                    from bot.logger import LOGGER
                     LOGGER.debug(f"Transfer.it stderr parser error: {e}")
 
             # Jalankan pembacaan stderr di background
@@ -812,6 +866,7 @@ class DirectUpload:
                 os.remove(state_file)
             raise
         except Exception as e:
+            from bot.logger import LOGGER
             LOGGER.error(f"Transfer.it Subprocess Error: {e}")
             if os.path.exists(state_file):
                 os.remove(state_file)
@@ -865,9 +920,10 @@ class DirectUpload:
                 link = await self._upload_terabox_aiohttp(filepath, cookie, remote_dir=remote_dir, details=details)
                 return {'Terabox': link} if link else None
 
-        # Tambahan baru untuk Transfer.it
         elif upload_type in ['tf', 'transferit']:
-            LOGGER.info(f"Uploading Transfer.it: {file_name}")
+            # [FIX] Cek jika file_name None (Saat Upload Folder), tampilkan nama foldernya
+            display_name = file_name if file_name else os.path.basename(filepath)
+            LOGGER.info(f"Uploading Transfer.it: {display_name}")
             link = await self._upload_transferit_subprocess(filepath, details)
             return {'Transfer.it': link} if link else None
 
