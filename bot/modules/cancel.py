@@ -25,7 +25,7 @@ async def cancel_task_callback(client: Client, query: CallbackQuery):
 async def process_cancel(client, message, gid, user_id, is_callback=False, query_obj=None):
     if not bot_set.bot_public and user_id not in bot_set.auth_users and user_id not in bot_set.admins:
         if is_callback:
-            await query_obj.answer("❌ Akses Ditolak.", show_alert=True)
+            await query_obj.answer("❌ Access Denied.", show_alert=True)
         return
     
     is_admin = user_id in bot_set.admins
@@ -35,9 +35,9 @@ async def process_cancel(client, message, gid, user_id, is_callback=False, query
         task_owner = GLOBAL_TASKS[gid].get('user_id')
         if not is_admin and task_owner and str(task_owner) != str(user_id):
             if is_callback:
-                await query_obj.answer("❌ Akses Ditolak: Anda hanya bisa membatalkan tugas Anda sendiri.", show_alert=True)
+                await query_obj.answer("❌ Access Denied: You can only cancel your own tasks.", show_alert=True)
             else:
-                await message.reply("❌ **Akses Ditolak:** Anda hanya bisa membatalkan tugas Anda sendiri.")
+                await message.reply("❌ **Access Denied:** You can only cancel your own tasks.")
             return
             
     cancel_success_msg = ""
@@ -46,17 +46,17 @@ async def process_cancel(client, message, gid, user_id, is_callback=False, query
         filename = ACTIVE_DOWNLOADS[gid]
         success = await aria2_cancel(gid)
         if success:
-            cancel_success_msg = f"🛑 Unduhan Dibatalkan:\n{filename}"
+            cancel_success_msg = f"🛑 Download Canceled:\n{filename}"
         else:
-            cancel_success_msg = "❌ Gagal membatalkan unduhan Aria2."
+            cancel_success_msg = "❌ Failed to cancel Aria2 download."
             
     elif gid in GLOBAL_TASKS:
         GLOBAL_CANCEL_DICT.add(gid)
         await database.add_cancel_task(gid)
-        cancel_success_msg = "🛑 Sinyal Batal Dikirim!\nProses akan segera dihentikan."
+        cancel_success_msg = "🛑 Cancel Signal Sent!\nThe process will be stopped shortly."
         
     else:
-        cancel_success_msg = "❌ Task tidak ditemukan atau sudah selesai."
+        cancel_success_msg = "❌ Task not found or already completed."
         
     # Kirim pop-up Toast Notification jika klik dari tombol, kirim pesan text jika manual
     if is_callback:
@@ -70,7 +70,7 @@ async def process_cancel(client, message, gid, user_id, is_callback=False, query
 async def force_unlock_handler(client: Client, message: Message):
     user_id = message.from_user.id
     if user_id not in bot_set.admins:
-        await message.reply("❌ **Akses Ditolak:** Hanya Admin yang bisa mereset sistem.")
+        await message.reply("❌ **Access Denied:** Only Admin can reset the system.")
         return
         
     import bot.helpers.ui_manager as ui_manager
@@ -81,4 +81,4 @@ async def force_unlock_handler(client: Client, message: Message):
     from bot.helpers.aria2_helper import aria2_purge_all
     await aria2_purge_all()
     
-    await message.reply("✅ **Sistem Papan Global Berhasil Direset!**\nSemua task hantu dan unduhan yang macet telah dibersihkan.")
+    await message.reply("✅ **Global Board System has been successfully reset!**\nAll ghost tasks and stalled downloads have been cleared.")
