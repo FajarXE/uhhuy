@@ -36,8 +36,22 @@ def _get_system_stats() -> dict:
     except ImportError:
         cpu_usage = ram_usage = 0.0
 
+    # Kalkulasi Penyimpanan Server
     total, used, free = shutil.disk_usage(Config.DOWNLOAD_BASE_DIR)
     free_storage = free / (1024 ** 3)
+    disk_percent = (used / total) * 100 if total > 0 else 0
+    disk_total_str = f"{total / (1024 ** 3):.1f} GiB"
+
+    # Kalkulasi Lalu Lintas Jaringan (Network IO)
+    try:
+        net_io = psutil.net_io_counters()
+        dl_gb = net_io.bytes_recv / (1024 ** 3)
+        up_gb = net_io.bytes_sent / (1024 ** 3)
+        net_dl = f"{dl_gb:.1f} GiB" if dl_gb >= 0.1 else f"{net_io.bytes_recv / (1024**2):.1f} MiB"
+        net_up = f"{up_gb:.1f} GiB" if up_gb >= 0.1 else f"{net_io.bytes_sent / (1024**2):.1f} MiB"
+    except Exception:
+        net_dl = "0 GiB"
+        net_up = "0 GiB"
 
     uptime_seconds = int(time.time() - BOT_START_TIME)
     h, rem = divmod(uptime_seconds, 3600)
@@ -47,6 +61,10 @@ def _get_system_stats() -> dict:
         'cpu': cpu_usage,
         'ram': ram_usage,
         'free_storage': free_storage,
+        'disk_percent': disk_percent,
+        'disk_total': disk_total_str,
+        'net_dl': net_dl,
+        'net_up': net_up,
         'uptime': f"{h}h {m}m {s}s"
     }
 
@@ -88,18 +106,19 @@ async def get_status_text(page=1, limit=5):
         unique_short_id = t['cancel_id'][:6]
         user_id_val = t.get('user_id', 'Unknown')
         
-        # Header Task
-        text += f"**{blue_text}**: `{t['title']}`\n"
+        # Header Utama
+        text += f"**{blue_text}**: {t['title']}\n"
         text += f"Since: {t['since']}\n\n"
         
-        # Blok Detail Progress dengan garis ┎ ┠ ┖
-        text += f"┎ **Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
-        text += f"┠ **{t['processed_label']}**: {t['processed']}\n"
-        text += f"┠ **Current_Speed**: {t['speed']}\n"
-        text += f"┠ **Machine_type**: {t['machine']}\n"
-        text += f"┠ **Destination_mode**: {t['mode']}\n"
-        text += f"┠ **User_ID**: `{user_id_val}`\n"
-        text += f"┖ **Cancel_ID**: `{unique_short_id}`\n"
+        # Blok Processed (Sesuai format yang diminta)
+        text += f"┎ **Bot Processed**:\n"
+        text += f"┠ Progress [{t['progress_bar']}] {t['percentage']}\n"
+        text += f"┠ {t['processed_label']}: {t['processed']}\n"
+        text += f"┠ Current_Speed: {t['speed']}\n"
+        text += f"┠ Machine_type: {t['machine']}\n"
+        text += f"┠ Destination_mode: {t['mode']}\n"
+        text += f"┠ User_ID: {user_id_val}\n"
+        text += f"┖ Cancel_ID: {unique_short_id}\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n" # Spasi antar task
@@ -120,11 +139,13 @@ async def get_status_text(page=1, limit=5):
 
     stats = _get_system_stats()
     
-    # Bot Stats (Tanda titik dua ditaruh di luar tautan agar tetap putih)
-    blue_stats = f"[Bot Stats](https://t.me/{Config.BOT_USERNAME})"
+    # Blok Statistics Baru
+    blue_stats = f"[Bot Statistics](https://t.me/{Config.BOT_USERNAME})"
     text += f"\n┎ **{blue_stats}**:\n"
-    text += f"┠ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
-    text += f"┠ **RAM**: {stats['ram']:.1f}% | **UPTIME**: {stats['uptime']}\n"
+    text += f"┠ CPU: {stats['cpu']:.1f}% | FREE: {stats['free_storage']:.2f} GB\n"
+    text += f"┠ RAM: {stats['ram']:.1f}% | UPTIME: {stats['uptime']}\n"
+    text += f"┠ DISK: {stats['disk_percent']:.0f}% | OF: {stats['disk_total']}\n"
+    text += f"┠ DL: {stats['net_dl']}  | UP: {stats['net_up']}\n"
     text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
 
     nav_row = []
@@ -202,7 +223,7 @@ async def progress_message(done, total, details):
         msg_obj = details['msg']
         user_id_val = msg_obj.chat.id
         dest_mode = bot_set.user_data.get(user_id_val, {}).get('upload_mode', bot_set.upload_mode)
-    except: 
+    except Exception: 
         user_id_val = 0
         dest_mode = bot_set.upload_mode
         
@@ -210,7 +231,8 @@ async def progress_message(done, total, details):
         stats = await get_aria2_global_stat()
         speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
         speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-    except: speed_dl = speed_ul = 0
+    except Exception: 
+        speed_dl = speed_ul = 0
 
     machine = details.get('machine', 'Aria2c 1.37.0')
 
