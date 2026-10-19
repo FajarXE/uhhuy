@@ -752,6 +752,15 @@ class DirectUpload:
                     while True:
                         line = await process.stderr.readline()
                         if not line:
+                            # Jika output berhenti (EOF), artinya data sudah terkirim.
+                            # Ubah status UI ke Finalizing sambil menunggu server merakit link.
+                            task_id = details.get('task_id') if details else None
+                            if task_id and task_id in GLOBAL_TASKS:
+                                GLOBAL_TASKS[task_id]['action'] = 'Finalizing'
+                                GLOBAL_TASKS[task_id]['processed'] = 'Generating Link...'
+                                GLOBAL_TASKS[task_id]['speed'] = '0 B/s'
+                                GLOBAL_TASKS[task_id]['progress_bar'] = '■■■■■■■■■■■■'
+                                GLOBAL_TASKS[task_id]['percentage'] = '100.00%'
                             break
                             
                         if details and 'task_id' in details:
@@ -774,12 +783,10 @@ class DirectUpload:
                                 file_match = re.search(r'POST\s+(.*?):', line_str)
                                 if file_match:
                                     current_file = os.path.basename(file_match.group(1))
-                                    # Tambahkan ke daftar jika ini file baru
                                     if current_file not in seen_files:
                                         seen_files.append(current_file)
                                         
                                     idx = seen_files.index(current_file) + 1
-                                    # Update Judul UI secara dinamis (Misal: "[File 2] 01 - Speak to Me.flac")
                                     GLOBAL_TASKS[task_id]['title'] = f"[File {idx}] {current_file}"
                                 
                                 # 2. TANGKAP PROGRESS: Perhitungan Kecepatan dan Persentase
@@ -905,9 +912,10 @@ class DirectUpload:
                 link = await self._upload_terabox_aiohttp(filepath, cookie, remote_dir=remote_dir, details=details)
                 return {'Terabox': link} if link else None
 
-        # Tambahan baru untuk Transfer.it
         elif upload_type in ['tf', 'transferit']:
-            LOGGER.info(f"Uploading Transfer.it: {file_name}")
+            # [FIX] Cek jika file_name None (Saat Upload Folder), tampilkan nama foldernya
+            display_name = file_name if file_name else os.path.basename(filepath)
+            LOGGER.info(f"Uploading Transfer.it: {display_name}")
             link = await self._upload_transferit_subprocess(filepath, details)
             return {'Transfer.it': link} if link else None
 
