@@ -747,6 +747,8 @@ class DirectUpload:
                     from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
                     import time
                     
+                    seen_files = [] # Variabel pelacak urutan file
+                    
                     while True:
                         line = await process.stderr.readline()
                         if not line:
@@ -766,16 +768,26 @@ class DirectUpload:
                                 GLOBAL_TASKS[task_id]['timestamp'] = time.time()
                                 GLOBAL_TASKS[task_id]['action'] = 'Uploading'
                                 GLOBAL_TASKS[task_id]['machine'] = 'Transfer.it CLI'
-                                GLOBAL_TASKS[task_id]['processed_label'] = 'Processed_bytes' # FIX Label
+                                GLOBAL_TASKS[task_id]['processed_label'] = 'Processed_bytes'
                                 
-                                # Regex yang disempurnakan untuk menangkap Bytes DAN Speed
+                                # 1. INTIP NAMA FILE: Tangkap nama file yang sedang diunggah mesin
+                                file_match = re.search(r'POST\s+(.*?):', line_str)
+                                if file_match:
+                                    current_file = os.path.basename(file_match.group(1))
+                                    # Tambahkan ke daftar jika ini file baru
+                                    if current_file not in seen_files:
+                                        seen_files.append(current_file)
+                                        
+                                    idx = seen_files.index(current_file) + 1
+                                    # Update Judul UI secara dinamis (Misal: "[File 2] 01 - Speak to Me.flac")
+                                    GLOBAL_TASKS[task_id]['title'] = f"[File {idx}] {current_file}"
+                                
+                                # 2. TANGKAP PROGRESS: Perhitungan Kecepatan dan Persentase
                                 match = re.search(r'(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s+MiB.*?([\d.]+)\s*([a-zA-Z]+/s)', line_str)
                                 if not match:
-                                    # Fallback jika Regex pertama gagal (hanya tangkap MB)
                                     match = re.search(r'(\d+)/(\d+)\s+MiB', line_str)
                                 
                                 if match:
-                                    # Cek apakah mendapatkan data kecepatan (Speed)
                                     if len(match.groups()) >= 4:
                                         sent_mb = float(match.group(1))
                                         total_mb = float(match.group(2))
@@ -791,11 +803,8 @@ class DirectUpload:
                                     
                                     if total_mb > 0:
                                         pct = (sent_mb / total_mb) * 100
-                                        
-                                        # --- LOGIKA PROGRESS BAR 3 TAHAP ---
                                         blocks = 12
                                         fill_val = (pct / 100) * blocks
-                                        # Menggunakan int() untuk menggantikan math.floor() agar tidak error
                                         filled_blocks = int(fill_val) 
                                         remainder = fill_val - filled_blocks
                                         
