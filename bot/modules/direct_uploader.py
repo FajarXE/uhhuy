@@ -723,11 +723,14 @@ class DirectUpload:
         # 5. Share File
         return await self.terabox_share(remote_file_path, cookie_raw)
 
-    # Tambahkan ini di dalam kelas DirectUpload (di bawah metode _upload_viking_aiohttp)
+    # ============================
+    # TRANSFERIT HANDLER (AIOHTTP)
+    # ============================
     async def _upload_transferit_subprocess(self, filepath, details):
         import sys, tempfile, re
         
         filename = os.path.basename(filepath)
+        is_dir = os.path.isdir(filepath) # Mendeteksi apakah yang diupload berupa folder atau file tunggal
         state_file = os.path.join(tempfile.gettempdir(), f"tf_{os.urandom(4).hex()}.json")
         script_path = os.path.join(os.getcwd(), "transferit_upload.py")
         
@@ -776,7 +779,7 @@ class DirectUpload:
                             if task_id and task_id in GLOBAL_TASKS:
                                 GLOBAL_TASKS[task_id]['timestamp'] = time.time()
                                 GLOBAL_TASKS[task_id]['action'] = 'Uploading'
-                                GLOBAL_TASKS[task_id]['machine'] = 'Transfer.it CLI'
+                                GLOBAL_TASKS[task_id]['machine'] = 'Transferit CLI' # Ubah nama mesin menjadi Transferit CLI
                                 GLOBAL_TASKS[task_id]['processed_label'] = 'Processed_bytes'
                                 
                                 # 1. INTIP NAMA FILE: Tangkap nama file yang sedang diunggah mesin
@@ -786,8 +789,13 @@ class DirectUpload:
                                     if current_file not in seen_files:
                                         seen_files.append(current_file)
                                         
-                                    idx = seen_files.index(current_file) + 1
-                                    GLOBAL_TASKS[task_id]['title'] = f"[File {idx}] {current_file}"
+                                    if is_dir:
+                                        # Jika bentuknya Folder, tampilkan label [File X]
+                                        idx = seen_files.index(current_file) + 1
+                                        GLOBAL_TASKS[task_id]['title'] = f"[File {idx}] {current_file}"
+                                    else:
+                                        # Jika bentuknya File Tunggal (.zip, dll), langsung tampilkan nama filenya
+                                        GLOBAL_TASKS[task_id]['title'] = current_file
                                 
                                 # 2. TANGKAP PROGRESS: Perhitungan Kecepatan dan Persentase
                                 match = re.search(r'(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s+MiB.*?([\d.]+)\s*([a-zA-Z]+/s)', line_str)
