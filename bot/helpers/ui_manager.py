@@ -86,9 +86,9 @@ async def get_status_text(page=1, limit=5):
         # Trik Hyperlink agar teks Action & Type menjadi BIRU
         blue_text = f"[{i:02d}. {t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
         
-        # Blok Header Task
-        text += f"┎ **{blue_text}**: `{t['title']}`\n"
-        text += f"┖ **Since**: {t['since']}\n\n"
+        # Header Task (Tanpa ┎ dan ┖)
+        text += f"**{blue_text}**: `{t['title']}`\n"
+        text += f"Since: {t['since']}\n\n"
         
         # Blok Detail Progress
         text += f"┎ **Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
@@ -96,13 +96,17 @@ async def get_status_text(page=1, limit=5):
         text += f"┠ **Current_Speed**: {t['speed']}\n"
         text += f"┠ **Machine_type**: {t['machine']}\n"
         text += f"┠ **Destination_mode**: {t['mode']}\n"
-        text += f"┖ **User_ID**: `{t.get('user_id', 'Unknown')}`\n"
+        
+        # Trik Diff untuk User_ID (Hijau) dan Cancel_ID (Merah)
+        user_label = t.get('user_label', t.get('user_id', 'Unknown'))
+        unique_short_id = t['cancel_id'][:6]
+        
+        text += f"```diff\n+ ┠ User_ID: {user_label}\n- ┖ Cancel_ID: {unique_short_id}\n```"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
-            text += "\n" # Spasi antar task
+            text += "\n\n" # Spasi antar task
 
-        # Tombol Cancel dengan 6 karakter pertama dari ID Unik Task
-        unique_short_id = t['cancel_id'][:6]
+        # Tombol Cancel
         buttons.append([
             InlineKeyboardButton(
                 f"Cancel (ID: {unique_short_id})", 
@@ -118,7 +122,11 @@ async def get_status_text(page=1, limit=5):
     global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
 
     stats = _get_system_stats()
-    text += f"\n┎ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
+    
+    # Bot Stats (Hyperlink Biru)
+    blue_stats = f"[Bot Stats:](https://t.me/{Config.BOT_USERNAME})"
+    text += f"\n┎ **{blue_stats}**\n"
+    text += f"┠ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
     text += f"┠ **RAM**: {stats['ram']:.1f}% | **UPTIME**: {stats['uptime']}\n"
     text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
 
@@ -136,6 +144,7 @@ async def get_status_text(page=1, limit=5):
     ])     
 
     return text, InlineKeyboardMarkup(buttons)
+
 
 async def progress_message(done, total, details):
     if not details or not details.get('msg'): return
@@ -163,7 +172,7 @@ async def progress_message(done, total, details):
     for b in range(blocks):
         if b < filled_blocks:
             progress_bar += "■"
-        elif b == filled_blocks and remainder > 0.05: # Threshold akurasi
+        elif b == filled_blocks and remainder > 0.05:
             progress_bar += "▥"
         else:
             progress_bar += "□"
@@ -191,10 +200,18 @@ async def progress_message(done, total, details):
     
     task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16] if details.get('msg') else details.get('task_id', 'unknown')
     
+    # Menangkap Nama dan ID Pengguna
     try:
-        user_id = details['msg'].chat.id
-        dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode)
-    except: dest_mode = bot_set.upload_mode
+        chat = details['msg'].chat
+        user_id_val = chat.id
+        user_name_val = chat.first_name if chat.first_name else "User"
+        user_label = f"{user_name_val} | {user_id_val}"
+        
+        dest_mode = bot_set.user_data.get(user_id_val, {}).get('upload_mode', bot_set.upload_mode)
+    except: 
+        user_id_val = 0
+        user_label = "Unknown"
+        dest_mode = bot_set.upload_mode
         
     try:
         stats = await get_aria2_global_stat()
@@ -218,7 +235,7 @@ async def progress_message(done, total, details):
             'speed': speed_str, 'machine': machine, 'mode': dest_mode,
             'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
             'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl,
-            'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0,
+            'speed_ul_raw': speed_ul, 'user_id': user_id_val, 'user_label': user_label,
             'timestamp': now
         })
 
