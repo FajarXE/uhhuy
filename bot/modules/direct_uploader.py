@@ -775,8 +775,20 @@ class DirectUpload:
                                     
                                     if total > 0:
                                         pct = (sent / total) * 100
-                                        filled = int((pct / 100) * 12)
-                                        GLOBAL_TASKS[task_id]['progress_bar'] = "■" * filled + "□" * (12 - filled)
+                                        # --- LOGIKA PROGRESS BAR 3 TAHAP ---
+                                        blocks = 12
+                                        fill_val = (pct / 100) * blocks
+                                        filled_blocks = math.floor(fill_val)
+                                        remainder = fill_val - filled_blocks
+                                        
+                                        p_bar = ""
+                                        for b in range(blocks):
+                                            if b < filled_blocks: p_bar += "■"
+                                            elif b == filled_blocks and remainder > 0.05: p_bar += "▥"
+                                            else: p_bar += "□"
+                                            
+                                        GLOBAL_TASKS[task_id]['progress_bar'] = p_bar
+                                        # -----------------------------------
                                         GLOBAL_TASKS[task_id]['percentage'] = f"{pct:.2f}%"
                 except Exception as e:
                     LOGGER.debug(f"Transfer.it stderr parser error: {e}")
