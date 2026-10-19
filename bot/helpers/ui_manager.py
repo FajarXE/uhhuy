@@ -83,12 +83,14 @@ async def get_status_text(page=1, limit=5):
     buttons = []
     
     for i, t in enumerate(tasks_page, start=start_idx + 1):
-        # 1. Trik Hyperlink Markdown agar teks "01. Download Album" berwarna BIRU di Telegram
+        # Trik Hyperlink agar teks Action & Type menjadi BIRU
         blue_text = f"[{i:02d}. {t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
         
         # Blok Header Task
         text += f"┎ **{blue_text}**: `{t['title']}`\n"
-        text += f"┖ **Since**: {t['since']}\n\n"
+        
+        # Trik Syntax diff agar teks 'Since' menjadi HIJAU
+        text += f"┖ **Waktu**:\n```diff\n+ Since: {t['since']}\n```\n"
         
         # Blok Detail Progress
         text += f"┎ **Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
@@ -101,10 +103,11 @@ async def get_status_text(page=1, limit=5):
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n" # Spasi antar task
 
-        # 2. Menggunakan Kurigram ButtonStyle.DANGER agar tombol menjadi kotak MERAH
+        # Tombol Cancel dengan Nama/ID User Target
+        user_id_label = t.get('user_id', 'Unknown')
         buttons.append([
             InlineKeyboardButton(
-                f"🛑 Cancel Task {i:02d}", 
+                f"🛑 Cancel (ID: {user_id_label})", 
                 callback_data=f"cancel_{t['cancel_id']}", 
                 style=ButtonStyle.DANGER
             )
@@ -129,13 +132,13 @@ async def get_status_text(page=1, limit=5):
 
     if nav_row: buttons.append(nav_row)
     
-    # Tombol UI Utama (Hijau & Merah)
     buttons.append([
         InlineKeyboardButton("♻️ Refresh", callback_data=f"status_refresh_{page}", style=ButtonStyle.SUCCESS),
         InlineKeyboardButton("❌ Close", callback_data="status_close", style=ButtonStyle.DANGER)
     ])     
 
     return text, InlineKeyboardMarkup(buttons)
+
 
 async def progress_message(done, total, details):
     if not details or not details.get('msg'): return
@@ -153,9 +156,21 @@ async def progress_message(done, total, details):
     speed = done / diff
     percentage = (done / total) * 100 if total > 0 else 0
     
-    filled_blocks = math.floor((percentage / 100) * 12)
-    empty_blocks = 12 - filled_blocks
-    progress_bar = "■" * filled_blocks + "□" * empty_blocks
+    # --- LOGIKA PROGRESS BAR 3 TAHAP (■, ▥, □) ---
+    blocks = 12
+    fill_val = (percentage / 100) * blocks
+    filled_blocks = math.floor(fill_val)
+    remainder = fill_val - filled_blocks
+    
+    progress_bar = ""
+    for b in range(blocks):
+        if b < filled_blocks:
+            progress_bar += "■"
+        elif b == filled_blocks and remainder > 0.05: # Threshold akurasi
+            progress_bar += "▥"
+        else:
+            progress_bar += "□"
+    # ---------------------------------------------
     
     if total > 1000:
         done_str = get_readable_file_size(done)
