@@ -195,9 +195,22 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = N
                         speed_ul = 0
                         
                     percentage = (completed_tasks / total_tasks) * 100 if total_tasks > 0 else 0
-                    filled_blocks = math.floor((percentage / 100) * 12)
-                    empty_blocks = 12 - filled_blocks
-                    progress_bar = "■" * filled_blocks + "□" * empty_blocks
+                    
+                    # --- LOGIKA PROGRESS BAR 3 TAHAP ---
+                    blocks = 12
+                    fill_val = (percentage / 100) * blocks
+                    filled_blocks = math.floor(fill_val)
+                    remainder = fill_val - filled_blocks
+                    
+                    progress_bar = ""
+                    for b in range(blocks):
+                        if b < filled_blocks:
+                            progress_bar += "■"
+                        elif b == filled_blocks and remainder > 0.05:
+                            progress_bar += "▥"
+                        else:
+                            progress_bar += "□"
+                    # -----------------------------------
                     
                     speed_str = f"{get_readable_file_size(speed_dl)}/s"
                     since_str = get_readable_time(int(time.time() - start_time))
