@@ -15,7 +15,6 @@ from config import Config
 from bot.settings import bot_set
 from bot.logger import LOGGER
 
-# Import aman karena utils.py tidak lagi mengimpor balik file ini di top-level
 from bot.helpers.utils import get_readable_file_size, get_readable_time
 from bot.helpers.aria2_helper import get_aria2_global_stat
 
@@ -31,15 +30,28 @@ GLOBAL_STATE_LOCK = asyncio.Lock()
 # -------------------------------
 
 def _get_system_stats() -> dict:
-    """Helper ringan untuk mengambil statistik sistem (CPU, RAM, Disk, Uptime)"""
     try:
         cpu_usage = psutil.cpu_percent(interval=None)
         ram_usage = psutil.virtual_memory().percent
     except ImportError:
         cpu_usage = ram_usage = 0.0
 
+    # Kalkulasi Penyimpanan Server
     total, used, free = shutil.disk_usage(Config.DOWNLOAD_BASE_DIR)
     free_storage = free / (1024 ** 3)
+    disk_percent = (used / total) * 100 if total > 0 else 0
+    disk_total_str = f"{total / (1024 ** 3):.1f} GiB"
+
+    # Kalkulasi Lalu Lintas Jaringan (Network IO)
+    try:
+        net_io = psutil.net_io_counters()
+        dl_gb = net_io.bytes_recv / (1024 ** 3)
+        up_gb = net_io.bytes_sent / (1024 ** 3)
+        net_dl = f"{dl_gb:.1f} GiB" if dl_gb >= 0.1 else f"{net_io.bytes_recv / (1024**2):.1f} MiB"
+        net_up = f"{up_gb:.1f} GiB" if up_gb >= 0.1 else f"{net_io.bytes_sent / (1024**2):.1f} MiB"
+    except Exception:
+        net_dl = "0 GiB"
+        net_up = "0 GiB"
 
     uptime_seconds = int(time.time() - BOT_START_TIME)
     h, rem = divmod(uptime_seconds, 3600)
@@ -49,14 +61,16 @@ def _get_system_stats() -> dict:
         'cpu': cpu_usage,
         'ram': ram_usage,
         'free_storage': free_storage,
+        'disk_percent': disk_percent,
+        'disk_total': disk_total_str,
+        'net_dl': net_dl,
+        'net_up': net_up,
         'uptime': f"{h}h {m}m {s}s"
     }
-    
 
 async def get_status_text(page=1, limit=5):
     current_time = time.time()
     
-    # --- [FIX] AMANKAN PEMBACAAN DENGAN LOCK ---
     async with GLOBAL_STATE_LOCK:
         stale = []
         for k, v in list(GLOBAL_TASKS.items()):
@@ -70,7 +84,6 @@ async def get_status_text(page=1, limit=5):
             GLOBAL_TASKS.pop(k, None)
 
         tasks = list(GLOBAL_TASKS.values())
-    # -------------------------------------------
         
     if not tasks:
         return "💤 **There are no tasks currently running.**", None
@@ -85,22 +98,43 @@ async def get_status_text(page=1, limit=5):
     tasks_page = tasks[start_idx:end_idx]
 
     text = ""
+    buttons = []
+    
     for i, t in enumerate(tasks_page, start=start_idx + 1):
-        # Blok Header Task
-        text += f"┎ **{i:02d}. {t['action']} {t['type']}**: `{t['title']}`\n"
-        text += f"┖ **Since**: {t['since']}\n\n"
+        # Trik Hyperlink agar teks Action & Type menjadi BIRU
+        blue_text = f"[{i:02d}. {t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
+        unique_short_id = t['cancel_id'][:6]
+        user_id_val = str(t.get('user_id', 'Unknown'))
         
-        # Blok Detail Progress
-        text += f"┎ **Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
+        # Trik Zero-Width Space (\u200B) untuk memblokir auto-link Telegram
+        safe_title = str(t['title']).replace(".", ".\u200B").replace("://", "://\u200B")
+        safe_user_id = user_id_val[:4] + "\u200B" + user_id_val[4:] if len(user_id_val) > 4 else user_id_val
+        
+        # Header Utama
+        text += f"**{blue_text}**: {safe_title}\n"
+        text += f"**Since**: {t['since']}\n\n"
+        
+        # Blok Processed (Biru, Bold, Titik dua putih)
+        blue_bot_processed = f"[Bot Processed](https://t.me/{Config.BOT_USERNAME})"
+        text += f"┎ **{blue_bot_processed}**:\n"
+        text += f"┠ **Progress** [{t['progress_bar']}] {t['percentage']}\n"
         text += f"┠ **{t['processed_label']}**: {t['processed']}\n"
         text += f"┠ **Current_Speed**: {t['speed']}\n"
         text += f"┠ **Machine_type**: {t['machine']}\n"
         text += f"┠ **Destination_mode**: {t['mode']}\n"
-        text += f"┠ **User_ID**: `{t.get('user_id', 'Unknown')}`\n"
-        text += f"┖ **Cancel**: /cancel_{t['cancel_id']}\n"
+        text += f"┠ **User_ID**: {safe_user_id}\n"
+        text += f"┖ **Cancel_ID**: {unique_short_id}\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n" # Spasi antar task
+
+        buttons.append([
+            InlineKeyboardButton(
+                f"Cancel (ID: {unique_short_id})", 
+                callback_data=f"cancel_{t['cancel_id']}", 
+                style=ButtonStyle.DANGER
+            )
+        ])
 
     total_dl_raw = sum(t.get('speed_dl_raw', 0) for t in tasks)
     total_ul_raw = sum(t.get('speed_ul_raw', 0) for t in tasks)
@@ -108,13 +142,17 @@ async def get_status_text(page=1, limit=5):
     global_dl = f"{get_readable_file_size(total_dl_raw)}/s" if total_dl_raw > 0 else "0B/s"
     global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
 
-    # Blok System Stats dengan border
     stats = _get_system_stats()
-    text += f"\n┎ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
+    
+    # Blok Statistics (Biru, Bold, Titik dua putih)
+    blue_stats = f"[Bot Statistics](https://t.me/{Config.BOT_USERNAME})"
+    text += f"\n┎ **{blue_stats}**:\n"
+    text += f"┠ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
     text += f"┠ **RAM**: {stats['ram']:.1f}% | **UPTIME**: {stats['uptime']}\n"
+    text += f"┠ **DISK**: {stats['disk_percent']:.0f}% | **OF**: {stats['disk_total']}\n"
+    text += f"┠ **DL**: {stats['net_dl']}  | **UP**: {stats['net_up']}\n"
     text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
 
-    buttons = []
     nav_row = []
     if page > 1:
         nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"status_page_{page-1}", style=ButtonStyle.PRIMARY))
@@ -122,6 +160,7 @@ async def get_status_text(page=1, limit=5):
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"status_page_{page+1}", style=ButtonStyle.PRIMARY))
 
     if nav_row: buttons.append(nav_row)
+    
     buttons.append([
         InlineKeyboardButton("♻️ Refresh", callback_data=f"status_refresh_{page}", style=ButtonStyle.SUCCESS),
         InlineKeyboardButton("❌ Close", callback_data="status_close", style=ButtonStyle.DANGER)
@@ -132,10 +171,8 @@ async def get_status_text(page=1, limit=5):
 
 async def progress_message(done, total, details):
     if not details or not details.get('msg'): return
-    
     now = time.time()
     
-    # Jeda internal kalkulasi agar tidak boros CPU
     if 'last_updated' in details:
         if now - details['last_updated'] < 1.0 and done < total:
             return
@@ -145,13 +182,24 @@ async def progress_message(done, total, details):
         details['start_time'] = now
         
     diff = max(now - details['start_time'], 1)
-        
     speed = done / diff
     percentage = (done / total) * 100 if total > 0 else 0
     
-    filled_blocks = math.floor((percentage / 100) * 12)
-    empty_blocks = 12 - filled_blocks
-    progress_bar = "■" * filled_blocks + "□" * empty_blocks
+    # --- LOGIKA PROGRESS BAR 3 TAHAP (■, ▥, □) ---
+    blocks = 12
+    fill_val = (percentage / 100) * blocks
+    filled_blocks = math.floor(fill_val)
+    remainder = fill_val - filled_blocks
+    
+    progress_bar = ""
+    for b in range(blocks):
+        if b < filled_blocks:
+            progress_bar += "■"
+        elif b == filled_blocks and remainder > 0.05:
+            progress_bar += "▥"
+        else:
+            progress_bar += "□"
+    # ---------------------------------------------
     
     if total > 1000:
         done_str = get_readable_file_size(done)
@@ -175,24 +223,27 @@ async def progress_message(done, total, details):
     
     task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16] if details.get('msg') else details.get('task_id', 'unknown')
     
+    # Menangkap ID Pengguna Asli
     try:
-        user_id = details['msg'].chat.id
-        dest_mode = bot_set.user_data.get(user_id, {}).get('upload_mode', bot_set.upload_mode)
-    except: dest_mode = bot_set.upload_mode
+        msg_obj = details['msg']
+        user_id_val = msg_obj.chat.id
+        dest_mode = bot_set.user_data.get(user_id_val, {}).get('upload_mode', bot_set.upload_mode)
+    except Exception: 
+        user_id_val = 0
+        dest_mode = bot_set.upload_mode
         
     try:
         stats = await get_aria2_global_stat()
         speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
         speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-    except: speed_dl = speed_ul = 0
+    except Exception: 
+        speed_dl = speed_ul = 0
 
     machine = details.get('machine', 'Aria2c 1.37.0')
 
     if action.lower() == 'upload': speed_ul += speed
     elif action.lower() == 'download' and machine == 'Telegram API': speed_dl += speed
 
-    # --- [FIX] UPDATE DICTIONARY DALAM LOCK MEMORI ---
-    # Ini mencegah alokasi memori berulang kali dan mengatasi CPU Overhead
     async with GLOBAL_STATE_LOCK:
         if task_id not in GLOBAL_TASKS:
             GLOBAL_TASKS[task_id] = {}
@@ -204,25 +255,17 @@ async def progress_message(done, total, details):
             'speed': speed_str, 'machine': machine, 'mode': dest_mode,
             'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
             'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl,
-            'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0,
-            'timestamp': now
+            'speed_ul_raw': speed_ul, 'user_id': user_id_val, 'timestamp': now
         })
-    # ------------------------------------------------
-
 
 async def dedicated_ui_worker():
-    """ Mandor UI (Daemon) yang berputar di latar belakang """
     from bot.helpers.message import edit_message
-    
     last_memory_sweep = time.time()
 
     while True:
         await asyncio.sleep(2.5)
-        
         now = time.time()
         
-        # --- [GARBAGE COLLECTOR OTONOM] ---
-        # Membersihkan RAM setiap 60 detik tanpa menunggu interaksi pengguna
         if now - last_memory_sweep > 60:
             last_memory_sweep = now
             async with GLOBAL_STATE_LOCK:
@@ -236,13 +279,11 @@ async def dedicated_ui_worker():
                 
                 for k in stale_tasks:
                     GLOBAL_TASKS.pop(k, None)
-                    GLOBAL_CANCEL_DICT.discard(k) # Bersihkan juga ID Cancel agar RAM tidak bocor
+                    GLOBAL_CANCEL_DICT.discard(k)
                 
-                # Bersihkan memori paginasi (halaman) yang ditinggalkan
                 stale_pages = [cid for cid in GLOBAL_UI_PAGES if cid not in GLOBAL_UI_MSG]
                 for cid in stale_pages:
                     GLOBAL_UI_PAGES.pop(cid, None)
-        # ----------------------------------
 
         if not GLOBAL_UI_MSG: continue
 
@@ -253,5 +294,5 @@ async def dedicated_ui_worker():
                 g_text, g_markup = await get_status_text(page=page)
                 
                 await edit_message(msg, g_text, g_markup, antiflood=False)
-                await asyncio.sleep(0.15) # Rem API Telegram
+                await asyncio.sleep(0.15) 
             except Exception: pass
