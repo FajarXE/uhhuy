@@ -88,8 +88,6 @@ async def get_status_text(page=1, limit=5):
         
         # Blok Header Task
         text += f"┎ **{blue_text}**: `{t['title']}`\n"
-        
-        # Dikembalikan ke teks sebaris berbahasa Inggris agar rapi dan tidak memunculkan kotak "Diff"
         text += f"┖ **Since**: {t['since']}\n\n"
         
         # Blok Detail Progress
@@ -103,11 +101,11 @@ async def get_status_text(page=1, limit=5):
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n" # Spasi antar task
 
-        # Tombol Cancel dengan Nama/ID User Target (Tanpa Emoji)
-        user_id_label = t.get('user_id', 'Unknown')
+        # Tombol Cancel dengan 6 karakter pertama dari ID Unik Task
+        unique_short_id = t['cancel_id'][:6]
         buttons.append([
             InlineKeyboardButton(
-                f"Cancel (ID: {user_id_label})", 
+                f"Cancel (ID: {unique_short_id})", 
                 callback_data=f"cancel_{t['cancel_id']}", 
                 style=ButtonStyle.DANGER
             )
