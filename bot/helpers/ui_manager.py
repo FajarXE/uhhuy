@@ -89,8 +89,8 @@ async def get_status_text(page=1, limit=5):
         # Blok Header Task
         text += f"┎ **{blue_text}**: `{t['title']}`\n"
         
-        # Trik Syntax diff agar teks 'Since' menjadi HIJAU
-        text += f"┖ **Waktu**:\n```diff\n+ Since: {t['since']}\n```\n"
+        # Dikembalikan ke teks sebaris berbahasa Inggris agar rapi dan tidak memunculkan kotak "Diff"
+        text += f"┖ **Since**: {t['since']}\n\n"
         
         # Blok Detail Progress
         text += f"┎ **Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
@@ -103,11 +103,11 @@ async def get_status_text(page=1, limit=5):
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n" # Spasi antar task
 
-        # Tombol Cancel dengan Nama/ID User Target
+        # Tombol Cancel dengan Nama/ID User Target (Tanpa Emoji)
         user_id_label = t.get('user_id', 'Unknown')
         buttons.append([
             InlineKeyboardButton(
-                f"🛑 Cancel (ID: {user_id_label})", 
+                f"Cancel (ID: {user_id_label})", 
                 callback_data=f"cancel_{t['cancel_id']}", 
                 style=ButtonStyle.DANGER
             )
@@ -138,7 +138,6 @@ async def get_status_text(page=1, limit=5):
     ])     
 
     return text, InlineKeyboardMarkup(buttons)
-
 
 async def progress_message(done, total, details):
     if not details or not details.get('msg'): return
