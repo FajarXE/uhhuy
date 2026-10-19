@@ -83,31 +83,29 @@ async def get_status_text(page=1, limit=5):
     buttons = []
     
     for i, t in enumerate(tasks_page, start=start_idx + 1):
-        # Trik Hyperlink agar teks Action & Type menjadi BIRU
+        # Hyperlink biru untuk judul task
         blue_text = f"[{i:02d}. {t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
-        
-        # Header Task (Tanpa ┎ dan ┖)
-        text += f"**{blue_text}**: `{t['title']}`\n"
-        text += f"Since: {t['since']}\n\n"
-        
-        # Blok Detail Progress
-        text += f"┎ **Progress**: `[{t['progress_bar']}]` {t['percentage']}\n"
-        text += f"┠ **{t['processed_label']}**: {t['processed']}\n"
-        text += f"┠ **Current_Speed**: {t['speed']}\n"
-        text += f"┠ **Machine_type**: {t['machine']}\n"
-        text += f"┠ **Destination_mode**: {t['mode']}\n"
-        
-        # User_ID dan Cancel_ID dikembalikan ke teks biasa agar rapi (Tanpa kotak Diff)
-        user_label = t.get('user_label', t.get('user_id', 'Unknown'))
         unique_short_id = t['cancel_id'][:6]
+        user_id_val = t.get('user_id', 'Unknown')
         
-        text += f"┠ **User_ID**: {user_label}\n"
-        text += f"┖ **Cancel_ID**: `{unique_short_id}`\n"
+        # Header
+        text += f"**{blue_text}**: `{t['title']}`\n\n"
+        
+        # Kurigram Markdown Table
+        text += "| Status | Details |\n"
+        text += "| :--- | :--- |\n"
+        text += f"| Since | {t['since']} |\n"
+        text += f"| Progress | `[{t['progress_bar']}]` {t['percentage']} |\n"
+        text += f"| Processed | {t['processed']} |\n"
+        text += f"| Speed | {t['speed']} |\n"
+        text += f"| Machine | {t['machine']} |\n"
+        text += f"| Destination | {t['mode']} |\n"
+        text += f"| User ID | {user_id_val} |\n"
+        text += f"| Cancel ID | {unique_short_id} |\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n\n" # Spasi antar task
 
-        # Tombol Cancel
         buttons.append([
             InlineKeyboardButton(
                 f"Cancel (ID: {unique_short_id})", 
@@ -124,12 +122,16 @@ async def get_status_text(page=1, limit=5):
 
     stats = _get_system_stats()
     
-    # Bot Stats (Tanda titik dua ditaruh di luar tautan agar tetap putih)
+    # Bot Stats Markdown Table
     blue_stats = f"[Bot Stats](https://t.me/{Config.BOT_USERNAME})"
-    text += f"\n┎ **{blue_stats}**:\n"
-    text += f"┠ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
-    text += f"┠ **RAM**: {stats['ram']:.1f}% | **UPTIME**: {stats['uptime']}\n"
-    text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
+    text += f"\n**{blue_stats}**\n\n"
+    text += "| Resource | Usage |\n"
+    text += "| :--- | :--- |\n"
+    text += f"| CPU | {stats['cpu']:.1f}% |\n"
+    text += f"| RAM | {stats['ram']:.1f}% |\n"
+    text += f"| Free | {stats['free_storage']:.2f} GB |\n"
+    text += f"| Uptime | {stats['uptime']} |\n"
+    text += f"| Network | 🔻 {global_dl} / 🔺 {global_ul} |\n"
 
     nav_row = []
     if page > 1:
@@ -201,23 +203,13 @@ async def progress_message(done, total, details):
     
     task_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16] if details.get('msg') else details.get('task_id', 'unknown')
     
-    # Menangkap Nama dan ID Pengguna dengan lebih kuat
+    # Menangkap ID Pengguna Asli (Tanpa Nama)
     try:
         msg_obj = details['msg']
         user_id_val = msg_obj.chat.id
-        
-        if msg_obj.from_user and msg_obj.from_user.first_name:
-            user_name_val = msg_obj.from_user.first_name
-        elif msg_obj.chat and msg_obj.chat.first_name:
-            user_name_val = msg_obj.chat.first_name
-        else:
-            user_name_val = "User"
-            
-        user_label = f"{user_name_val} | {user_id_val}"
         dest_mode = bot_set.user_data.get(user_id_val, {}).get('upload_mode', bot_set.upload_mode)
     except: 
         user_id_val = 0
-        user_label = "Unknown"
         dest_mode = bot_set.upload_mode
         
     try:
@@ -242,8 +234,7 @@ async def progress_message(done, total, details):
             'speed': speed_str, 'machine': machine, 'mode': dest_mode,
             'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
             'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl,
-            'speed_ul_raw': speed_ul, 'user_id': user_id_val, 'user_label': user_label,
-            'timestamp': now
+            'speed_ul_raw': speed_ul, 'user_id': user_id_val, 'timestamp': now
         })
 
 async def dedicated_ui_worker():
