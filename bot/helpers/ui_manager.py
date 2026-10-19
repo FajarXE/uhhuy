@@ -15,7 +15,6 @@ from config import Config
 from bot.settings import bot_set
 from bot.logger import LOGGER
 
-# Import aman karena utils.py tidak lagi mengimpor balik file ini di top-level
 from bot.helpers.utils import get_readable_file_size, get_readable_time
 from bot.helpers.aria2_helper import get_aria2_global_stat
 
@@ -31,7 +30,6 @@ GLOBAL_STATE_LOCK = asyncio.Lock()
 # -------------------------------
 
 def _get_system_stats() -> dict:
-    """Helper ringan untuk mengambil statistik sistem (CPU, RAM, Disk, Uptime)"""
     try:
         cpu_usage = psutil.cpu_percent(interval=None)
         ram_usage = psutil.virtual_memory().percent
@@ -51,12 +49,10 @@ def _get_system_stats() -> dict:
         'free_storage': free_storage,
         'uptime': f"{h}h {m}m {s}s"
     }
-    
 
 async def get_status_text(page=1, limit=5):
     current_time = time.time()
     
-    # --- [FIX] AMANKAN PEMBACAAN DENGAN LOCK ---
     async with GLOBAL_STATE_LOCK:
         stale = []
         for k, v in list(GLOBAL_TASKS.items()):
@@ -70,7 +66,6 @@ async def get_status_text(page=1, limit=5):
             GLOBAL_TASKS.pop(k, None)
 
         tasks = list(GLOBAL_TASKS.values())
-    # -------------------------------------------
         
     if not tasks:
         return "💤 **There are no tasks currently running.**", None
@@ -85,9 +80,14 @@ async def get_status_text(page=1, limit=5):
     tasks_page = tasks[start_idx:end_idx]
 
     text = ""
+    buttons = []
+    
     for i, t in enumerate(tasks_page, start=start_idx + 1):
+        # 1. Trik Hyperlink Markdown agar teks "01. Download Album" berwarna BIRU di Telegram
+        blue_text = f"[{i:02d}. {t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
+        
         # Blok Header Task
-        text += f"┎ **{i:02d}. {t['action']} {t['type']}**: `{t['title']}`\n"
+        text += f"┎ **{blue_text}**: `{t['title']}`\n"
         text += f"┖ **Since**: {t['since']}\n\n"
         
         # Blok Detail Progress
@@ -96,11 +96,19 @@ async def get_status_text(page=1, limit=5):
         text += f"┠ **Current_Speed**: {t['speed']}\n"
         text += f"┠ **Machine_type**: {t['machine']}\n"
         text += f"┠ **Destination_mode**: {t['mode']}\n"
-        text += f"┠ **User_ID**: `{t.get('user_id', 'Unknown')}`\n"
-        text += f"┖ **Cancel**: /cancel_{t['cancel_id']}\n"
+        text += f"┖ **User_ID**: `{t.get('user_id', 'Unknown')}`\n"
         
         if i < (start_idx + len(tasks_page)) and i < total_tasks:
             text += "\n" # Spasi antar task
+
+        # 2. Menggunakan Kurigram ButtonStyle.DANGER agar tombol menjadi kotak MERAH
+        buttons.append([
+            InlineKeyboardButton(
+                f"🛑 Cancel Task {i:02d}", 
+                callback_data=f"cancel_{t['cancel_id']}", 
+                style=ButtonStyle.DANGER
+            )
+        ])
 
     total_dl_raw = sum(t.get('speed_dl_raw', 0) for t in tasks)
     total_ul_raw = sum(t.get('speed_ul_raw', 0) for t in tasks)
@@ -108,13 +116,11 @@ async def get_status_text(page=1, limit=5):
     global_dl = f"{get_readable_file_size(total_dl_raw)}/s" if total_dl_raw > 0 else "0B/s"
     global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
 
-    # Blok System Stats dengan border
     stats = _get_system_stats()
     text += f"\n┎ **CPU**: {stats['cpu']:.1f}% | **FREE**: {stats['free_storage']:.2f} GB\n"
     text += f"┠ **RAM**: {stats['ram']:.1f}% | **UPTIME**: {stats['uptime']}\n"
     text += f"┖ 🔻 {global_dl} | 🔺 {global_ul}\n"
 
-    buttons = []
     nav_row = []
     if page > 1:
         nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"status_page_{page-1}", style=ButtonStyle.PRIMARY))
@@ -122,6 +128,8 @@ async def get_status_text(page=1, limit=5):
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"status_page_{page+1}", style=ButtonStyle.PRIMARY))
 
     if nav_row: buttons.append(nav_row)
+    
+    # Tombol UI Utama (Hijau & Merah)
     buttons.append([
         InlineKeyboardButton("♻️ Refresh", callback_data=f"status_refresh_{page}", style=ButtonStyle.SUCCESS),
         InlineKeyboardButton("❌ Close", callback_data="status_close", style=ButtonStyle.DANGER)
@@ -129,13 +137,10 @@ async def get_status_text(page=1, limit=5):
 
     return text, InlineKeyboardMarkup(buttons)
 
-
 async def progress_message(done, total, details):
     if not details or not details.get('msg'): return
-    
     now = time.time()
     
-    # Jeda internal kalkulasi agar tidak boros CPU
     if 'last_updated' in details:
         if now - details['last_updated'] < 1.0 and done < total:
             return
@@ -145,7 +150,6 @@ async def progress_message(done, total, details):
         details['start_time'] = now
         
     diff = max(now - details['start_time'], 1)
-        
     speed = done / diff
     percentage = (done / total) * 100 if total > 0 else 0
     
@@ -191,8 +195,6 @@ async def progress_message(done, total, details):
     if action.lower() == 'upload': speed_ul += speed
     elif action.lower() == 'download' and machine == 'Telegram API': speed_dl += speed
 
-    # --- [FIX] UPDATE DICTIONARY DALAM LOCK MEMORI ---
-    # Ini mencegah alokasi memori berulang kali dan mengatasi CPU Overhead
     async with GLOBAL_STATE_LOCK:
         if task_id not in GLOBAL_TASKS:
             GLOBAL_TASKS[task_id] = {}
@@ -207,22 +209,15 @@ async def progress_message(done, total, details):
             'speed_ul_raw': speed_ul, 'user_id': details['msg'].chat.id if details.get('msg') else 0,
             'timestamp': now
         })
-    # ------------------------------------------------
-
 
 async def dedicated_ui_worker():
-    """ Mandor UI (Daemon) yang berputar di latar belakang """
     from bot.helpers.message import edit_message
-    
     last_memory_sweep = time.time()
 
     while True:
         await asyncio.sleep(2.5)
-        
         now = time.time()
         
-        # --- [GARBAGE COLLECTOR OTONOM] ---
-        # Membersihkan RAM setiap 60 detik tanpa menunggu interaksi pengguna
         if now - last_memory_sweep > 60:
             last_memory_sweep = now
             async with GLOBAL_STATE_LOCK:
@@ -236,13 +231,11 @@ async def dedicated_ui_worker():
                 
                 for k in stale_tasks:
                     GLOBAL_TASKS.pop(k, None)
-                    GLOBAL_CANCEL_DICT.discard(k) # Bersihkan juga ID Cancel agar RAM tidak bocor
+                    GLOBAL_CANCEL_DICT.discard(k)
                 
-                # Bersihkan memori paginasi (halaman) yang ditinggalkan
                 stale_pages = [cid for cid in GLOBAL_UI_PAGES if cid not in GLOBAL_UI_MSG]
                 for cid in stale_pages:
                     GLOBAL_UI_PAGES.pop(cid, None)
-        # ----------------------------------
 
         if not GLOBAL_UI_MSG: continue
 
@@ -253,5 +246,5 @@ async def dedicated_ui_worker():
                 g_text, g_markup = await get_status_text(page=page)
                 
                 await edit_message(msg, g_text, g_markup, antiflood=False)
-                await asyncio.sleep(0.15) # Rem API Telegram
+                await asyncio.sleep(0.15) 
             except Exception: pass
