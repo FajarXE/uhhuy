@@ -649,6 +649,43 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
             LOGGER.debug(f"Gagal menghapus file lokal default: {e}")
             await asyncio.sleep(1.0)
 
+async def video_upload(metadata: dict, user: UserDetails):
+    user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', bot_set.upload_mode)
+    
+    # Cek apakah target di-zip oleh handler
+    target = metadata.get('zip_path') or metadata.get('folderpath') or metadata.get('filepath')
+    
+    if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain', 'Terabox']:
+        link = await upload_to_cloud_handler(target, user, metadata, user_mode.title())
+        if link:
+            caption = await create_simple_text(metadata, user)
+            caption += f"\n\n🔗 <b>{user_mode.upper()} LINK:</b>\n{link}"
+            await send_message(user, caption, 'text')
+            
+            await asyncio.sleep(0.5)
+            try:
+                if os.path.exists(target):
+                    if os.path.isdir(target):
+                        import shutil
+                        shutil.rmtree(target, ignore_errors=True)
+                    else:
+                        os.remove(target)
+            except Exception: pass
+            return
+            
+    # Fallback ke telegram jika cloud gagal / tidak dipilih
+    await telegram_upload(metadata, user)
+    
+    await asyncio.sleep(0.5)
+    try:
+        if os.path.exists(target):
+            if os.path.isdir(target):
+                import shutil
+                shutil.rmtree(target, ignore_errors=True)
+            else:
+                os.remove(target)
+    except Exception: pass
+
 async def rclone_upload(user: UserDetails, realpath):
     path_to_upload = realpath
     base_path = f"{Config.DOWNLOAD_BASE_DIR}/{user['r_id']}/"
