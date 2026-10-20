@@ -176,6 +176,8 @@ async def start_video(video_id: str, user: dict, upload=True):
         video_meta['media_type'] = 'video' 
     
     # --- BUAT KETERANGAN CAPTION OTOMATIS ---
+    video_meta['quality'] = quality_str  # <-- TAMBAHKAN BARIS INI
+    
     video_caption = (
         f"NAME : {video_meta.get('title', 'Unknown')}\n"
         f"TYPE : Video\n"
