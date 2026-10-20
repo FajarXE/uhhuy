@@ -87,8 +87,8 @@ def get_upload_session(force_refresh=False):
         _GLOBAL_UPLOAD_SESSION = None
 
     if _GLOBAL_UPLOAD_SESSION is None or _GLOBAL_UPLOAD_SESSION.closed:
-        # Gunakan resolusi DNS asinkronus untuk menghindari bottleneck
-        conn = aiohttp.TCPConnector(limit=0, keepalive_timeout=60, enable_cleanup_closed=True, resolver=aiohttp.AsyncResolver())
+        # HAPUS resolver=aiohttp.AsyncResolver() dari sini
+        conn = aiohttp.TCPConnector(limit=0, keepalive_timeout=60, enable_cleanup_closed=True)
         _GLOBAL_UPLOAD_SESSION = aiohttp.ClientSession(connector=conn)
     return _GLOBAL_UPLOAD_SESSION
 
@@ -748,9 +748,11 @@ class DirectUpload:
                 try:
                     from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
                     import time
+                    import re
+                    import os
                     
                     seen_files = [] # Variabel pelacak urutan file
-                    last_tf_update = 0 # <-- Tambahkan pelacak waktu lokal
+                    last_tf_update = 0 # Pelacak waktu lokal
                     
                     while True:
                         line = await process.stderr.readline()
@@ -774,10 +776,22 @@ class DirectUpload:
                         line_str = line.decode().strip()
                         now_tf = time.time()
                         
-                        # Hanya proses data jika sudah berlalu 3.5 detik dari baris sebelumnya
                         if "POST" in line_str and "MiB" in line_str:
+                            file_match = re.search(r'POST\s+(.*?):', line_str)
+                            
+                            # 1. INTIP NAMA FILE & BYPASS DELAY JIKA FILE BARU
+                            if file_match:
+                                current_file = os.path.basename(file_match.group(1))
+                                if current_file not in seen_files:
+                                    seen_files.append(current_file)
+                                    # BYPASS DELAY: Paksa laporan langsung terkirim agar UI seketika berubah saat ganti file
+                                    last_tf_update = 0 
+                            
+                            # 2. TAHAN LAPORAN PROGRESS ANGKA (THROTTLING)
+                            # Hanya proses MB/s dan persentase jika sudah berlalu 3.5 detik
                             if now_tf - last_tf_update < 3.5:
-                                continue # Abaikan baris ini agar RAM tidak tersedak
+                                continue 
+                                
                             last_tf_update = now_tf
                             
                             task_id = details.get('task_id') if details else None
@@ -787,13 +801,8 @@ class DirectUpload:
                                 GLOBAL_TASKS[task_id]['machine'] = 'Transferit CLI' # Ubah nama mesin menjadi Transferit CLI
                                 GLOBAL_TASKS[task_id]['processed_label'] = 'Processed_bytes'
                                 
-                                # 1. INTIP NAMA FILE: Tangkap nama file yang sedang diunggah mesin
-                                file_match = re.search(r'POST\s+(.*?):', line_str)
+                                # 3. UPDATE JUDUL DI RADAR
                                 if file_match:
-                                    current_file = os.path.basename(file_match.group(1))
-                                    if current_file not in seen_files:
-                                        seen_files.append(current_file)
-                                        
                                     if is_dir:
                                         # Jika bentuknya Folder, tampilkan label [File X]
                                         idx = seen_files.index(current_file) + 1
@@ -802,7 +811,7 @@ class DirectUpload:
                                         # Jika bentuknya File Tunggal (.zip, dll), langsung tampilkan nama filenya
                                         GLOBAL_TASKS[task_id]['title'] = current_file
                                 
-                                # 2. TANGKAP PROGRESS: Perhitungan Kecepatan dan Persentase
+                                # 4. TANGKAP PROGRESS: Perhitungan Kecepatan dan Persentase
                                 match = re.search(r'(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s+MiB.*?([\d.]+)\s*([a-zA-Z]+/s)', line_str)
                                 if not match:
                                     match = re.search(r'(\d+)/(\d+)\s+MiB', line_str)
