@@ -186,8 +186,9 @@ async def start_video(video_id: str, user: dict, upload=True):
     # ----------------------------------------
     
     if upload:
-        from bot.helpers.uploder import telegram_upload
-        await telegram_upload(video_meta, user)
+        # Panggil video_upload agar sistem perutean Cloud berfungsi
+        from bot.helpers.uploder import video_upload
+        await video_upload(video_meta, user)
 
     return video_meta
         
