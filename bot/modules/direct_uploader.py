@@ -758,7 +758,6 @@ class DirectUpload:
                         line = await process.stderr.readline()
                         if not line:
                             # Jika output berhenti (EOF), artinya data sudah terkirim.
-                            # Ubah status UI ke Finalizing sambil menunggu server merakit link.
                             task_id = details.get('task_id') if details else None
                             if task_id and task_id in GLOBAL_TASKS:
                                 GLOBAL_TASKS[task_id]['action'] = 'Finalizing'
@@ -776,7 +775,8 @@ class DirectUpload:
                         line_str = line.decode().strip()
                         now_tf = time.time()
                         
-                        if "POST" in line_str and "MiB" in line_str:
+                        # Pastikan ini adalah baris log unggahan dari Transfer.it
+                        if "POST" in line_str:
                             file_match = re.search(r'POST\s+(.*?):', line_str)
                             
                             # 1. INTIP NAMA FILE & BYPASS DELAY JIKA FILE BARU
@@ -784,11 +784,11 @@ class DirectUpload:
                                 current_file = os.path.basename(file_match.group(1))
                                 if current_file not in seen_files:
                                     seen_files.append(current_file)
-                                    # BYPASS DELAY: Paksa laporan langsung terkirim agar UI seketika berubah saat ganti file
+                                    # BYPASS DELAY: Paksa laporan langsung terkirim agar UI seketika berubah
                                     last_tf_update = 0 
                             
                             # 2. TAHAN LAPORAN PROGRESS ANGKA (THROTTLING)
-                            # Hanya proses MB/s dan persentase jika sudah berlalu 3.5 detik
+                            # Hanya proses pembaruan jika sudah berlalu 3.5 detik
                             if now_tf - last_tf_update < 3.5:
                                 continue 
                                 
@@ -798,53 +798,58 @@ class DirectUpload:
                             if task_id and task_id in GLOBAL_TASKS:
                                 GLOBAL_TASKS[task_id]['timestamp'] = time.time()
                                 GLOBAL_TASKS[task_id]['action'] = 'Uploading'
-                                GLOBAL_TASKS[task_id]['machine'] = 'Transferit CLI' # Ubah nama mesin menjadi Transferit CLI
+                                GLOBAL_TASKS[task_id]['machine'] = 'Transferit CLI'
                                 GLOBAL_TASKS[task_id]['processed_label'] = 'Processed_bytes'
                                 
                                 # 3. UPDATE JUDUL DI RADAR
                                 if file_match:
                                     if is_dir:
-                                        # Jika bentuknya Folder, tampilkan label [File X]
                                         idx = seen_files.index(current_file) + 1
                                         GLOBAL_TASKS[task_id]['title'] = f"[File {idx}] {current_file}"
                                     else:
-                                        # Jika bentuknya File Tunggal (.zip, dll), langsung tampilkan nama filenya
                                         GLOBAL_TASKS[task_id]['title'] = current_file
                                 
-                                # 4. TANGKAP PROGRESS: Perhitungan Kecepatan dan Persentase
-                                match = re.search(r'(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)\s+MiB.*?([\d.]+)\s*([a-zA-Z]+/s)', line_str)
-                                if not match:
-                                    match = re.search(r'(\d+)/(\d+)\s+MiB', line_str)
-                                
-                                if match:
-                                    if len(match.groups()) >= 4:
-                                        sent_mb = float(match.group(1))
-                                        total_mb = float(match.group(2))
-                                        speed_val = match.group(3)
-                                        speed_unit = match.group(4)
-                                        
-                                        GLOBAL_TASKS[task_id]['processed'] = f"{sent_mb:.2f} MB of {total_mb:.2f} MB"
-                                        GLOBAL_TASKS[task_id]['speed'] = f"{speed_val} {speed_unit}"
-                                    else:
-                                        sent_mb = float(match.group(1))
-                                        total_mb = float(match.group(2))
-                                        GLOBAL_TASKS[task_id]['processed'] = f"{sent_mb:.2f} MB of {total_mb:.2f} MB"
+                                # 4. METODE PARSING REGEX SUPER FLEKSIBEL
+                                # A. Tangkap persentase misal: 45%
+                                pct_match = re.search(r'(\d+(?:\.\d+)?)%', line_str)
+                                # B. Tangkap ukuran (Size) misal: 1.5M/10.0M atau 1.5/10.0 MiB
+                                size_match = re.search(r'([\d.]+)[A-Za-z]*\s*/\s*([\d.]+)\s*([A-Za-z]+)', line_str)
+                                # C. Tangkap kecepatan (Speed) misal: 1.50MB/s atau 1.5 MiB/s
+                                speed_match = re.search(r'([\d.]+)\s*([A-Za-z]+/s)', line_str)
+
+                                if size_match:
+                                    sent_val = float(size_match.group(1))
+                                    total_val = float(size_match.group(2))
+                                    unit = size_match.group(3)
                                     
-                                    if total_mb > 0:
-                                        pct = (sent_mb / total_mb) * 100
-                                        blocks = 12
-                                        fill_val = (pct / 100) * blocks
-                                        filled_blocks = int(fill_val) 
-                                        remainder = fill_val - filled_blocks
+                                    # Normalisasi unit bacaan agar seragam di UI
+                                    if unit.upper() == 'M': unit = 'MB'
+                                    elif unit.upper() == 'K': unit = 'KB'
+                                    elif unit.upper() == 'G': unit = 'GB'
+                                    
+                                    GLOBAL_TASKS[task_id]['processed'] = f"{sent_val:.2f} {unit} of {total_val:.2f} {unit}"
+                                    
+                                    if speed_match:
+                                        GLOBAL_TASKS[task_id]['speed'] = f"{speed_match.group(1)} {speed_match.group(2)}"
                                         
-                                        p_bar = ""
-                                        for b in range(blocks):
-                                            if b < filled_blocks: p_bar += "■"
-                                            elif b == filled_blocks and remainder > 0.05: p_bar += "▥"
-                                            else: p_bar += "□"
-                                            
-                                        GLOBAL_TASKS[task_id]['progress_bar'] = p_bar
-                                        GLOBAL_TASKS[task_id]['percentage'] = f"{pct:.2f}%"
+                                    if pct_match:
+                                        pct = float(pct_match.group(1))
+                                    else:
+                                        pct = (sent_val / total_val) * 100 if total_val > 0 else 0
+                                        
+                                    blocks = 12
+                                    fill_val = (pct / 100) * blocks
+                                    filled_blocks = int(fill_val) 
+                                    remainder = fill_val - filled_blocks
+                                    
+                                    p_bar = ""
+                                    for b in range(blocks):
+                                        if b < filled_blocks: p_bar += "■"
+                                        elif b == filled_blocks and remainder > 0.05: p_bar += "▥"
+                                        else: p_bar += "□"
+                                        
+                                    GLOBAL_TASKS[task_id]['progress_bar'] = p_bar
+                                    GLOBAL_TASKS[task_id]['percentage'] = f"{pct:.2f}%"
                 except Exception as e:
                     from bot.logger import LOGGER
                     LOGGER.debug(f"Transfer.it stderr parser error: {e}")
