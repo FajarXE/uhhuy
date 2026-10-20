@@ -45,8 +45,8 @@ class ProgressFileWrapper(io.IOBase):
         if chunk:
             self.bytes_read += len(chunk)
             now = time.time()
-            # Tembakkan radar progres setiap 1.5 detik agar Telegram tidak FloodWait
-            if self.details and (now - self.last_update > 1.5 or self.bytes_read == self.total_size):
+            # Tembakkan radar progres setiap 4 detik agar Telegram tidak FloodWait
+            if self.details and (now - self.last_update > 4.0 or self.bytes_read == self.total_size):
                 self.last_update = now
                 from bot.helpers.ui_manager import progress_message
                 
@@ -82,14 +82,13 @@ def get_upload_session(force_refresh=False):
     global _GLOBAL_UPLOAD_SESSION
     if force_refresh:
         if _GLOBAL_UPLOAD_SESSION and not _GLOBAL_UPLOAD_SESSION.closed:
-            # Jadwalkan penutupan di background agar tidak membekukan IO
-            asyncio.create_task(_GLOBAL_UPLOAD_SESSION.close())
+            # Gunakan penutupan instan via detach konektor (mencegah Task nyangkut)
+            _GLOBAL_UPLOAD_SESSION.connector.close()
         _GLOBAL_UPLOAD_SESSION = None
 
     if _GLOBAL_UPLOAD_SESSION is None or _GLOBAL_UPLOAD_SESSION.closed:
-        # limit=0 mematikan limitasi TCP bawaan aiohttp (100) 
-        # agar unggahan paralel file raksasa tidak mengalami bottleneck.
-        conn = aiohttp.TCPConnector(limit=0, keepalive_timeout=60, enable_cleanup_closed=True)
+        # Gunakan resolusi DNS asinkronus untuk menghindari bottleneck
+        conn = aiohttp.TCPConnector(limit=0, keepalive_timeout=60, enable_cleanup_closed=True, resolver=aiohttp.AsyncResolver())
         _GLOBAL_UPLOAD_SESSION = aiohttp.ClientSession(connector=conn)
     return _GLOBAL_UPLOAD_SESSION
 
@@ -751,6 +750,7 @@ class DirectUpload:
                     import time
                     
                     seen_files = [] # Variabel pelacak urutan file
+                    last_tf_update = 0 # <-- Tambahkan pelacak waktu lokal
                     
                     while True:
                         line = await process.stderr.readline()
@@ -772,9 +772,14 @@ class DirectUpload:
                                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
                                 
                         line_str = line.decode().strip()
+                        now_tf = time.time()
                         
-                        # Menangkap log: "POST namafile: 10/50 MiB (5.00 MiB/s)"
+                        # Hanya proses data jika sudah berlalu 3.5 detik dari baris sebelumnya
                         if "POST" in line_str and "MiB" in line_str:
+                            if now_tf - last_tf_update < 3.5:
+                                continue # Abaikan baris ini agar RAM tidak tersedak
+                            last_tf_update = now_tf
+                            
                             task_id = details.get('task_id') if details else None
                             if task_id and task_id in GLOBAL_TASKS:
                                 GLOBAL_TASKS[task_id]['timestamp'] = time.time()
