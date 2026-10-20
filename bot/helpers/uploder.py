@@ -215,6 +215,8 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
     
     # 2. Normalisasi Input (Menyatukan Logika List, File Tunggal, dan Direktori)
     files_to_upload = []
+    is_directory_upload = False  # <-- FLAG PENDETEKSI FOLDER
+    
     if isinstance(filepath, list):
         files_to_upload = filepath
         base_path = os.path.dirname(filepath[0])
@@ -222,6 +224,7 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         files_to_upload = [filepath]
         base_path = os.path.dirname(filepath)
     elif os.path.isdir(filepath):
+        is_directory_upload = True  # <-- TANDAI BAHWA INPUT ASLINYA ADALAH FOLDER UTUH
         files_to_upload = [os.path.join(filepath, f) for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
         base_path = filepath
     else:
@@ -264,18 +267,21 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         
         # 4. Iterasi Eksekusi Upload (Dengan Exponential Backoff: Max 3x Retry)
         if mode == 'Transferit':
-            if total_files > 1:
-                # Eksekusi 1 folder penuh sekaligus ke Transfer.it
+            # Gunakan mode "upload 1 folder sekaligus" HANYA jika input aslinya memang folder
+            if total_files > 1 and is_directory_upload:
                 if details: details['title'] = f"Mengunggah Folder: {folder_name}"
                 res = await uploader.upload(None, 0, upload_type='transferit', details=details)
+                if res:
+                    uploaded_links.append(list(res.values())[0])
             else:
-                # Eksekusi jika hanya 1 track satuan
-                filename = os.path.basename(files_to_upload[0])
-                if details: details['title'] = filename
-                res = await uploader.upload(filename, 0, upload_type='transferit', details=details)
-                
-            if res:
-                uploaded_links.append(list(res.values())[0])
+                # Eksekusi satu per satu jika hanya 1 track satuan atau list (Track + Lirik)
+                for index, file_part in enumerate(files_to_upload, 1):
+                    filename = os.path.basename(file_part)
+                    if details: details['title'] = filename
+                    res = await uploader.upload(filename, 0, upload_type='transferit', details=details)
+                    
+                    if res:
+                        uploaded_links.append(list(res.values())[0])
         else:
             # Mode cloud lain (Gofile dkk) tetap menggunakan perulangan satu per satu
             for index, file_part in enumerate(files_to_upload, 1):
@@ -547,28 +553,77 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
     user_mode = bot_set.user_data.get(user['user_id'], {}).get('upload_mode', bot_set.upload_mode)
     upload_success = False
     
+    # Simpan state path awal
+    original_filepath = metadata['filepath']
+    target_to_upload = original_filepath
+    is_moved_to_folder = False
+    
     if user_mode.title() in ['Gofile', 'Buzzheavier', 'Vikingfiles', 'Transferit', 'Pixeldrain', 'Terabox']:
-        link = await upload_to_cloud_handler(metadata['filepath'], user, metadata, user_mode.title())
+        user_settings = bot_set.user_data.get(user['user_id'], {})
+        has_lyrics = False
+        base_path = os.path.splitext(original_filepath)[0]
+        lyrics_files = []
+        
+        if user_settings.get('send_lyrics_file', False):
+            for ext in ['.lrc', '.txt']:
+                if os.path.exists(base_path + ext):
+                    lyrics_files.append(base_path + ext)
+                    has_lyrics = True
+        
+        # --- PERBAIKAN: BUNGKUS AUDIO DAN LIRIK KE DALAM FOLDER ---
+        if has_lyrics:
+            import re
+            import shutil
+            
+            # 1. Buat nama folder yang aman berdasarkan judul lagu
+            safe_title = re.sub(r'[\\/*?:"<>|]', "", metadata.get('title', 'Track')).strip() or "Track"
+            parent_dir = os.path.dirname(original_filepath)
+            new_folder = os.path.join(parent_dir, safe_title)
+            
+            os.makedirs(new_folder, exist_ok=True)
+            
+            # 2. Pindahkan file audio ke folder baru
+            new_audio_path = os.path.join(new_folder, os.path.basename(original_filepath))
+            shutil.move(original_filepath, new_audio_path)
+            metadata['filepath'] = new_audio_path # Update jalur aslinya untuk fallback Telegram
+            
+            # 3. Pindahkan semua file lirik ke folder baru
+            for lf in lyrics_files:
+                new_lf_path = os.path.join(new_folder, os.path.basename(lf))
+                shutil.move(lf, new_lf_path)
+            
+            # 4. Ubah target unggah dari file tunggal menjadi Folder utuh!
+            target_to_upload = new_folder
+            is_moved_to_folder = True
+        # ---------------------------------------------------------
+
+        link = await upload_to_cloud_handler(target_to_upload, user, metadata, user_mode.title())
+        
         if link:
             caption = await create_simple_text(metadata, user)
             caption += f"\n\n🔗 <b>{user_mode.upper()} LINK:</b>\n{link}"
             await send_message(user, caption, 'text')
             upload_success = True
             
-            # --- [FIX SILENT ERROR] Retry Hapus File ---
+            # --- Pembersihan Sisa File / Folder ---
             await asyncio.sleep(0.5)
             for _ in range(3):
                 try:
-                    if os.path.exists(metadata['filepath']): os.remove(metadata['filepath'])
+                    if is_moved_to_folder and os.path.exists(target_to_upload):
+                        import shutil
+                        shutil.rmtree(target_to_upload, ignore_errors=True)
+                    else:
+                        if os.path.exists(metadata['filepath']): os.remove(metadata['filepath'])
+                        for lf in lyrics_files:
+                            if not is_moved_to_folder and os.path.exists(lf): os.remove(lf)
                     break
-                except PermissionError: await asyncio.sleep(1.0)
-                except FileNotFoundError: break
                 except Exception as e: 
-                    LOGGER.debug(f"Gagal menghapus file lokal: {e}")
-                    break
-            # -------------------------------------------
+                    from bot.logger import LOGGER
+                    LOGGER.debug(f"Gagal menghapus file/folder lokal: {e}")
+                    await asyncio.sleep(1.0)
             return 
 
+    # --- FALLBACK JIKA GAGAL UPLOAD KE CLOUD ---
     if not upload_success:
         if bot_set.upload_mode == 'Local': await local_upload(metadata, user)
         elif bot_set.upload_mode == 'Telegram' or user_mode == 'Telegram': await telegram_upload(metadata, user)
@@ -576,18 +631,23 @@ async def track_upload(metadata: dict, user: UserDetails, disable_link: bool = F
             rclone_link, index_link = await rclone_upload(user, metadata['filepath'])
             if not disable_link: await post_simple_message(user, metadata, rclone_link, index_link)
             
-    # --- [FIX SILENT ERROR] Retry Hapus File Default ---
+    # --- Pembersihan Default Jika Terjadi Fallback ---
     await asyncio.sleep(0.5)
     for _ in range(3):
         try:
-            if os.path.exists(metadata['filepath']): os.remove(metadata['filepath'])
+            if is_moved_to_folder and os.path.exists(target_to_upload):
+                import shutil
+                shutil.rmtree(target_to_upload, ignore_errors=True)
+            else:
+                if os.path.exists(metadata['filepath']): os.remove(metadata['filepath'])
+                base_p = os.path.splitext(metadata['filepath'])[0]
+                for ext in ['.lrc', '.txt']:
+                    if os.path.exists(base_p + ext): os.remove(base_p + ext)
             break
-        except PermissionError: await asyncio.sleep(1.0)
-        except FileNotFoundError: break
         except Exception as e: 
+            from bot.logger import LOGGER
             LOGGER.debug(f"Gagal menghapus file lokal default: {e}")
-            break
-    # ---------------------------------------------------
+            await asyncio.sleep(1.0)
 
 async def rclone_upload(user: UserDetails, realpath):
     path_to_upload = realpath
