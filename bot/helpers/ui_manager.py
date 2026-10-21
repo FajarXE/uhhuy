@@ -101,17 +101,20 @@ async def get_status_text(page=1, limit=5):
     buttons = []
     
     for i, t in enumerate(tasks_page, start=start_idx + 1):
-        # Trik Hyperlink agar teks Action & Type menjadi BIRU
-        blue_text = f"[{i:02d}. {t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
+        # Trik Hyperlink agar HANYA teks Action & Type yang menjadi BIRU (Angka tetap putih)
+        blue_text = f"[{t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
         unique_short_id = t['cancel_id'][:6]
         user_id_val = str(t.get('user_id', 'Unknown'))
         
         # Trik Zero-Width Space (\u200B) untuk memblokir auto-link Telegram
-        safe_title = str(t['title']).replace(".", ".\u200B").replace("://", "://\u200B")
+        import re
+        safe_title = str(t['title']).replace(".", ".\u200B").replace("://", "://\u200B").replace("/", "/\u200B")
+        # Menyisipkan spasi tak terlihat di tengah deretan angka agar tidak dikira nomor telepon
+        safe_title = re.sub(r'(\d{4,})', lambda m: m.group(1)[:2] + '\u200B' + m.group(1)[2:], safe_title)
         safe_user_id = user_id_val[:4] + "\u200B" + user_id_val[4:] if len(user_id_val) > 4 else user_id_val
         
-        # Header Utama
-        text += f"**{blue_text}**: {safe_title}\n"
+        # Header Utama (Angka i:02d diletakkan di luar kurung biru)
+        text += f"**{i:02d}. {blue_text}**: {safe_title}\n"
         text += f"**Since**: {t['since']}\n\n"
         
         # Blok Processed (Biru, Bold, Titik dua putih)
@@ -174,7 +177,8 @@ async def progress_message(done, total, details):
     now = time.time()
     
     if 'last_updated' in details:
-        if now - details['last_updated'] < 1.0 and done < total:
+        # Tahan update jika belum berlalu 4 detik
+        if now - details['last_updated'] < 4.0 and done < total:
             return
     details['last_updated'] = now
 
@@ -263,7 +267,7 @@ async def dedicated_ui_worker():
     last_memory_sweep = time.time()
 
     while True:
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(5.0) # <-- Ubah dari 2.5 menjadi 5.0
         now = time.time()
         
         if now - last_memory_sweep > 60:
