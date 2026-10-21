@@ -141,9 +141,14 @@ class BotSettings:
     async def initialize_users(self) -> dict:
         user_data = await database.initialize_users()
         
+        # Bersihkan dan perbarui isi LRUCache tanpa menimpa objek aslinya
+        self.user_data.clear()
+        if user_data:
+            self.user_data.update(user_data)
+        
         if tidal_manager and tidal_manager.clients:
-            tidal_manager.user_data = user_data
+            tidal_manager.user_data = self.user_data
             
-        self.user_data = user_data
+        return self.user_data
 
 bot_set = BotSettings()
