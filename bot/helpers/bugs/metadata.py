@@ -124,17 +124,34 @@ async def process_track_metadata(track_id: str, r_id: str, user: dict, pre_data:
     metadata['totalvolume'] = str(t_vol) if t_vol else '1'
     # ------------------------------------
     
-    # Date Handling
-    release_date_str = album_data.get('release_ymd')
+    # Date Handling (Perbaikan Format Bugs KR - Sesuai Akurasi Asli)
+    release_date_str = str(album_data.get('release_ymd') or '').strip()
+    
     if release_date_str:
-        try:
-            if len(release_date_str) == 6: release_date_str += '01'
-            release_date_obj = datetime.strptime(release_date_str, '%Y%m%d')
-            metadata['date'] = release_date_obj.strftime('%Y-%m-%d')
-            metadata['year'] = release_date_obj.strftime('%Y')
-        except ValueError:
-            metadata['date'] = None
-            metadata['year'] = None
+        # Bersihkan akhiran '00' yang mengindikasikan ketiadaan bulan/tanggal
+        if release_date_str.endswith('0000'): 
+            release_date_str = release_date_str[:4]
+        elif release_date_str.endswith('00') and len(release_date_str) == 8: 
+            release_date_str = release_date_str[:6]
+            
+        if len(release_date_str) == 8:
+            # Format lengkap: Tahun, Bulan, Tanggal
+            metadata['date'] = f"{release_date_str[:4]}-{release_date_str[4:6]}-{release_date_str[6:8]}"
+            metadata['year'] = release_date_str[:4]
+        elif len(release_date_str) == 6:
+            # Format menengah: Tahun, Bulan
+            metadata['date'] = f"{release_date_str[:4]}-{release_date_str[4:6]}"
+            metadata['year'] = release_date_str[:4]
+        elif len(release_date_str) == 4:
+            # Format pendek: Hanya Tahun
+            metadata['date'] = release_date_str
+            metadata['year'] = release_date_str
+        else:
+            # Fallback jika format aneh
+            metadata['date'] = release_date_str
+            metadata['year'] = release_date_str[:4] if len(release_date_str) >= 4 else release_date_str
+            
+        metadata['release_date'] = metadata['date']
 
     if album_data.get('genres'):
         metadata['genre'] = ", ".join([g.get('svc_nm') for g in album_data.get('genres')])
@@ -319,16 +336,34 @@ async def process_album_metadata(album_id: str, r_id: str, user: dict):
         metadata['publisher'] = label_name
         metadata['copyright'] = f'© {metadata.get("year", "")} {label_name}'
 
-    release_date_str = album_data.get('release_ymd')
+    # Date Handling Album (Perbaikan Format Bugs KR - Sesuai Akurasi Asli)
+    release_date_str = str(album_data.get('release_ymd') or '').strip()
+    
     if release_date_str:
-        try:
-            if len(release_date_str) == 6: release_date_str += '01'
-            release_date_obj = datetime.strptime(release_date_str, '%Y%m%d')
-            metadata['date'] = release_date_obj.strftime('%Y-%m-%d')
-            metadata['year'] = release_date_obj.strftime('%Y')
-        except ValueError:
-            metadata['date'] = None
-            metadata['year'] = None
+        # Bersihkan akhiran '00' yang mengindikasikan ketiadaan bulan/tanggal
+        if release_date_str.endswith('0000'): 
+            release_date_str = release_date_str[:4]
+        elif release_date_str.endswith('00') and len(release_date_str) == 8: 
+            release_date_str = release_date_str[:6]
+            
+        if len(release_date_str) == 8:
+            # Format lengkap: Tahun, Bulan, Tanggal
+            metadata['date'] = f"{release_date_str[:4]}-{release_date_str[4:6]}-{release_date_str[6:8]}"
+            metadata['year'] = release_date_str[:4]
+        elif len(release_date_str) == 6:
+            # Format menengah: Tahun, Bulan
+            metadata['date'] = f"{release_date_str[:4]}-{release_date_str[4:6]}"
+            metadata['year'] = release_date_str[:4]
+        elif len(release_date_str) == 4:
+            # Format pendek: Hanya Tahun
+            metadata['date'] = release_date_str
+            metadata['year'] = release_date_str
+        else:
+            # Fallback jika format aneh
+            metadata['date'] = release_date_str
+            metadata['year'] = release_date_str[:4] if len(release_date_str) >= 4 else release_date_str
+            
+        metadata['release_date'] = metadata['date']
     
     metadata['totaltracks'] = str(album_data.get('track_count'))
     metadata['provider'] = 'Bugs'
