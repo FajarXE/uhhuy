@@ -176,6 +176,8 @@ async def start_video(video_id: str, user: dict, upload=True):
         video_meta['media_type'] = 'video' 
     
     # --- BUAT KETERANGAN CAPTION OTOMATIS ---
+    video_meta['quality'] = quality_str  # <-- TAMBAHKAN BARIS INI
+    
     video_caption = (
         f"NAME : {video_meta.get('title', 'Unknown')}\n"
         f"TYPE : Video\n"
@@ -186,8 +188,9 @@ async def start_video(video_id: str, user: dict, upload=True):
     # ----------------------------------------
     
     if upload:
-        from bot.helpers.uploder import telegram_upload
-        await telegram_upload(video_meta, user)
+        # Panggil video_upload agar sistem perutean Cloud berfungsi
+        from bot.helpers.uploder import video_upload
+        await video_upload(video_meta, user)
 
     return video_meta
         
