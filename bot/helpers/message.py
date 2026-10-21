@@ -402,11 +402,21 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
         except MessageNotModified: 
             break 
         except FloodWait as e:
+            # --- [PERBAIKAN KRITIKAL] ---
+            if e.value > 60:
+                try:
+                    from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+                    chat_id = msg.chat.id
+                    if chat_id in GLOBAL_UI_MSG: del GLOBAL_UI_MSG[chat_id]
+                    if chat_id in GLOBAL_UI_PAGES: del GLOBAL_UI_PAGES[chat_id]
+                except: pass
+                return None # Tinggalkan pesan yang terkunci
+                
             if antiflood:
-                if e.value > 60: return None
                 await asyncio.sleep(e.value)
-                continue # Coba edit ulang setelah delay
+                continue
             break
+            # ----------------------------
         except MessageIdInvalid:
             from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES
             chat_id = msg.chat.id
