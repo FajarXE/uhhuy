@@ -402,7 +402,7 @@ def language_buttons(languages, selected):
         inline_keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=text.UPPER(),
+                    text=text.upper(),
                     callback_data=f'langSet_{item.__language__}'
                 )
             ]
