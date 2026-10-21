@@ -402,19 +402,24 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
         except MessageNotModified: 
             break 
         except FloodWait as e:
-            # --- [PERBAIKAN KRITIKAL] ---
-            if e.value > 60:
+            import bot.helpers.ui_manager as ui_manager
+            ui_manager.GLOBAL_FLOOD_UNTIL = time.time() + e.value + 2.0
+            LOGGER.warning(f"FloodWait terdeteksi selama {e.value}s pada edit_message.")
+
+            if e.value > 60 or not antiflood:
                 try:
-                    from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+                    from bot.helpers.database.mongo_async import database
                     chat_id = msg.chat.id
-                    if chat_id in GLOBAL_UI_MSG: del GLOBAL_UI_MSG[chat_id]
-                    if chat_id in GLOBAL_UI_PAGES: del GLOBAL_UI_PAGES[chat_id]
-                except: pass
-                return None # Tinggalkan pesan yang terkunci
-                
-            if antiflood:
-                await asyncio.sleep(e.value)
-                continue
+                    if e.value > 60:
+                        ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
+                        ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
+                        await database.remove_ui_state(chat_id)
+                except Exception:
+                    pass
+                return None
+
+            await asyncio.sleep(e.value)
+            continue
             break
             # ----------------------------
         except MessageIdInvalid:
