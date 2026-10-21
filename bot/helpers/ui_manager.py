@@ -20,14 +20,14 @@ from bot.helpers.aria2_helper import get_aria2_global_stat
 
 BOT_START_TIME = time.time()
 
-# --- STATE GLOBAL UI & TASKS ---
 GLOBAL_CANCEL_DICT = set()
 GLOBAL_TASKS = {}
 GLOBAL_UI_MSG = {}
 GLOBAL_UI_PAGES = {}
 GLOBAL_UI_LAST_UPDATE = {}
+GLOBAL_UI_LAST_TEXT = {}
+GLOBAL_FLOOD_UNTIL = 0.0
 GLOBAL_STATE_LOCK = asyncio.Lock()
-# -------------------------------
 
 def _get_system_stats() -> dict:
     try:
@@ -264,39 +264,70 @@ async def progress_message(done, total, details):
 
 async def dedicated_ui_worker():
     from bot.helpers.message import edit_message
+    from bot.helpers.database.mongo_async import database
+    global GLOBAL_FLOOD_UNTIL
     last_memory_sweep = time.time()
 
     while True:
-        await asyncio.sleep(5.0) # <-- Ubah dari 2.5 menjadi 5.0
+        await asyncio.sleep(7.0)  # Naikkan dari 5.0 ke 7.0 detik agar aman dari rate-limit
         now = time.time()
-        
+
+        # Circuit Breaker: Jangan lakukan edit apa pun jika sedang masa penalti FloodWait
+        if now < GLOBAL_FLOOD_UNTIL:
+            continue
+
         if now - last_memory_sweep > 60:
             last_memory_sweep = now
             async with GLOBAL_STATE_LOCK:
                 stale_tasks = []
                 for k, v in list(GLOBAL_TASKS.items()):
                     action = str(v.get('action', '')).lower()
-                    time_limit = 1800 if 'zipping' in action else 900 
-                    
+                    time_limit = 1800 if 'zipping' in action else 900
                     if now - v.get('timestamp', now) > time_limit:
                         stale_tasks.append(k)
-                
+
                 for k in stale_tasks:
                     GLOBAL_TASKS.pop(k, None)
                     GLOBAL_CANCEL_DICT.discard(k)
-                
+
                 stale_pages = [cid for cid in GLOBAL_UI_PAGES if cid not in GLOBAL_UI_MSG]
                 for cid in stale_pages:
                     GLOBAL_UI_PAGES.pop(cid, None)
+                    GLOBAL_UI_LAST_TEXT.pop(cid, None)
 
-        if not GLOBAL_UI_MSG: continue
+        if not GLOBAL_UI_MSG:
+            continue
 
-        targets = list(GLOBAL_UI_MSG.items()) 
+        has_tasks = bool(GLOBAL_TASKS)
+        targets = list(GLOBAL_UI_MSG.items())
+
         for chat_id, msg in targets:
+            if time.time() < GLOBAL_FLOOD_UNTIL:
+                break
             try:
                 page = GLOBAL_UI_PAGES.get(chat_id, 1)
                 g_text, g_markup = await get_status_text(page=page)
-                
+
+                # Cegah pengiriman RPC ke Telegram jika isi teks sama persis
+                if GLOBAL_UI_LAST_TEXT.get(chat_id) == g_text:
+                    # Jika sudah tidak ada task aktif, cabut dari radar agar tidak terus dipolling
+                    if not has_tasks:
+                        GLOBAL_UI_MSG.pop(chat_id, None)
+                        GLOBAL_UI_PAGES.pop(chat_id, None)
+                        GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
+                        await database.remove_ui_state(chat_id)
+                    continue
+
+                GLOBAL_UI_LAST_TEXT[chat_id] = g_text
                 await edit_message(msg, g_text, g_markup, antiflood=False)
-                await asyncio.sleep(0.15) 
-            except Exception: pass
+
+                # Jika baru saja berubah menjadi idle (tidak ada task), hentikan polling untuk chat ini
+                if not has_tasks:
+                    GLOBAL_UI_MSG.pop(chat_id, None)
+                    GLOBAL_UI_PAGES.pop(chat_id, None)
+                    GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
+                    await database.remove_ui_state(chat_id)
+
+                await asyncio.sleep(0.3)
+            except Exception:
+                pass
