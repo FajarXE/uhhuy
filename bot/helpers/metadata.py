@@ -32,19 +32,6 @@ from bot.logger import LOGGER
 COVER_LOCKS = {}
 _COVER_SESSIONS = {}
 
-class SafeTempFile:
-    """Wrapper pelindung untuk mencegah error deepcopy pada objek file OS."""
-    def __init__(self, file_obj):
-        self.file_obj = file_obj
-    
-    def __deepcopy__(self, memo):
-        # Beritahu Python: "Jangan dikloning isinya, kembalikan saja referensi aslinya!"
-        return self
-        
-    @property
-    def name(self):
-        return self.file_obj.name
-
 try:
     from bot.helpers.lyrics.manager import lyrics_manager
 except ImportError:
@@ -1063,34 +1050,36 @@ async def _download_cover_with_headers(url: str, destination: str, proxy: str = 
         LOGGER.error(f"Sistem gagal saat inisialisasi download cover: {e}")
 
 async def create_cover_file(url: str, meta: dict, thumbnail=False, proxy: str = None): 
-    if not url: return './project-siesta.png'
-    if url.startswith("//"): url = "https:" + url
+    if not url:
+        return './project-siesta.png'
+    if url.startswith("//"):
+        url = "https:" + url
 
-    if 'cover_temp_obj' in meta and os.path.exists(meta['cover_temp_obj'].name):
-        return meta['cover_temp_obj'].name
-
-    temp_dir = meta.get('tempfolder', '.')
+    temp_dir = meta.get('tempfolder') or Config.DOWNLOAD_BASE_DIR
     os.makedirs(temp_dir, exist_ok=True)
     
-    temp_file = tempfile.NamedTemporaryFile(dir=temp_dir, suffix='.jpg', delete=True)
-    cover_path = temp_file.name
-    
-    # --- PERBAIKAN DI SINI ---
-    # Gunakan wrapper SafeTempFile agar lolos dari jebakan copy.deepcopy() di modul penyedia musik
-    meta['cover_temp_obj'] = SafeTempFile(temp_file)
-    # -------------------------
+    # Gunakan hash MD5 dari URL agar lagu-lagu dalam 1 album berbagi 1 file cover yang sama
+    url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()[:16]
+    prefix = "thumb" if thumbnail else "cover"
+    cover_path = os.path.join(temp_dir, f"{prefix}_{url_hash}.jpg")
 
-    lock = COVER_LOCKS.get(url)
-    if lock is None:
-        lock = asyncio.Lock()
-        COVER_LOCKS[url] = lock
+    # Jika file cover sudah diunduh oleh track sebelumnya dan valid, langsung kembalikan
+    if os.path.exists(cover_path) and os.path.getsize(cover_path) > 0:
+        return cover_path
+
+    # Kunci per path file agar worker lain menunggu hingga unduhan pertama selesai
+    lock = COVER_LOCKS.setdefault(cover_path, asyncio.Lock())
 
     try:
         async with lock:
-            await _download_cover_with_headers(url, cover_path, proxy=proxy)
+            # Cek sekali lagi di dalam lock (Double-Checked Locking)
+            # Jika worker pertama sudah selesai mengunduh, worker ke-2 dst tidak perlu mengunduh ulang!
+            if not (os.path.exists(cover_path) and os.path.getsize(cover_path) > 0):
+                await _download_cover_with_headers(url, cover_path, proxy=proxy)
     finally:
-        if url in COVER_LOCKS:
-            COVER_LOCKS.pop(url, None)
+        # Hapus lock dari memori hanya jika sedang tidak ada coroutine lain yang mengantre/mengunci
+        if not lock.locked():
+            COVER_LOCKS.pop(cover_path, None)
     
     if os.path.exists(cover_path) and os.path.getsize(cover_path) > 0:
         return cover_path
