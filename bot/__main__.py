@@ -325,16 +325,19 @@ async def shutdown_all_services():
         logging.warning(f"Main: Peringatan saat mengatur penutupan Aria2: {e}")
     # ---------------------------------------------
 
-    # --- PENAMBAHAN GRACEFUL SHUTDOWN CLOUD UPLOADER & METADATA ---
+    # --- PENAMBAHAN GRACEFUL SHUTDOWN CLOUD UPLOADER, METADATA & LYRICS ---
     try:
         from bot.modules.direct_uploader import close_upload_session
         tasks.append(close_upload_session())
         
         from bot.helpers.metadata import close_all_cover_sessions
         tasks.append(close_all_cover_sessions())
+
+        from bot.helpers.lyrics.apis import close_lyrics_session
+        tasks.append(close_lyrics_session())
     except Exception as e:
         logging.warning(f"Main: Peringatan penutupan layanan HTTP: {e}")
-    # ---------------------------------------------------------
+    # ----------------------------------------------------------------------
 
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
