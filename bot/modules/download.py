@@ -363,36 +363,39 @@ async def run_download_task(link: str, user: dict):
     
     # Menunggu slot pribadi kosong (User lain TIDAK akan terpengaruh)
     async with user_sem:
-        # Hapus pesan "Masuk Antrean" ketika tugas ini akhirnya mulai berjalan
         if notif_msg:
             try: await notif_msg.delete()
-            except: pass
+            except Exception: pass
             
-        task_successful = False
+        import hashlib
+        import bot.helpers.ui_manager as ui_manager
+        from bot.helpers.database.mongo_async import database
+
+        cancel_id = None
         
         try:
-            user['bot_msg'] = await send_message(user, 'Mempersiapkan tugas...')
+            # Langsung kirim pesan status awal tanpa perlu edit_message ganda
+            user['bot_msg'] = await send_message(user, '🚀 Starting task...')
             
+            # Fallback ID unik jika send_message gagal/None
+            msg_id_for_hash = user['bot_msg'].id if user.get('bot_msg') else f"{chat_id}_{user.get('r_id', time.time())}"
+            cancel_id = hashlib.md5(str(msg_id_for_hash).encode()).hexdigest()[:16]
+
             # --- PUSATKAN PESAN STATUS ---
-            # [FIX] MENGGUNAKAN ui_manager ALIH-ALIH utils
-            import bot.helpers.ui_manager as ui_manager
-            
-            if chat_id in ui_manager.GLOBAL_UI_MSG:
-                try: 
-                    from bot.tgclient import aio
-                    await aio.delete_messages(chat_id, ui_manager.GLOBAL_UI_MSG[chat_id].id)
-                except Exception: 
-                    pass
-            ui_manager.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
-            
-            # --- [SINKRONISASI KE MONGODB] ---
-            from bot.helpers.database.mongo_async import database
-            await database.save_ui_state(chat_id, user['bot_msg'].id, 1)
+            if user.get('bot_msg'):
+                old_radar = ui_manager.GLOBAL_UI_MSG.get(chat_id)
+                if old_radar and old_radar.id != user['bot_msg'].id:
+                    try: 
+                        await aio.delete_messages(chat_id, old_radar.id)
+                    except Exception: 
+                        pass
+                ui_manager.GLOBAL_UI_MSG[chat_id] = user['bot_msg']
+                if hasattr(ui_manager, 'GLOBAL_UI_LAST_TEXT'):
+                    ui_manager.GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
+                
+                # --- [SINKRONISASI KE MONGODB] ---
+                await database.save_ui_state(chat_id, user['bot_msg'].id, 1)
             # ---------------------------------
-            
-            import hashlib
-            import time
-            cancel_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
             
             if cancel_id in ui_manager.GLOBAL_CANCEL_DICT:
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
@@ -403,12 +406,12 @@ async def run_download_task(link: str, user: dict):
                     'action': 'Processing',
                     'type': 'Task',
                     'title': link,
-                    'since': '', 
-                    'progress_bar': '', 
-                    'percentage': '',
+                    'since': '0s', 
+                    'progress_bar': '□□□□□□□□□□□□', 
+                    'percentage': '0.00%',
                     'processed_label': 'Status',
                     'processed': 'Fetching metadata...',
-                    'speed': '',
+                    'speed': '0B/s',
                     'machine': 'Initializing',
                     'mode': '',
                     'cancel_id': cancel_id,
@@ -421,8 +424,6 @@ async def run_download_task(link: str, user: dict):
                     'is_queue': False
                 }
 
-            await edit_message(user['bot_msg'], '🚀 Starting task...')
-            
             # 1. Lindungi resolve_shortlink dengan tambahan pengaman
             try:
                 resolved = await asyncio.wait_for(resolve_shortlink(link), timeout=20.0)
@@ -436,16 +437,12 @@ async def run_download_task(link: str, user: dict):
             # --- [FITUR LIMIT UNDUHAN PENGGUNA GRATIS] ---
             from bot.settings import bot_set
             
-            # 1. Pastikan fitur limit diaktifkan lewat variabel server (.env)
             if Config.FREE_ALBUM_LIMIT is not None and Config.FREE_PLAYLIST_LIMIT is not None and Config.FREE_VIDEO_LIMIT is not None and Config.FREE_TRACK_LIMIT is not None and Config.FREE_WAIT_TIME is not None:
-                
-                # 2. Abaikan limit jika pengguna adalah Admin atau masuk dalam daftar VIP (Auth Users)
                 if user['user_id'] not in bot_set.admins and user['user_id'] not in bot_set.auth_users:
                     current_time = time.time()
                     link_lower = link.lower()
                     
-                    # 3. Identifikasi jenis tautan berdasarkan pola URL
-                    link_type = "track" # Default ke track (Tanpa Limit)
+                    link_type = "track"
                     if re.search(r'/(album|release|ep|master|albuminfo|sets|albums)(/|\?|$)', link_lower):
                         link_type = "album"
                     elif re.search(r'/(playlist|mix|chart|playlists)(/|\?|$)', link_lower) or "playlist" in link_lower:
@@ -457,19 +454,16 @@ async def run_download_task(link: str, user: dict):
                     elif re.search(r'/(track|tracks|song)(/|\?|$)', link_lower):
                         link_type = "track"
                     
-                    # 4. Bersihkan riwayat lama yang sudah melewati batas tunggu dinamis
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['album'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['album'] if current_time - ts < Config.FREE_WAIT_TIME]
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['playlist'] if current_time - ts < Config.FREE_WAIT_TIME]
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['artist'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['artist'] if current_time - ts < Config.FREE_WAIT_TIME]
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['video'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['video'] if current_time - ts < Config.FREE_WAIT_TIME]
-                    USER_DOWNLOAD_HISTORY[user['user_id']]['track'] = [ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']]['track'] if current_time - ts < Config.FREE_WAIT_TIME]
+                    for k_hist in ('album', 'playlist', 'artist', 'video', 'track'):
+                        USER_DOWNLOAD_HISTORY[user['user_id']][k_hist] = [
+                            ts for ts in USER_DOWNLOAD_HISTORY[user['user_id']][k_hist]
+                            if current_time - ts < Config.FREE_WAIT_TIME
+                        ]
 
-                    # Periksa apakah seluruh daftar riwayat (album, playlist, dll) sudah kosong
                     is_history_empty = all(not history_list for history_list in USER_DOWNLOAD_HISTORY[user['user_id']].values())
                     if is_history_empty:
                         USER_DOWNLOAD_HISTORY.pop(user['user_id'], None)
                     
-                    # 5. Cek aturan limitasi
                     if link_type == "artist":
                         if Config.FREE_ARTIST_LIMIT <= 0:
                             raise Exception("🔒 vip access required!\nDownloading Artist links is not available for free users. Please contact @monomars to donate and unlock unlimited access.")
@@ -526,86 +520,55 @@ async def run_download_task(link: str, user: dict):
                             USER_DOWNLOAD_HISTORY[user['user_id']]['track'].append(current_time)
             # =======================================================================
 
-            # --- [FIX SEMAPHORE] BATAS WAKTU DIPERPANJANG UNTUK PLAYLIST RAKSASA ---
             try:
-                # Memaksa agar tugas seberat apa pun tidak boleh berjalan lebih dari 6 jam (21600 detik)
                 await asyncio.wait_for(start_link(link, user), timeout=21600.0)
-                task_successful = True
             except asyncio.TimeoutError:
-                # Melemparkan error ke blok 'except Exception as e:' agar diproses dengan rapi
                 raise Exception("Tugas memakan waktu terlalu lama (> 6 Jam) dan diputus paksa oleh sistem agar tidak memblokir antrean.")
-            # -----------------------------------------------------------------------
                 
         except asyncio.CancelledError:
             LOGGER.info(f"Tugas untuk {user['user_id']} dibatalkan.")
-            
-            import bot.helpers.ui_manager as ui_manager
-            import hashlib
-            task_id_cancel = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-            
-            async with ui_manager.GLOBAL_STATE_LOCK:
-                ui_manager.GLOBAL_TASKS.pop(task_id_cancel, None)
+            if cancel_id:
+                async with ui_manager.GLOBAL_STATE_LOCK:
+                    ui_manager.GLOBAL_TASKS.pop(cancel_id, None)
             
             try:
-                # [FIX] Hapus import lokal di sini, gunakan import global yang sudah ada di atas file
                 await send_message(user, "🛑 **Tugas dibatalkan oleh pengguna.**", 'text')
-            except: pass
+            except Exception:
+                pass
             await asyncio.sleep(5) 
                 
         except Exception as e:
-            import traceback
             error_str = str(e).lower()
-            is_handled_error = False
-            
-            if "not available in any" in error_str or \
-               "vip access required" in error_str or \
-               "limit reached" in error_str or \
-               "maaf, tidak ada akun" in error_str or \
-               "notimplementederror" in error_str or \
-               "deezer tidak valid" in error_str or \
-               "tidak tersedia di semua" in error_str or \
-               "track not available" in error_str or \
-               "stream key kosong" in error_str or \
-               "region locked" in error_str or \
-               "link bandcamp tidak valid" in error_str or \
-               "link tidak valid" in error_str or \
-               "link tidak dikenali" in error_str or \
-               "halaman sistem" in error_str or \
-               "gagal mengambil profil artis" in error_str or \
-               "404" in error_str or \
-               "highresaudioerror" in error_str or \
-               "deezererror" in error_str or \
-               "bugserror" in error_str or \
-               "qobuz" in error_str or \
-               "unavailable" in error_str: 
-                is_handled_error = True
+            is_handled_error = any(k in error_str for k in [
+                "not available in any", "vip access required", "limit reached",
+                "maaf, tidak ada akun", "notimplementederror", "deezer tidak valid",
+                "tidak tersedia di semua", "track not available", "stream key kosong",
+                "region locked", "link bandcamp tidak valid", "link tidak valid",
+                "link tidak dikenali", "halaman sistem", "gagal mengambil profil artis",
+                "404", "highresaudioerror", "deezererror", "bugserror", "qobuz", "unavailable"
+            ])
             
             error_message = f"Tugas Gagal: {e}" if is_handled_error else f"Tugas Gagal: Terjadi error.\n`{e}`"
 
             if is_handled_error:
-                 LOGGER.warning(f"Download Task Ditolak (Region Lock / Handled): {e}")
+                LOGGER.warning(f"Download Task Ditolak (Region Lock / Handled): {e}")
             else:
-                 LOGGER.error(f"Error fatal di run_download_task: {e}\n{traceback.format_exc()}")
+                LOGGER.error(f"Error fatal di run_download_task: {e}\n{traceback.format_exc()}")
 
             admin_markup = None
             if "vip access required" in error_str or "limit reached" in error_str:
-                from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                from pyrogram.enums import ButtonStyle
                 admin_markup = InlineKeyboardMarkup([
                     [InlineKeyboardButton(Config.ADMIN_BTN_TEXT, url=Config.ADMIN_BTN_URL, style=ButtonStyle.PRIMARY)]
                 ])
 
-            import bot.helpers.ui_manager as ui_manager
-            import hashlib
-            task_id_err = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-            
-            async with ui_manager.GLOBAL_STATE_LOCK:
-                ui_manager.GLOBAL_TASKS.pop(task_id_err, None)
+            if cancel_id:
+                async with ui_manager.GLOBAL_STATE_LOCK:
+                    ui_manager.GLOBAL_TASKS.pop(cancel_id, None)
 
             try:
-                # [FIX] Hapus import lokal di sini
                 await send_message(user, error_message, type='text', markup=admin_markup)
-            except: pass 
+            except Exception:
+                pass 
                 
         finally:
             await cleanup(user)
@@ -615,37 +578,41 @@ async def run_download_task(link: str, user: dict):
                 USER_SEMAPHORES.pop(chat_id, None)
             
             try:
-                if 'bot_msg' in user:
-                    import hashlib
-                    import bot.helpers.ui_manager as ui_manager
-                    final_task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
-                    
+                if cancel_id:
                     async with ui_manager.GLOBAL_STATE_LOCK:
-                        ui_manager.GLOBAL_TASKS.pop(final_task_id, None)
-                        ui_manager.GLOBAL_CANCEL_DICT.discard(final_task_id)
+                        ui_manager.GLOBAL_TASKS.pop(cancel_id, None)
+                        ui_manager.GLOBAL_CANCEL_DICT.discard(cancel_id)
 
                     try:
-                        from bot.helpers.database.mongo_async import database
-                        await database.client.cancelled_tasks.delete_one({'_id': final_task_id})
-                    except: pass
-                    
-                    current_radar = ui_manager.GLOBAL_UI_MSG.get(chat_id)
-                    if current_radar and current_radar.id == user['bot_msg'].id:
-                        
-                        has_active_tasks = False
-                        async with ui_manager.GLOBAL_STATE_LOCK:
-                            for t in ui_manager.GLOBAL_TASKS.values():
-                                if t.get('user_id') == chat_id:
-                                    has_active_tasks = True
-                                    break
-                        
-                        if not has_active_tasks:
-                            try: await user['bot_msg'].delete()
-                            except: pass
-                            ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
-                            ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
-                            try: await database.remove_ui_state(chat_id)
-                            except: pass
+                        await database.client.cancelled_tasks.delete_one({'_id': cancel_id})
+                    except Exception:
+                        pass
+                
+                # Cek apakah user ini masih memiliki task lain yang sedang aktif
+                has_active_tasks = False
+                async with ui_manager.GLOBAL_STATE_LOCK:
+                    for t in ui_manager.GLOBAL_TASKS.values():
+                        if t.get('user_id') == chat_id:
+                            has_active_tasks = True
+                            break
+                
+                # Jika sudah TIDAK ada task aktif di chat ini, bersihkan radar aktif apa pun ID-nya!
+                if not has_active_tasks:
+                    current_radar = ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
+                    ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
+                    if hasattr(ui_manager, 'GLOBAL_UI_LAST_TEXT'):
+                        ui_manager.GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
+
+                    if current_radar:
+                        try: await aio.delete_messages(chat_id, current_radar.id)
+                        except Exception: pass
+
+                    if user.get('bot_msg') and (not current_radar or user['bot_msg'].id != current_radar.id):
+                        try: await user['bot_msg'].delete()
+                        except Exception: pass
+
+                    try: await database.remove_ui_state(chat_id)
+                    except Exception: pass
             except Exception as e:
                 LOGGER.debug(f"Pembersihan akhir gagal (Non-Fatal): {e}")
 
