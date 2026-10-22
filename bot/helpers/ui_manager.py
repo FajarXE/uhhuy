@@ -100,6 +100,7 @@ async def get_status_text(page=1, limit=5):
     text = ""
     buttons = []
     
+    import re
     for i, t in enumerate(tasks_page, start=start_idx + 1):
         # Trik Hyperlink agar HANYA teks Action & Type yang menjadi BIRU (Angka tetap putih)
         blue_text = f"[{t['action']} {t['type']}](https://t.me/{Config.BOT_USERNAME})"
@@ -107,7 +108,6 @@ async def get_status_text(page=1, limit=5):
         user_id_val = str(t.get('user_id', 'Unknown'))
         
         # Trik Zero-Width Space (\u200B) untuk memblokir auto-link Telegram
-        import re
         safe_title = str(t['title']).replace(".", ".\u200B").replace("://", "://\u200B").replace("/", "/\u200B")
         # Menyisipkan spasi tak terlihat di tengah deretan angka agar tidak dikira nomor telepon
         safe_title = re.sub(r'(\d{4,})', lambda m: m.group(1)[:2] + '\u200B' + m.group(1)[2:], safe_title)
@@ -139,8 +139,24 @@ async def get_status_text(page=1, limit=5):
             )
         ])
 
-    total_dl_raw = sum(t.get('speed_dl_raw', 0) for t in tasks)
-    total_ul_raw = sum(t.get('speed_ul_raw', 0) for t in tasks)
+    # Ambil kecepatan global Aria2c & Deezer cukup 1 kali saja di sini
+    try:
+        aria_stats = await get_aria2_global_stat()
+        aria2_dl = int(aria_stats.get('downloadSpeed', 0)) if aria_stats else 0
+        aria2_ul = int(aria_stats.get('uploadSpeed', 0)) if aria_stats else 0
+    except Exception:
+        aria2_dl = aria2_ul = 0
+
+    try:
+        from bot.helpers.deezer.dzapi import get_deezer_speed
+        dz_spd = get_deezer_speed()
+        if dz_spd > 0:
+            aria2_dl += dz_spd
+    except Exception:
+        pass
+
+    total_dl_raw = aria2_dl + sum(t.get('speed_dl_raw', 0) for t in tasks)
+    total_ul_raw = aria2_ul + sum(t.get('speed_ul_raw', 0) for t in tasks)
         
     global_dl = f"{get_readable_file_size(total_dl_raw)}/s" if total_dl_raw > 0 else "0B/s"
     global_ul = f"{get_readable_file_size(total_ul_raw)}/s" if total_ul_raw > 0 else "0B/s"
@@ -162,7 +178,8 @@ async def get_status_text(page=1, limit=5):
     if page < max_pages:
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"status_page_{page+1}", style=ButtonStyle.PRIMARY))
 
-    if nav_row: buttons.append(nav_row)
+    if nav_row:
+        buttons.append(nav_row)
     
     buttons.append([
         InlineKeyboardButton("♻️ Refresh", callback_data=f"status_refresh_{page}", style=ButtonStyle.SUCCESS),
@@ -170,7 +187,6 @@ async def get_status_text(page=1, limit=5):
     ])     
 
     return text, InlineKeyboardMarkup(buttons)
-
 
 async def progress_message(done, total, details):
     if not details or not details.get('msg'): return
@@ -235,18 +251,12 @@ async def progress_message(done, total, details):
     except Exception: 
         user_id_val = 0
         dest_mode = bot_set.upload_mode
-        
-    try:
-        stats = await get_aria2_global_stat()
-        speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
-        speed_ul = int(stats.get('uploadSpeed', 0)) if stats else 0
-    except Exception: 
-        speed_dl = speed_ul = 0
 
     machine = details.get('machine', 'Aria2c 1.37.0')
 
-    if action.lower() == 'upload': speed_ul += speed
-    elif action.lower() == 'download' and machine == 'Telegram API': speed_dl += speed
+    # Hanya catat speed_dl_raw jika bukan dari Aria2c (agar tidak terhitung ganda dengan aria2_dl global)
+    speed_dl_raw = speed if (action.lower() == 'download' and 'aria2' not in machine.lower()) else 0
+    speed_ul_raw = speed if action.lower() == 'upload' else 0
 
     async with GLOBAL_STATE_LOCK:
         if task_id not in GLOBAL_TASKS:
@@ -257,9 +267,9 @@ async def progress_message(done, total, details):
             'progress_bar': progress_bar, 'percentage': f"{percentage:.2f}%",
             'processed_label': progress_label, 'processed': f"{done_str} of {total_str}",
             'speed': speed_str, 'machine': machine, 'mode': dest_mode,
-            'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-            'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl,
-            'speed_ul_raw': speed_ul, 'user_id': user_id_val, 'timestamp': now
+            'cancel_id': task_id, 'dl_speed': f"{get_readable_file_size(speed_dl_raw)}/s",
+            'ul_speed': f"{get_readable_file_size(speed_ul_raw)}/s", 'speed_dl_raw': speed_dl_raw,
+            'speed_ul_raw': speed_ul_raw, 'user_id': user_id_val, 'timestamp': now
         })
 
 async def dedicated_ui_worker():
