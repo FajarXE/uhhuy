@@ -168,7 +168,6 @@ async def antiSpam(uid=None, cid=None, revoke=False) -> bool:
 async def standalone_local_progress(current, total, p_state: dict, user, text, task_type):
     from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS, GLOBAL_STATE_LOCK
     from bot.helpers.utils import get_readable_file_size, get_readable_time
-    from bot.helpers.aria2_helper import get_aria2_global_stat
     
     if p_state['cancel_id'] in GLOBAL_CANCEL_DICT:
         raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
@@ -188,12 +187,14 @@ async def standalone_local_progress(current, total, p_state: dict, user, text, t
                 try:
                     p_state['msg'] = await aio.send_message(p_state['chat_id'], f"🔄 Mengunggah file... `/cancel_{p_state['cancel_id']}`")
                     user['radar_msg'] = p_state['msg']
-                except: pass
+                except Exception:
+                    pass
 
-    if not p_state['msg']: return
+    if not p_state['msg']:
+        return
 
     now = time.time()
-    if now - p_state['last_update_time'] > 1.5 or current == total:
+    if now - p_state['last_update_time'] > 2.0 or current == total:
         diff = max(now - p_state['start_time'], 1)
         speed = current / diff
         percentage = (current / total) * 100 if total > 0 else 0
@@ -202,21 +203,8 @@ async def standalone_local_progress(current, total, p_state: dict, user, text, t
         progress_bar = "■" * filled + "□" * (12 - filled)
         
         dest_mode = bot_set.user_data.get(p_state['chat_id'], {}).get('upload_mode', bot_set.upload_mode)
-        
-        try:
-            stats = await get_aria2_global_stat()
-            speed_dl = int(stats.get('downloadSpeed', 0)) if stats else 0
-        except: speed_dl = 0
-            
-        try:
-            from bot.helpers.deezer.dzapi import get_deezer_speed
-            dz_spd = get_deezer_speed()
-            if dz_spd > 0: speed_dl += dz_spd
-        except: pass
-        
         file_title = os.path.basename(text) if isinstance(text, str) else "Unknown File"
         
-        # --- [FIX] UPDATE DICTIONARY DALAM LOCK MEMORI ---
         async with GLOBAL_STATE_LOCK:
             if p_state['cancel_id'] not in GLOBAL_TASKS:
                 GLOBAL_TASKS[p_state['cancel_id']] = {}
@@ -228,12 +216,11 @@ async def standalone_local_progress(current, total, p_state: dict, user, text, t
                 'processed': f"{get_readable_file_size(current)} of {get_readable_file_size(total)}",
                 'speed': f"{get_readable_file_size(speed)}/s", 'machine': "Telegram API",
                 'mode': dest_mode, 'cancel_id': p_state['cancel_id'],
-                'dl_speed': f"{get_readable_file_size(speed_dl)}/s", 'ul_speed': f"{get_readable_file_size(speed)}/s",
-                'speed_dl_raw': speed_dl, 'speed_ul_raw': speed,
+                'dl_speed': "0B/s", 'ul_speed': f"{get_readable_file_size(speed)}/s",
+                'speed_dl_raw': 0, 'speed_ul_raw': speed,
                 'user_id': p_state['msg'].chat.id if p_state['msg'] else 0,
                 'timestamp': now
             })
-        # -------------------------------------------------
         p_state['last_update_time'] = now
 
 # ==========================================================
