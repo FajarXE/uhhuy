@@ -163,6 +163,13 @@ async def start_services():
     logging.info("------------------------------------------------")
     logging.info("Main: Memulai Inisialisasi Layanan...")
     
+    # Jalankan Gunicorn secara terkontrol saat start_services dimulai
+    try:
+        from bot import start_gunicorn
+        start_gunicorn()
+    except Exception as e:
+        logging.warning(f"Main: Gagal menjalankan Gunicorn: {e}")
+
     try:
         from bot.helpers.aria2_helper import aria2_purge_all
         await aria2_purge_all()
