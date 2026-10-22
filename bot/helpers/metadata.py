@@ -991,58 +991,70 @@ async def get_cover_session(used_proxy=None):
         _COVER_SESSIONS[used_proxy] = aiohttp.ClientSession(headers=headers, connector=connector)
         
     return _COVER_SESSIONS[used_proxy]
-# ----------------------------------------------------
 
 async def _download_cover_with_headers(url: str, destination: str, proxy: str = None):
-    if not url: return
+    if not url:
+        return
     
     if url.startswith("//"):
         url = "https:" + url
         
     from bot.helpers.proxy_manager import proxy_manager
     used_proxy = await proxy_manager.get_proxy(proxy)
-    
-    # Jika menggunakan proksi HTTP biasa (bukan socks), pasang via argumen get()
     client_proxy = used_proxy if used_proxy and not used_proxy.startswith('socks') else None
+
+    # Daftar URL kandidat (Auto-Fallback khusus CDN Tidal jika 1280x1280 / 80x80 terkena HTTP 403)
+    candidate_urls = [url]
+    if "resources.tidal.com/images/" in url:
+        base_img_url = url.rsplit("/", 1)[0]
+        if url.endswith("/1280x1280.jpg"):
+            for res in ["1080x1080.jpg", "750x750.jpg", "640x640.jpg", "1080x720.jpg", "750x500.jpg", "320x320.jpg"]:
+                 candidate_urls.append(f"{base_img_url}/{res}")
+        elif url.endswith("/80x80.jpg"):
+            for res in ["160x160.jpg", "320x320.jpg", "160x107.jpg"]:
+                candidate_urls.append(f"{base_img_url}/{res}")
 
     try:
         dir_path = os.path.dirname(destination)
         os.makedirs(dir_path, exist_ok=True)
         
-        # MENGGUNAKAN GLOBAL SESSION (Menghemat Overhead Koneksi / Socket TIME_WAIT)
         session = await get_cover_session(used_proxy)
-        
         get_kwargs = {}
         if client_proxy:
             get_kwargs['proxy'] = client_proxy
             
-        # --- [FIX] Tambahkan Mekanisme Retry & Chunking ---
-        for attempt in range(3):
-            try:
-                async with session.get(url, timeout=30, **get_kwargs) as resp:
-                    if resp.status == 200:
-                        import aiofiles
-                        async with aiofiles.open(destination, 'wb') as f:
-                            # Baca data per bagian (64KB) agar aman untuk gambar raksasa dan RAM
-                            async for chunk in resp.content.iter_chunked(1024 * 64):
-                                await f.write(chunk)
-                                
-                        if used_proxy:
-                            await proxy_manager.report_success(used_proxy)
+        for target_url in candidate_urls:
+            for attempt in range(3):
+                try:
+                    async with session.get(target_url, timeout=30, **get_kwargs) as resp:
+                        if resp.status == 200:
+                            async with aiofiles.open(destination, 'wb') as f:
+                                async for chunk in resp.content.iter_chunked(1024 * 64):
+                                    await f.write(chunk)
+                                    
+                            if used_proxy:
+                                await proxy_manager.report_success(used_proxy)
+                            return  # Berhasil diunduh, langsung keluar
                             
-                        return  # Berhasil, keluar dari fungsi
-                    else:
-                        if used_proxy:
-                            await proxy_manager.report_fail(used_proxy)
-                        LOGGER.error(f"Gagal download cover: HTTP {resp.status} | URL: {url}")
-                        return  # HTTP Error (misal 404), tidak perlu diulang
-                        
-            except (aiohttp.ClientPayloadError, ConnectionResetError, asyncio.TimeoutError) as net_err:
-                LOGGER.warning(f"Koneksi terputus saat download cover (Percobaan {attempt + 1}/3): {net_err}")
-                await asyncio.sleep(2)  # Jeda 2 detik sebelum mencoba lagi
-            except Exception as e:
-                LOGGER.warning(f"Gagal download cover (Fatal) | URL: {url} | Error: {e}")
-                break  # Error jenis lain, hentikan retry
+                        elif resp.status in (403, 404):
+                            # Resolusi ini tidak tersedia di CDN, lanjut coba kandidat resolusi berikutnya
+                            break
+                        else:
+                            if resp.status >= 500 and used_proxy:
+                                await proxy_manager.report_fail(used_proxy)
+                            LOGGER.error(f"Gagal download cover: HTTP {resp.status} | URL: {target_url}")
+                            return
+                            
+                except (aiohttp.ClientPayloadError, ConnectionResetError, asyncio.TimeoutError) as net_err:
+                    LOGGER.warning(f"Koneksi terputus saat download cover (Percobaan {attempt + 1}/3): {net_err}")
+                    if attempt == 2 and used_proxy:
+                        await proxy_manager.report_fail(used_proxy)
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    LOGGER.warning(f"Gagal download cover (Fatal) | URL: {target_url} | Error: {e}")
+                    break
+
+        LOGGER.warning(f"Cover tidak ditemukan pada seluruh resolusi fallback untuk URL awal: {url}")
                 
     except Exception as e:
         if used_proxy:
