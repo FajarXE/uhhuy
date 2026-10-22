@@ -312,53 +312,37 @@ async def set_metadata(metadata:dict, user_id: int = None):
     if lyrics_manager and user_id:
         from bot.settings import bot_set
         
-        # [PERBAIKAN 1]: Baca ID sebagai integer DAN string agar tidak pernah kosong
+        # Baca ID sebagai integer maupun string secara aman tanpa memodifikasi isinya
         user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
         
-        # Cek status masing-masing tombol
-        embed_lyrics = user_settings.get('lyrics_status', False)
-        send_file_lyrics = user_settings.get('send_lyrics_file', False)
+        embed_lyrics = bool(user_settings.get('lyrics_status', False))
+        send_file_lyrics = bool(user_settings.get('send_lyrics_file', False))
         
         # Lakukan pencarian lirik JIKA minimal salah satu tombol aktif
         if embed_lyrics or send_file_lyrics:
             try:
-                # [PERBAIKAN 2]: HACK AMAN
-                # Simpan status asli, lalu paksa jadi True sesaat agar lyrics_manager 
-                # tidak membatalkan pencarian jika lyrics_status sedang OFF.
-                original_status = user_settings.get('lyrics_status')
-                user_settings['lyrics_status'] = True 
-                
-                # Cari lirik
-                lyrics_text = await lyrics_manager.fetch_lyrics(metadata, user_id)
-                
-                # Kembalikan status tombol ke bentuk aslinya
-                if original_status is not None:
-                    user_settings['lyrics_status'] = original_status
-                else:
-                    user_settings['lyrics_status'] = False
+                # Panggil dengan force=True karena validasi tombol sudah dilakukan di atas
+                lyrics_text = await lyrics_manager.fetch_lyrics(metadata, user_id, force=True)
 
-                # Jika lirik berhasil didapatkan:
                 if lyrics_text: 
                     # 1. Masukkan lirik ke dalam metadata audio (Hanya jika Status: ON)
                     if embed_lyrics:
                         metadata['lyrics'] = lyrics_text
                     else:
-                        metadata['lyrics'] = "" # Kosongkan agar tidak tertanam di lagu
+                        metadata['lyrics'] = ""
                         
-                    # 2. Buat file lirik terpisah (Hanya jika Send Lyrics File: ON)
+                    # 2. Buat file lirik terpisah secara asinkron (Hanya jika Send Lyrics File: ON)
                     if send_file_lyrics:
                         ext = ".lrc"
                         base_path = os.path.splitext(audio_path)[0]
                         lyrics_file_path = f"{base_path}{ext}"
                         
                         try:
-                            with open(lyrics_file_path, 'w', encoding='utf-8') as lf:
-                                lf.write(lyrics_text)
-                        except Exception as e:
-                            from bot.logger import LOGGER
+                            async with aiofiles.open(lyrics_file_path, 'w', encoding='utf-8') as lf:
+                                await lf.write(lyrics_text)
+                        except Exception:
                             LOGGER.exception("Gagal menulis file lirik fisik:")
-            except Exception as e:
-                from bot.logger import LOGGER
+            except Exception:
                 LOGGER.exception("Error fetching lyrics:")
 
     # --- 3. ROUTING KE HANDLER SPESIFIK ---
