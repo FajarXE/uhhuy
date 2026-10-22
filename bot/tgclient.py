@@ -1,4 +1,4 @@
-# [FILE: bot/tgclient.py]
+# [GANTI FILE: bot/tgclient.py]
 
 from config import Config
 from pyrogram import Client
@@ -28,10 +28,10 @@ class Bot(Client):
             bot_token=Config.TG_BOT_TOKEN,
             plugins=plugins,
             workdir=Config.WORK_DIR,
-            in_memory=False,
+            in_memory=True,      # Sesuai dengan mode RAM (mencegah SQLite lock)
             ipv6=False,
             workers=20,
-            sleep_threshold=30
+            sleep_threshold=5    # Diturunkan dari 30 ke 5 agar FloodWait segera tertangkap oleh edit_message
         )
 
     async def start(self):
