@@ -1,7 +1,6 @@
 # [GANTI SELURUH FILE: bot/helpers/lyrics/manager.py]
 
 import logging
-# --- PERBAIKAN: Impor GeniusAPI ---
 from bot.helpers.lyrics.apis import MusixmatchAPI, LRCLibAPI, GeniusAPI
 from bot.settings import bot_set
 
@@ -11,18 +10,20 @@ class LyricsManager:
     def __init__(self):
         self.musixmatch = MusixmatchAPI()
         self.lrclib = LRCLibAPI()
-        # --- PERBAIKAN: Inisialisasi Genius ---
         self.genius = GeniusAPI()
     
-    async def fetch_lyrics(self, metadata: dict, user_id: int):
+    async def fetch_lyrics(self, metadata: dict, user_id: int, force: bool = False):
         """
         Mengambil lirik berdasarkan pengaturan pengguna.
         Mengembalikan string lirik atau None.
         """
-        user_settings = bot_set.user_data.get(user_id, {})
+        user_settings = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
         
-        if not user_settings.get('lyrics_status', False):
-            return None
+        if not force:
+            embed_lyrics = bool(user_settings.get('lyrics_status', False))
+            send_file_lyrics = bool(user_settings.get('send_lyrics_file', False))
+            if not (embed_lyrics or send_file_lyrics):
+                return None
 
         provider = user_settings.get('lyrics_provider', 'lrclib') 
         l_type = user_settings.get('lyrics_type', 'plain') 
@@ -33,9 +34,9 @@ class LyricsManager:
         
         duration_raw = metadata.get('duration')
         try:
-            if duration_raw: duration = int(float(duration_raw))
-            else: duration = 0
-        except: duration = 0
+            duration = int(float(duration_raw)) if duration_raw else 0
+        except Exception:
+            duration = 0
 
         plain = None
         synced = None
@@ -48,7 +49,6 @@ class LyricsManager:
             elif provider == 'lrclib':
                 plain, synced = await self.lrclib.get_lyrics(title, artist, album, duration)
             elif provider == 'genius':
-                # --- PERBAIKAN: Panggil fungsi dari class Genius ---
                 plain, synced = await self.genius.get_lyrics(title, artist, album, duration)
             
             if l_type == 'synced':
