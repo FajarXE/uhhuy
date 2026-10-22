@@ -226,11 +226,11 @@ async def run_concurrent_tasks(tasks: list, update_details: dict, limit: int = N
                         'processed_label': "Processed_tasks", 'processed': f"{completed_tasks} of {total_tasks}",
                         'speed': speed_str, 'machine': "Aria2c 1.37.0", 'mode': dest_mode,
                         'cancel_id': batch_id, 'dl_speed': f"{get_readable_file_size(speed_dl)}/s",
-                        'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': speed_dl, 
-                        'speed_ul_raw': speed_ul, 'user_id': user_id, 'timestamp': time.time()
+                        'ul_speed': f"{get_readable_file_size(speed_ul)}/s", 'speed_dl_raw': 0, 
+                        'speed_ul_raw': 0, 'user_id': user_id, 'timestamp': time.time()
                     }
                 
-                for _ in range(10): 
+                for _ in range(25): 
                     if not is_running or batch_id in ui_module.GLOBAL_CANCEL_DICT:
                         break
                     await asyncio.sleep(0.1)
