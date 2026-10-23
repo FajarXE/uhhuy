@@ -1295,67 +1295,62 @@ def lyrics_button(user_settings: dict, user_id):
     status_style = ButtonStyle.SUCCESS if status else ButtonStyle.DANGER
     buttons.append([InlineKeyboardButton(text=status_text, callback_data=status_cb, style=status_style)])
 
-    # === [TAMBAHAN: TOMBOL BARU UNTUK MENGIRIM FILE LIRIK] ===
+    # === [TOMBOL UNTUK MENGIRIM FILE LIRIK] ===
     send_ly = user_settings.get('send_lyrics_file', False)
     send_ly_text = "Send Lyrics File: ON" if send_ly else "Send Lyrics File: OFF"
     send_ly_cb = "uset_sendly_off" if send_ly else "uset_sendly_on"
     
     send_ly_style = ButtonStyle.SUCCESS if send_ly else ButtonStyle.DANGER
     buttons.append([InlineKeyboardButton(text=send_ly_text, callback_data=send_ly_cb, style=send_ly_style)])
-    # =========================================================
+    # ==========================================
 
-    if status:
+    # Tampilkan pilihan Provider & Tipe jika salah satu (Embed ATAU Send File) menyala
+    if status or send_ly:
         prov = user_settings.get('lyrics_provider', 'lrclib')
         row_prov = []
         
-        # --- LOGIKA WARNA PROVIDER ---
-        # Jika dipilih -> Hijau, Jika tidak -> Default
-        
         style_lrclib = ButtonStyle.SUCCESS if prov == 'lrclib' else ButtonStyle.DEFAULT
         row_prov.append(InlineKeyboardButton(
-            text=f"{'' if prov=='lrclib' else ''}LRCLib", 
+            text="LRCLib", 
             callback_data="uset_ly_p_lrclib", 
             style=style_lrclib
         ))
         
         style_musix = ButtonStyle.SUCCESS if prov == 'musixmatch' else ButtonStyle.DEFAULT
         row_prov.append(InlineKeyboardButton(
-            text=f"{'' if prov=='musixmatch' else ''}Musixmatch", 
+            text="Musixmatch", 
             callback_data="uset_ly_p_musixmatch", 
             style=style_musix
         ))
         
         style_genius = ButtonStyle.SUCCESS if prov == 'genius' else ButtonStyle.DEFAULT
         row_prov.append(InlineKeyboardButton(
-            text=f"{'' if prov=='genius' else ''}Genius", 
+            text="Genius", 
             callback_data="uset_ly_p_genius", 
             style=style_genius
         ))
         
         buttons.append(row_prov)
         
-        # --- LOGIKA WARNA TIPE LYRICS ---
-        
         l_type = user_settings.get('lyrics_type', 'plain')
         row_type = []
         
         style_plain = ButtonStyle.SUCCESS if l_type == 'plain' else ButtonStyle.DEFAULT
         row_type.append(InlineKeyboardButton(
-            text=f"{'' if l_type=='plain' else ''}Plain (Text)", 
+            text="Plain (Text)", 
             callback_data="uset_ly_t_plain", 
             style=style_plain
         ))
         
         style_synced = ButtonStyle.SUCCESS if l_type == 'synced' else ButtonStyle.DEFAULT
         row_type.append(InlineKeyboardButton(
-            text=f"{'' if l_type=='synced' else ''}Synced (LRC)", 
+            text="Synced (LRC)", 
             callback_data="uset_ly_t_synced", 
             style=style_synced
         ))
         
         buttons.append(row_type)
 
-    # Tombol Back Biru
     buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="uset_back", style=ButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(buttons)
 
@@ -1439,22 +1434,32 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     
     user_dict = bot_set.user_data.get(user_id, {})
 
-    is_playlist = user_dict.get("PLAYLIST_ZIP", False)
+    def _get_zip_flag(upper_k, lower_k):
+        val = user_dict.get(upper_k)
+        if val is None:
+            val = user_dict.get(lower_k, False)
+        if isinstance(val, str):
+            return val.lower() in ['true', '1', 'on']
+        return bool(val)
+
+    is_playlist = _get_zip_flag("PLAYLIST_ZIP", "playlist_zip")
     style_playlist = ButtonStyle.SUCCESS if is_playlist else ButtonStyle.DANGER
     buttons.append([InlineKeyboardButton(text="PLAYLIST_ZIP", callback_data="zip_playlist", style=style_playlist)])
 
-    is_album = user_dict.get("ALBUM_ZIP", False)
+    is_album = _get_zip_flag("ALBUM_ZIP", "album_zip")
     style_album = ButtonStyle.SUCCESS if is_album else ButtonStyle.DANGER
     buttons.append([InlineKeyboardButton(text="ALBUM_ZIP", callback_data="zip_album", style=style_album)])
 
-    is_poster = user_dict.get("ART_POSTER", False)
+    is_artist = _get_zip_flag("ARTIST_ZIP", "artist_zip")
+    style_artist = ButtonStyle.SUCCESS if is_artist else ButtonStyle.DANGER
+    buttons.append([InlineKeyboardButton(text="ARTIST_ZIP", callback_data="zip_artist", style=style_artist)])
+
+    is_poster = _get_zip_flag("ART_POSTER", "art_poster")
     style_poster = ButtonStyle.SUCCESS if is_poster else ButtonStyle.DANGER
     
-    # Tambahkan status UI untuk VIDEO_ZIP
-    is_video = user_dict.get("VIDEO_ZIP", False)
+    is_video = _get_zip_flag("VIDEO_ZIP", "video_zip")
     style_video = ButtonStyle.SUCCESS if is_video else ButtonStyle.DANGER
     
-    # Letakkan ART_POSTER dan VIDEO_ZIP berdampingan
     buttons.append([
         InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster", style=style_poster),
         InlineKeyboardButton(text="VIDEO_ZIP", callback_data="zip_video", style=style_video)
