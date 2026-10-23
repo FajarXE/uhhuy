@@ -1317,8 +1317,6 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     curr_settings = bot_set.user_data.get(user_id, {})
     
     # --- PERBAIKAN LOGIKA BACA DATA ZIP ---
-    # Prioritas: Cek Key HURUF BESAR, jika None baru cek huruf kecil
-    
     # Playlist
     p_zip = curr_settings.get("PLAYLIST_ZIP")
     if p_zip is None: p_zip = curr_settings.get("playlist_zip", False)
@@ -1327,10 +1325,6 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     a_zip = curr_settings.get("ALBUM_ZIP")
     if a_zip is None: a_zip = curr_settings.get("album_zip", False)
     
-    # Artist
-    ar_zip = curr_settings.get("ARTIST_ZIP")
-    if ar_zip is None: ar_zip = curr_settings.get("artist_zip", False)
-    
     # Poster
     po_zip = curr_settings.get("ART_POSTER")
     if po_zip is None: po_zip = curr_settings.get("art_poster", False)
@@ -1338,7 +1332,6 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     # Video
     v_zip = curr_settings.get("VIDEO_ZIP")
     if v_zip is None: v_zip = curr_settings.get("video_zip", False)
-    
     # --- END PERBAIKAN ---
 
     # Ambil Pengaturan Cloud Upload
@@ -1348,7 +1341,7 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
     t_gf = "✅" if curr_settings.get('gofile_token') else "❌"
     t_bh = "✅" if curr_settings.get('buzzheavier_token') else "❌"
     t_vk = "✅" if curr_settings.get('viking_token') else "❌"
-    t_tf = "✅ (No Token Needed)" # Langsung menyala karena anonim
+    t_tf = "✅ (No Token Needed)"
     t_pd = "✅" if curr_settings.get('pixeldrain_token') else "❌"
     t_tb = "✅" if curr_settings.get('terabox_cookie') else "❌"
 
@@ -1356,8 +1349,7 @@ async def start_user_setting(client: Client, m: Message, edit=False, users_: dic
 <blockquote>
 <b>📦 ZIP SETTINGS</b>
 PLAYLIST : {p_zip} | ALBUM : {a_zip}
-ARTIST : {ar_zip} | POSTER : {po_zip}
-VIDEO : {v_zip}
+POSTER : {po_zip} | VIDEO : {v_zip}
 
 <b>☁️ UPLOAD MODE: {upload_mode}</b>
 Gofile: {t_gf} | Buzz: {t_bh}
@@ -2441,20 +2433,6 @@ async def uset_zip(self, query):
         bot_set.user_data[user_id].update(data_saved)
         await database.save_user_settings(user_id, data_saved)
         await query.answer(f"Album zip: {new_val}")
-        return await start_user_setting(self, query.message, True, users_)
-    
-    # Toggle Artist Zip
-    if data == "artist":
-        current = user_dict.get("ARTIST_ZIP")
-        if current is None:
-            current = user_dict.get("artist_zip", False)
-            
-        new_val = not current
-        data_saved = {"ARTIST_ZIP": new_val}
-        
-        bot_set.user_data[user_id].update(data_saved)
-        await database.save_user_settings(user_id, data_saved)
-        await query.answer(f"Artist zip: {new_val}")
         return await start_user_setting(self, query.message, True, users_)
     
     # Toggle Art Poster
