@@ -173,7 +173,7 @@ class TeraboxStrategy(CloudStrategy):
         return "\n".join(uploaded_links)
 
 async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, mode: str):
-    user_id = user['user_id']  # Editor sekarang tahu bahwa 'user_id' memang valid ada di dalam 'user'
+    user_id = user['user_id']
     user_data = bot_set.user_data.get(user_id, {})
     mode = mode.title() if mode else 'Telegram'
     
@@ -213,22 +213,26 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         "terabox": {"cookie": user_data.get('terabox_cookie')}
     }
     
-    # 2. Normalisasi Input (Menyatukan Logika List, File Tunggal, dan Direktori)
+    # 2. Normalisasi Input (Menyatukan Logika List, File Tunggal, dan Direktori + Subfolder)
     files_to_upload = []
-    is_directory_upload = False  # <-- FLAG PENDETEKSI FOLDER
+    is_directory_upload = False
     
     if isinstance(filepath, list):
-        files_to_upload = filepath
-        base_path = os.path.dirname(filepath[0])
+        files_to_upload = [f for f in filepath if os.path.exists(f)]
+        base_path = os.path.dirname(files_to_upload[0]) if files_to_upload else ""
     elif os.path.isfile(filepath):
         files_to_upload = [filepath]
         base_path = os.path.dirname(filepath)
     elif os.path.isdir(filepath):
-        is_directory_upload = True  # <-- TANDAI BAHWA INPUT ASLINYA ADALAH FOLDER UTUH
-        files_to_upload = [os.path.join(filepath, f) for f in os.listdir(filepath) if os.path.isfile(os.path.join(filepath, f))]
+        is_directory_upload = True
+        for root, dirs, files in os.walk(filepath):
+            dirs.sort()
+            for f in sorted(files):
+                if not f.endswith('.aria2'):
+                    files_to_upload.append(os.path.join(root, f))
         base_path = filepath
     else:
-        base_path = os.path.dirname(filepath.rstrip('/'))
+        base_path = os.path.dirname(str(filepath).rstrip('/'))
 
     if not files_to_upload:
         return None
@@ -237,7 +241,7 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
     uploader = DirectUpload(listener=listener, path=base_path)
 
     details = None
-    if 'bot_msg' in user:
+    if user.get('bot_msg'):
         task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         details = {
             'msg': user['bot_msg'], 'title': metadata.get('title', 'Unknown'),
@@ -252,12 +256,12 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         for attempt in range(3):
             try:
                 await strategy.prepare_folder(uploader, token, folder_name)
-                break # Sukses, keluar dari loop
+                break
             except Exception as e:
                 if attempt == 2:
                     LOGGER.warning(f"{mode} Folder API gagal setelah 3x percobaan: {e}")
                 else:
-                    delay = 2 * (2 ** attempt) # 2s, 4s
+                    delay = 2 * (2 ** attempt)
                     LOGGER.warning(f"{mode} Folder API Error. Retry {attempt+1} dalam {delay}s...")
                     await asyncio.sleep(delay)
         
@@ -269,38 +273,43 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         if mode == 'Transferit':
             # Gunakan mode "upload 1 folder sekaligus" HANYA jika input aslinya memang folder
             if total_files > 1 and is_directory_upload:
-                if details: details['title'] = f"Mengunggah Folder: {folder_name}"
+                if details:
+                    details['title'] = f"Mengunggah Folder: {folder_name}"
                 res = await uploader.upload(None, 0, upload_type='transferit', details=details)
                 if res:
                     uploaded_links.append(list(res.values())[0])
             else:
-                # Eksekusi satu per satu jika hanya 1 track satuan atau list (Track + Lirik)
                 for index, file_part in enumerate(files_to_upload, 1):
-                    filename = os.path.basename(file_part)
-                    if details: details['title'] = filename
-                    res = await uploader.upload(filename, 0, upload_type='transferit', details=details)
+                    rel_filename = os.path.relpath(file_part, base_path)
+                    display_name = os.path.basename(file_part)
+                    if details:
+                        details['title'] = display_name
+                    res = await uploader.upload(rel_filename, 0, upload_type='transferit', details=details)
                     
                     if res:
                         uploaded_links.append(list(res.values())[0])
         else:
-            # Mode cloud lain (Gofile dkk) tetap menggunakan perulangan satu per satu
+            # Mode cloud lain (Gofile, Buzzheavier, Vikingfiles, Pixeldrain, Terabox)
             for index, file_part in enumerate(files_to_upload, 1):
-                filename = os.path.basename(file_part)
+                rel_filename = os.path.relpath(file_part, base_path)
+                display_name = os.path.basename(file_part)
                 if details:
-                    details['title'] = f"[{index}/{total_files}] {filename}" if total_files > 1 else filename
+                    details['title'] = f"[{index}/{total_files}] {display_name}" if total_files > 1 else display_name
                 
                 res = None
                 for attempt in range(3):
                     try:
-                        res = await uploader.upload(filename, 0, details=details, **upload_kwargs)
+                        res = await uploader.upload(rel_filename, 0, details=details, **upload_kwargs)
                         break 
                     except asyncio.CancelledError:
                         raise
                     except Exception as e:
-                        if "DIBATALKAN_PENGGUNA" in str(e): raise
-                        if attempt == 2: raise e 
+                        if "DIBATALKAN_PENGGUNA" in str(e):
+                            raise
+                        if attempt == 2:
+                            raise e 
                         delay = 2 * (2 ** attempt)
-                        LOGGER.warning(f"Upload {filename} gagal ({e}). Retry {attempt+1} dalam {delay}s...")
+                        LOGGER.warning(f"Upload {display_name} gagal ({e}). Retry {attempt+1} dalam {delay}s...")
                         await asyncio.sleep(delay)
 
                 if res: 
@@ -313,6 +322,8 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         return res
 
     # --- PENANGANAN ERROR SPESIFIK & TRACEBACK ---
+    except asyncio.CancelledError:
+        raise
     except asyncio.TimeoutError:
         LOGGER.error(f"[UPLOAD TIMEOUT] Cloud API {mode} terlalu lambat merespons.")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> Request Timeout.", 'text')
@@ -323,7 +334,6 @@ async def upload_to_cloud_handler(filepath, user: UserDetails, metadata: dict, m
         LOGGER.error(f"[UPLOAD KEY ERROR] Struktur respon API berubah: {e}")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> Respons API tidak terduga (Kehilangan key {e}).", 'text')
     except Exception as e:
-        # Menggunakan .exception() agar traceback penuh tercetak di log
         LOGGER.exception(f"[UPLOAD FATAL ERROR] Exception tidak terduga di Cloud Handler: {e}")
         await send_message(user, f"⚠️ <b>{mode} Error:</b> {e}", 'text')
     
@@ -424,7 +434,7 @@ async def artist_upload(metadata: dict, user: UserDetails):
     handle_lyrics_files(metadata.get('folderpath'), user_id)
 
     if is_zip and not metadata.get('zip_path'):
-        if 'bot_msg' in user: 
+        if user.get('bot_msg'): 
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
             await progress_message(0, 1, up_zip)
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
@@ -461,10 +471,12 @@ async def artist_upload(metadata: dict, user: UserDetails):
             if isinstance(zip_files, str): zip_files = [zip_files]
             for item in zip_files: 
                 details = None
-                if 'bot_msg' in user:
+                if user.get('bot_msg'):
                     task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
                     details = {'msg': user['bot_msg'], 'title': os.path.basename(item), 'type': 'Zip Archive', 'action': 'Upload', 'machine': 'Telegram API', 'task_id': task_id}
                 await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata, progress=tg_progress_callback, progress_args=(details,))
+        else:
+            await batch_telegram_upload(metadata, user)
     else:
         rclone_link, index_link = await rclone_upload(user, metadata.get('zip_path') if is_zip else metadata['folderpath'])
         if show_poster and metadata.get('poster_msg'):
