@@ -217,6 +217,13 @@ class MongoDB:
             await self.client.ui_states.delete_one({'_id': chat_id})
         except Exception:
             pass
+
+    def close(self):
+        """Menutup koneksi pool AsyncIOMotorClient dengan aman saat bot shutdown"""
+        if self._db is not None:
+            self._db.close()
+            self._db = None
+            self._client = None
     # ----------------------------------------
 
 database = MongoDB()
