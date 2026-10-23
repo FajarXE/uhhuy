@@ -1450,16 +1450,13 @@ def usetting_button(user_id: int = None) -> InlineKeyboardMarkup:
     style_album = ButtonStyle.SUCCESS if is_album else ButtonStyle.DANGER
     buttons.append([InlineKeyboardButton(text="ALBUM_ZIP", callback_data="zip_album", style=style_album)])
 
-    is_artist = _get_zip_flag("ARTIST_ZIP", "artist_zip")
-    style_artist = ButtonStyle.SUCCESS if is_artist else ButtonStyle.DANGER
-    buttons.append([InlineKeyboardButton(text="ARTIST_ZIP", callback_data="zip_artist", style=style_artist)])
-
     is_poster = _get_zip_flag("ART_POSTER", "art_poster")
     style_poster = ButtonStyle.SUCCESS if is_poster else ButtonStyle.DANGER
     
     is_video = _get_zip_flag("VIDEO_ZIP", "video_zip")
     style_video = ButtonStyle.SUCCESS if is_video else ButtonStyle.DANGER
     
+    # Letakkan ART_POSTER dan VIDEO_ZIP berdampingan
     buttons.append([
         InlineKeyboardButton(text="ART_POSTER", callback_data="zip_poster", style=style_poster),
         InlineKeyboardButton(text="VIDEO_ZIP", callback_data="zip_video", style=style_video)
