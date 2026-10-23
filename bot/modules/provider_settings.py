@@ -73,6 +73,14 @@ try:
 except ImportError:
     LOGGER.warning("ProviderSettings: Gagal mengimpor genie_manager.")
     genie_manager = None
+try:
+    from ..helpers.highresaudio.manager import highresaudio_manager
+except ImportError:
+    highresaudio_manager = None
+try:
+    from ..helpers.audiomack.manager import audiomack_manager
+except ImportError:
+    audiomack_manager = None
 
 
 @Client.on_callback_query(filters.regex(pattern=r"^providerPanel"))
@@ -924,3 +932,22 @@ async def genie_quality_cb(c, cb:CallbackQuery):
         genie_manager.quality = to_set
         await database.set_variable('GENIE_QUALITY', to_set)
         await genie_cb(c, cb)
+
+
+#----------------
+# HIGHRESAUDIO & AUDIOMACK (GLOBAL ADMIN)
+#----------------
+@Client.on_callback_query(filters.regex(pattern=r"^hraP"))
+async def highresaudio_admin_cb(c, cb: CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        if not highresaudio_manager or not highresaudio_manager.clients:
+            return await edit_message(cb.message, "Layanan HighResAudio tidak aktif.")
+        await edit_message(cb.message, "**HIGHRESAUDIO PANEL (GLOBAL)**\nFormat default: FLAC (Lossless)", markup=hra_button())
+
+@Client.on_callback_query(filters.regex(pattern=r"^amackP"))
+async def audiomack_admin_cb(c, cb: CallbackQuery):
+    if await check_user(cb.from_user.id, restricted=True):
+        quality = {"HQ": "HQ (Default Server)✅"}
+        if not audiomack_manager:
+            return await edit_message(cb.message, "Layanan Audiomack tidak aktif.")
+        await edit_message(cb.message, "**AUDIOMACK PANEL (GLOBAL)**", markup=amack_button(quality))
