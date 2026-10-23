@@ -231,7 +231,7 @@ async def start_services():
     logging.info(f"BOT BERHASIL START SEBAGAI: @{me.username}")
     logging.info(f"------------------------------------------------")
 
-    # --- [FIX] PERBAIKAN IMPORT utils KE ui_manager ---
+    # --- [FIX] PEMBERSIHAN RADAR UI LAMA SAAT STARTUP ---
     logging.info("Main: Memuat State Radar UI dari Database...")
     try:
         ui_states = await database.load_all_ui_states()
@@ -242,40 +242,30 @@ async def start_services():
             msg_id = data['message_id']
             page = data['page']
             try:
-                # 1. Siapkan teks status kosong
+                # 1. Siapkan teks status kosong (idle)
                 g_text, g_markup = await ui_manager.get_status_text(page=page)
                 
-                # 2. BLIND EDIT (Paksa edit tanpa mengambil/membaca pesan dulu)
-                msg = None
+                # 2. Edit pesan lama menjadi status kosong
                 try:
-                    msg = await aio.edit_message_text(chat_id, msg_id, g_text, reply_markup=g_markup)
+                    await aio.edit_message_text(chat_id, msg_id, g_text, reply_markup=g_markup)
                 except Exception as edit_err:
-                    if "MESSAGE_NOT_MODIFIED" in str(edit_err).upper():
-                        # Jika gagal karena teksnya sama persis (sudah kosong), buat wujud pesan bohongan (Dummy)
-                        class DummyMsg:
-                            def __init__(self, c_id, m_id):
-                                self.chat = type('DummyChat', (), {'id': c_id})()
-                                self.id = m_id
-                                self._client = None # Memaksa bot menggunakan fallback edit
-                        msg = DummyMsg(chat_id, msg_id)
-                    else:
-                        raise edit_err # Lempar error jika pesan memang benar-benar dihapus oleh user
+                    if "MESSAGE_NOT_MODIFIED" not in str(edit_err).upper():
+                        raise edit_err
                 
-                # 3. Masukkan ke memori RAM
-                if msg:
-                    ui_manager.GLOBAL_UI_MSG[chat_id] = msg
-                    ui_manager.GLOBAL_UI_PAGES[chat_id] = page
-                    restored_count += 1
-                    logging.info(f"Main: Berhasil me-refresh Radar {msg_id} di chat {chat_id}.")
+                # 3. Cabut dari DB karena saat baru startup belum ada task yang berjalan
+                await database.remove_ui_state(chat_id)
+                restored_count += 1
+                logging.info(f"Main: Berhasil mereset Radar lama {msg_id} di chat {chat_id} ke status idle.")
+                await asyncio.sleep(0.3)
                     
             except Exception as e:
                 logging.warning(f"Main: Pesan Radar {msg_id} gagal diedit ({e}), mencabut dari DB.")
                 await database.remove_ui_state(chat_id)
         
         if restored_count > 0:
-            logging.info(f"Main: Berhasil memulihkan total {restored_count} panel Radar UI dari memori.")
+            logging.info(f"Main: Berhasil mereset total {restored_count} panel Radar UI lama.")
         else:
-            logging.info("Main: Tidak ada panel Radar UI yang dipulihkan.")
+            logging.info("Main: Tidak ada panel Radar UI yang perlu direset.")
             
     except Exception as e:
         logging.error(f"Main: Gagal memuat Radar UI (Fatal): {e}")
@@ -352,21 +342,12 @@ async def shutdown_all_services():
     # --- PENAMBAHAN GRACEFUL SHUTDOWN DATABASE ---
     try:
         from bot.helpers.database.mongo_async import database
-        import inspect
-        
-        # Opsi 1: Jika objek database mengekspos client Motor langsung
-        if hasattr(database, 'client'):
-            database.client.close()
+        if hasattr(database, 'close'):
+            database.close()
             logging.info("Main: Koneksi pool MongoDB berhasil ditutup dengan aman.")
-            
-        # Opsi 2: Jika objek database memiliki metode close() khusus
-        elif hasattr(database, 'close'):
-            if inspect.iscoroutinefunction(database.close):
-                await database.close()
-            else:
-                database.close()
+        elif getattr(database, '_db', None) is not None:
+            database._db.close()
             logging.info("Main: Koneksi pool MongoDB berhasil ditutup dengan aman.")
-            
     except Exception as e:
         logging.error(f"Main: Peringatan saat menutup koneksi MongoDB: {e}")
     # ---------------------------------------------
