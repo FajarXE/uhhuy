@@ -111,28 +111,31 @@ async def aria2_download(url, filepath, details=None):
         if not file_name.split('.')[-1].isdigit():
             LOGGER.info(f"Aria2 Memulai Unduhan: {file_name} (GID: {gid})")
         
+        cancel_id = None
         if details:
-            details['task_id'] = gid
-            # Prioritaskan display_title kustom agar ekstensi target (WAV/AIFF) yang muncul di radar
+            import hashlib
+            if details.get('msg'):
+                cancel_id = hashlib.md5(str(details['msg'].id).encode()).hexdigest()[:16]
+            else:
+                cancel_id = details.get('task_id') or gid
+            details['task_id'] = cancel_id
+            details['aria2_gid'] = gid
             details['title'] = details.get('display_title') or file_name
             details['type'] = 'Download'
 
-        # --- [PERBAIKAN] Tambahkan ARIA2_SECRET ke params TellStatus ---
         payload_status = {
             "jsonrpc": "2.0",
             "id": "bot_status",
             "method": "aria2.tellStatus",
             "params": [ARIA2_SECRET, gid]
         }
-        # ---------------------------------------------------------------
         
         while True:
-            if details and 'task_id' in details:
-                from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT
-                if details['task_id'] in GLOBAL_CANCEL_DICT:
-                    await aria2_cancel(gid) 
-                    LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
-                    return False
+            from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT
+            if gid in GLOBAL_CANCEL_DICT or (cancel_id and cancel_id in GLOBAL_CANCEL_DICT):
+                await aria2_cancel(gid)
+                LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
+                return False
 
             try:
                 async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
@@ -159,11 +162,10 @@ async def aria2_download(url, filepath, details=None):
                 else:
                     from bot.helpers.ui_manager import GLOBAL_TASKS
                     import time
-                    task_id = details.get('task_id')
-                    if task_id and task_id in GLOBAL_TASKS:
-                        GLOBAL_TASKS[task_id]['timestamp'] = time.time()
-                        GLOBAL_TASKS[task_id]['action'] = 'Connecting'
-                        GLOBAL_TASKS[task_id]['processed'] = 'Mengalokasikan file...'
+                    if cancel_id and cancel_id in GLOBAL_TASKS:
+                        GLOBAL_TASKS[cancel_id]['timestamp'] = time.time()
+                        GLOBAL_TASKS[cancel_id]['action'] = 'Connecting'
+                        GLOBAL_TASKS[cancel_id]['processed'] = 'Mengalokasikan file...'
             
             if state == "complete":
                 ACTIVE_DOWNLOADS.pop(gid, None)
