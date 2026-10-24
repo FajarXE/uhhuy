@@ -45,14 +45,20 @@ async def download_file(url, path, retries=3, timeout=30, details=None):
             if success and os.path.exists(path) and os.path.getsize(path) > 0:
                 return None 
             else:
-                LOGGER.warning(f"Aria2 attempt {attempt} gagal/dibatalkan...")
-                
+                LOGGER.warning(f"Aria2 attempt {attempt} gagal...")
                 try:
                     if os.path.exists(path): os.remove(path)
                     if os.path.exists(f"{path}.aria2"): os.remove(f"{path}.aria2")
                 except Exception as e:
                     LOGGER.debug(f"Gagal menghapus file sisa Aria2 '{path}': {e}")
-                
+
+        except asyncio.CancelledError:
+            try:
+                if os.path.exists(path): os.remove(path)
+                if os.path.exists(f"{path}.aria2"): os.remove(f"{path}.aria2")
+            except Exception:
+                pass
+            raise
         except asyncio.TimeoutError:
             LOGGER.warning(f"Download Timeout pada percobaan {attempt}")
         except aiohttp.ClientError as e:
