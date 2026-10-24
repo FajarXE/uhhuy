@@ -169,7 +169,7 @@ class DirectUpload:
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
-                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                        await edit_message(details['msg'], "🛑 **Process Cancelled by User.**", None, False)
                 except Exception:
                     pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
@@ -253,7 +253,7 @@ class DirectUpload:
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
-                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                        await edit_message(details['msg'], "🛑 **Process Cancelled by User.**", None, False)
                 except Exception:
                     pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
@@ -320,7 +320,7 @@ class DirectUpload:
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
-                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                        await edit_message(details['msg'], "🛑 **Process Cancelled by User.**", None, False)
                 except Exception:
                     pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
@@ -388,7 +388,7 @@ class DirectUpload:
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
-                        await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                        await edit_message(details['msg'], "🛑 **Process Cancelled by User.**", None, False)
                 except Exception:
                     pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
@@ -651,7 +651,7 @@ class DirectUpload:
                     try:
                         from bot.helpers.message import edit_message
                         if 'msg' in details:
-                            await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
+                            await edit_message(details['msg'], "🛑 **Process Cancelled by User.**", None, False)
                     except Exception:
                         pass
                     raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
