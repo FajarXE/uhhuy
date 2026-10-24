@@ -62,10 +62,10 @@ class ProgressFileWrapper(io.IOBase):
         
     def seek(self, offset, whence=io.SEEK_SET):
         return self.file.seek(offset, whence)
-    # ---------------------------------------------------------
     
     def close(self):
-        self.file.close()
+        if hasattr(self, 'file') and self.file and not self.file.closed:
+            self.file.close()
 
     def readable(self):
         return True
