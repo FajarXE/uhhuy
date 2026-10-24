@@ -363,7 +363,7 @@ async def album_upload(metadata: dict, user: UserDetails):
 
     if is_zip and not metadata.get('zip_path'):
         LOGGER.info("[DEBUG ALBUM] ZIP aktif tapi path kosong. Memulai Zipping...")
-        if 'bot_msg' in user: 
+        if user.get('bot_msg'): 
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
             await progress_message(0, 1, up_zip)
             
@@ -403,7 +403,7 @@ async def album_upload(metadata: dict, user: UserDetails):
             if isinstance(zip_files, str): zip_files = [zip_files] 
             for item in zip_files: 
                 details = None
-                if 'bot_msg' in user:
+                if user.get('bot_msg'):
                     task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
                     details = {'msg': user['bot_msg'], 'title': os.path.basename(item), 'type': 'Zip Archive', 'action': 'Upload', 'machine': 'Telegram API', 'task_id': task_id}
                 await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata, progress=tg_progress_callback, progress_args=(details,))
@@ -497,7 +497,7 @@ async def playlist_upload(metadata: dict, user: UserDetails):
     handle_lyrics_files(metadata.get('folderpath'), user_id)
 
     if is_zip and not metadata.get('zip_path'):
-        if 'bot_msg' in user: 
+        if user.get('bot_msg'): 
             up_zip = {'action': 'Zipping', 'type': metadata.get('type', 'Task'), 'title': metadata.get('title', 'Unknown'), 'msg': user['bot_msg']}
             await progress_message(0, 1, up_zip)
         metadata['zip_path'] = await zip_handler(metadata['folderpath'])
@@ -533,7 +533,7 @@ async def playlist_upload(metadata: dict, user: UserDetails):
             if isinstance(zip_files, str): zip_files = [zip_files]
             for item in zip_files: 
                 details = None
-                if 'bot_msg' in user:
+                if user.get('bot_msg'):
                     task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
                     details = {'msg': user['bot_msg'], 'title': os.path.basename(item), 'type': 'Zip Archive', 'action': 'Upload', 'machine': 'Telegram API', 'task_id': task_id}
                 await send_message(user, item, 'doc', caption=await create_simple_text(metadata, user), meta=metadata, progress=tg_progress_callback, progress_args=(details,))
@@ -758,7 +758,7 @@ async def telegram_upload(track: dict, user: UserDetails, batch_mode: bool = Fal
         raise FileNotFoundError(f"File not found: {filepath}")
         
     details = None
-    if 'bot_msg' in user:
+    if user.get('bot_msg'):
         task_id = hashlib.md5(str(user['bot_msg'].id).encode()).hexdigest()[:16]
         task_type = meta.get('type')
         if not task_type: task_type = 'Track'
