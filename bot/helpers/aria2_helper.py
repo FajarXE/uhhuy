@@ -134,8 +134,9 @@ async def aria2_download(url, filepath, details=None):
             from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT
             if gid in GLOBAL_CANCEL_DICT or (cancel_id and cancel_id in GLOBAL_CANCEL_DICT):
                 await aria2_cancel(gid)
+                ACTIVE_DOWNLOADS.pop(gid, None)
                 LOGGER.info(f"Aria2 Task {gid} dipaksa berhenti oleh Sinyal Batal.")
-                return False
+                raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
 
             try:
                 async with session.post(ARIA2_RPC_URL, json=payload_status) as resp:
@@ -177,7 +178,10 @@ async def aria2_download(url, filepath, details=None):
                 
             elif state in ["error", "removed"]:
                 ACTIVE_DOWNLOADS.pop(gid, None)
-                err_msg = status.get("errorMessage", "Dibatalkan oleh pengguna / Unknown Error")
+                if state == "removed" or gid in GLOBAL_CANCEL_DICT or (cancel_id and cancel_id in GLOBAL_CANCEL_DICT):
+                    LOGGER.info(f"Aria2 Task {gid} dihentikan (Removed/Cancelled).")
+                    raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
+                err_msg = status.get("errorMessage", "Unknown Error")
                 LOGGER.warning(f"Aria2 Berhenti [{state}]: {err_msg}")
                 if used_proxy:
                     await proxy_manager.report_fail(used_proxy)
@@ -185,7 +189,14 @@ async def aria2_download(url, filepath, details=None):
                 
             await asyncio.sleep(2.0)
 
+    except asyncio.CancelledError:
+        if 'gid' in locals() and gid:
+            await aria2_cancel(gid)
+            ACTIVE_DOWNLOADS.pop(gid, None)
+        raise
     except Exception as e:
+        if 'gid' in locals() and gid:
+            ACTIVE_DOWNLOADS.pop(gid, None)
         LOGGER.error(f"Aria2 RPC Exception: {e}")
         return False
 
