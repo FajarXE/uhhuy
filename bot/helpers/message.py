@@ -376,7 +376,8 @@ async def send_message(user, text: str, type: str = 'text', markup=None, antiflo
 # EDIT MESSAGE
 # ==========================================================
 async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
-    if not msg: return None
+    if not msg:
+        return None
     
     # Membungkus edit_message dalam iterasi aman
     for attempt in range(3):
@@ -387,7 +388,7 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
                 return await aio.edit_message_text(chat_id=msg.chat.id, message_id=msg.id, text=text, reply_markup=markup)
             break
         except MessageNotModified: 
-            break 
+            return msg
         except FloodWait as e:
             import bot.helpers.ui_manager as ui_manager
             ui_manager.GLOBAL_FLOOD_UNTIL = time.time() + e.value + 2.0
@@ -400,6 +401,7 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
                     if e.value > 60:
                         ui_manager.GLOBAL_UI_MSG.pop(chat_id, None)
                         ui_manager.GLOBAL_UI_PAGES.pop(chat_id, None)
+                        ui_manager.GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
                         await database.remove_ui_state(chat_id)
                 except Exception:
                     pass
@@ -407,10 +409,9 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
 
             await asyncio.sleep(e.value)
             continue
-            break
-            # ----------------------------
         except MessageIdInvalid:
-            from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+            from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES, GLOBAL_UI_LAST_TEXT
+            from bot.helpers.database.mongo_async import database
             chat_id = msg.chat.id
             
             # --- [PERBAIKAN GHOST PANEL] ---
@@ -420,21 +421,31 @@ async def edit_message(msg: Message, text: str, markup=None, antiflood=True):
             if current_radar and current_radar.id == msg.id:
                 GLOBAL_UI_MSG.pop(chat_id, None)
                 GLOBAL_UI_PAGES.pop(chat_id, None)
+                GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
+                try:
+                    await database.remove_ui_state(chat_id)
+                except Exception:
+                    pass
             # -------------------------------
             break
         except RPCError as e:
             err_str = str(e)
             if any(err in err_str for err in ["INPUT_USER_DEACTIVATED", "USER_IS_BLOCKED", "PEER_ID_INVALID", "CHAT_WRITE_FORBIDDEN"]):
                 try:
-                    from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES, GLOBAL_UI_LAST_UPDATE
+                    from bot.helpers.ui_manager import GLOBAL_UI_MSG, GLOBAL_UI_PAGES, GLOBAL_UI_LAST_UPDATE, GLOBAL_UI_LAST_TEXT
+                    from bot.helpers.database.mongo_async import database
                     chat_id = msg.chat.id
-                    if chat_id in GLOBAL_UI_MSG: del GLOBAL_UI_MSG[chat_id]
-                    if chat_id in GLOBAL_UI_PAGES: del GLOBAL_UI_PAGES[chat_id]
-                    if msg.id in GLOBAL_UI_LAST_UPDATE: del GLOBAL_UI_LAST_UPDATE[msg.id]
-                except: pass
+                    GLOBAL_UI_MSG.pop(chat_id, None)
+                    GLOBAL_UI_PAGES.pop(chat_id, None)
+                    GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
+                    GLOBAL_UI_LAST_UPDATE.pop(msg.id, None)
+                    await database.remove_ui_state(chat_id)
+                except Exception:
+                    pass
             break
         except (aiohttp.ClientConnectionError, aiohttp.ServerTimeoutError, TimeoutError) as e:
-            if "SSL shutdown" not in str(e): LOGGER.error(f"Connection Error Edit: {e}")
+            if "SSL shutdown" not in str(e):
+                LOGGER.error(f"Connection Error Edit: {e}")
             break
         except Exception: 
             break
