@@ -161,27 +161,25 @@ class DirectUpload:
             session = get_upload_session()
             async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
                 res = await resp.json()
-                wrapper.close()
                 if res.get('status') == 'ok':
                     return res['data']['downloadPage']
         except Exception as e:
-            wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
                 LOGGER.warning(f"Gofile Upload dibatalkan oleh pengguna: {filename}")
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
                         await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
-                except: pass
+                except Exception:
+                    pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Gofile Upload Error: {e}")
-                
-                # --- [FIX ANTI ZOMBIE CONNECTION] ---
                 if isinstance(e, (ServerDisconnectedError, ClientConnectorError, asyncio.TimeoutError)):
                     get_upload_session(force_refresh=True)
                     LOGGER.info("Cloud Uploader: Sesi aiohttp Gofile dibuang karena terdeteksi mati.")
-                # ------------------------------------
+        finally:
+            wrapper.close()
         return None
 
     # ============================
@@ -247,27 +245,25 @@ class DirectUpload:
             session = get_upload_session()
             async with session.put(url, headers=headers, data=wrapper, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
                 res = await resp.json()
-                wrapper.close()
                 if res.get('code') == 201:
                     return f"https://buzzheavier.com/{res['data']['id']}"
         except Exception as e:
-            wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
                 LOGGER.warning(f"Buzzheavier Upload dibatalkan oleh pengguna: {filename}")
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
                         await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
-                except: pass
+                except Exception:
+                    pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Buzzheavier Upload Error: {e}")
-                
-                # --- [FIX ANTI ZOMBIE CONNECTION] ---
                 if isinstance(e, (ServerDisconnectedError, ClientConnectorError, asyncio.TimeoutError)):
                     get_upload_session(force_refresh=True)
                     LOGGER.info("Cloud Uploader: Sesi aiohttp Buzzheavier dibuang karena terdeteksi mati.")
-                # ------------------------------------
+        finally:
+            wrapper.close()
         return None
 
     # ============================
@@ -280,7 +276,8 @@ class DirectUpload:
             async with session.get("https://vikingfile.com/api/get-server", timeout=10) as r:
                 res = await r.json()
                 srv = res.get('server')
-        except: pass
+        except Exception:
+            pass
 
         if not srv: 
             LOGGER.error("Viking Upload: Gagal mendapatkan server dari API.")
@@ -297,45 +294,43 @@ class DirectUpload:
             session = get_upload_session()
             async with session.post(srv, data=data, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
                 raw_text = await resp.text()
-                wrapper.close()
                 
                 # --- PARSER & DIAGNOSTIK ---
                 try:
                     res = json.loads(raw_text)
-                    if res.get('url'): return res['url']
-                except:
-                    # re.DOTALL (re.S) agar bisa melacak JSON multi-baris di dalam HTML
+                    if res.get('url'):
+                        return res['url']
+                except Exception:
                     match = re.search(r'(\{.*?\})', raw_text, re.DOTALL)
                     if match:
                         try:
                             res = json.loads(match.group(1))
-                            if res.get('url'): return res['url']
-                            else: LOGGER.warning(f"Viking Regex nemu JSON tapi tidak ada URL: {res}")
-                        except: pass
+                            if res.get('url'):
+                                return res['url']
+                            else:
+                                LOGGER.warning(f"Viking Regex nemu JSON tapi tidak ada URL: {res}")
+                        except Exception:
+                            pass
                         
-                # Jika sampai di baris ini, berarti server Vikingfile memberikan pesan error!
                 LOGGER.error(f"Viking Response Mentah: {raw_text[:500]}")
-                # ---------------------------
                         
         except Exception as e:
-            wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
                 LOGGER.warning(f"Vikingfiles Upload dibatalkan oleh pengguna: {filename}")
                 try:
                     from bot.helpers.message import edit_message
                     if details and 'msg' in details:
                         await edit_message(details['msg'], "🛑 **Proses Dibatalkan oleh Pengguna.**", None, False)
-                except: pass
-                # Membunuh rantai Fallback dan Loop secara total!
+                except Exception:
+                    pass
                 raise asyncio.CancelledError("DIBATALKAN_PENGGUNA")
             else:
                 LOGGER.error(f"Viking Upload Error: {e}")
-                
-                # --- [FIX ANTI ZOMBIE CONNECTION] ---
                 if isinstance(e, (ServerDisconnectedError, ClientConnectorError, asyncio.TimeoutError)):
                     get_upload_session(force_refresh=True)
                     LOGGER.info("Cloud Uploader: Sesi aiohttp Viking dibuang karena terdeteksi mati.")
-                # ------------------------------------
+        finally:
+            wrapper.close()
         return None
 
     # ============================
@@ -383,13 +378,11 @@ class DirectUpload:
             session = get_upload_session()
             async with session.post(url, data=data, headers=headers, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
                 res = await resp.json()
-                wrapper.close()
                 if res.get('id'):
                     return f"https://pixeldrain.com/u/{res.get('id')}"
                 else:
                     LOGGER.error(f"Pixeldrain Response Error: {res}")
         except Exception as e:
-            wrapper.close()
             if 'DIBATALKAN_PENGGUNA' in str(e):
                 LOGGER.warning(f"Pixeldrain Upload dibatalkan oleh pengguna: {filename}")
                 try:
@@ -404,6 +397,8 @@ class DirectUpload:
                 if isinstance(e, (ServerDisconnectedError, ClientConnectorError, asyncio.TimeoutError)):
                     get_upload_session(force_refresh=True)
                     LOGGER.info("Cloud Uploader: Sesi aiohttp Pixeldrain dibuang karena terdeteksi mati.")
+        finally:
+            wrapper.close()
         return None
 
     # ============================
