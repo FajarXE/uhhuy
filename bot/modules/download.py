@@ -532,7 +532,7 @@ async def run_download_task(link: str, user: dict):
                     ui_manager.GLOBAL_TASKS.pop(cancel_id, None)
             
             try:
-                await send_message(user, "🛑 **Tugas dibatalkan oleh pengguna.**", 'text')
+                await send_message(user, "🛑 **Task Cancelled by User.**", 'text')
             except Exception:
                 pass
             await asyncio.sleep(5) 
