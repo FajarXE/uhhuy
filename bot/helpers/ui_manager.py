@@ -328,11 +328,12 @@ async def dedicated_ui_worker():
                         await database.remove_ui_state(chat_id)
                     continue
 
-                GLOBAL_UI_LAST_TEXT[chat_id] = g_text
-                await edit_message(msg, g_text, g_markup, antiflood=False)
+                edited = await edit_message(msg, g_text, g_markup, antiflood=False)
+                if edited is not None:
+                    GLOBAL_UI_LAST_TEXT[chat_id] = g_text
 
                 # Jika baru saja berubah menjadi idle (tidak ada task), hentikan polling untuk chat ini
-                if not has_tasks:
+                if not has_tasks and (edited is not None or chat_id not in GLOBAL_UI_MSG):
                     GLOBAL_UI_MSG.pop(chat_id, None)
                     GLOBAL_UI_PAGES.pop(chat_id, None)
                     GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
