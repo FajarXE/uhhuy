@@ -1,56 +1,58 @@
-# [FILE: bot/modules/status.py]
+# [GANTI TOTAL ISI FILE: bot/modules/status.py]
 
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, Message
 from pyrogram.errors import FloodWait, MessageNotModified
 
-# --- [FIX] Mengimpor dari ui_manager untuk menyambungkan kabel radar Papan Global ---
-from bot.helpers.ui_manager import get_status_text, GLOBAL_UI_MSG, GLOBAL_UI_PAGES
+from bot.helpers.ui_manager import (
+    get_status_text,
+    GLOBAL_UI_MSG,
+    GLOBAL_UI_PAGES,
+    GLOBAL_UI_LAST_TEXT,
+    GLOBAL_TASKS
+)
 from bot.logger import LOGGER
-from bot.helpers.database.mongo_async import database # <-- [TAMBAHAN IMPORT MONGODB]
+from bot.helpers.database.mongo_async import database
 
 @Client.on_message(filters.command(["task", "tasks"]))
 async def task_command(client: Client, message: Message):
     chat_id = message.chat.id
     
-    # --- [FIX SPAM PAPAN GLOBAL] HAPUS PESAN LAMA JIKA ADA ---
-    if chat_id in GLOBAL_UI_MSG:
+    # --- HAPUS PESAN RADAR LAMA JIKA ADA ---
+    old_msg = GLOBAL_UI_MSG.pop(chat_id, None)
+    GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
+    if old_msg:
         try:
-            # Menggunakan delete_messages untuk penghapusan yang lebih pasti dan absolut
-            await client.delete_messages(chat_id, GLOBAL_UI_MSG[chat_id].id)
+            await client.delete_messages(chat_id, old_msg.id)
         except Exception:
             pass
-    # ---------------------------------------------------------
+    # ---------------------------------------
 
-    # --- [MEMORI HALAMAN] Set halaman ke 1 saat /task dikirim ---
     GLOBAL_UI_PAGES[chat_id] = 1
-    # ------------------------------------------------------------
-    
     text, markup = await get_status_text(page=1)
     
     try:
-        # Menyimpan pesan yang dikirim bot ke dalam variabel
         sent_msg = await message.reply_text(text, reply_markup=markup)
         
-        # Mendaftarkan pesan ini ke dalam memori Radar agar diperbarui secara real-time
-        GLOBAL_UI_MSG[chat_id] = sent_msg
-        
-        # --- [SINKRONISASI KE MONGODB] ---
-        await database.save_ui_state(chat_id, sent_msg.id, 1)
-        # ---------------------------------
+        # Hanya daftarkan ke Radar & MongoDB jika memang ada task yang sedang berjalan
+        if GLOBAL_TASKS:
+            GLOBAL_UI_MSG[chat_id] = sent_msg
+            GLOBAL_UI_LAST_TEXT[chat_id] = text
+            await database.save_ui_state(chat_id, sent_msg.id, 1)
+        else:
+            GLOBAL_UI_PAGES.pop(chat_id, None)
+            await database.remove_ui_state(chat_id)
         
     except FloodWait as e:
         LOGGER.warning(f"Terkena FloodWait {e.value} detik saat mengirim /task.")
         await asyncio.sleep(e.value)
-        # Coba kirim lagi setelah tidur sejenak
         try:
             sent_msg = await message.reply_text(text, reply_markup=markup)
-            GLOBAL_UI_MSG[chat_id] = sent_msg
-            
-            # --- [SINKRONISASI KE MONGODB (FALLBACK)] ---
-            await database.save_ui_state(chat_id, sent_msg.id, 1)
-            # --------------------------------------------
+            if GLOBAL_TASKS:
+                GLOBAL_UI_MSG[chat_id] = sent_msg
+                GLOBAL_UI_LAST_TEXT[chat_id] = text
+                await database.save_ui_state(chat_id, sent_msg.id, 1)
         except Exception:
             pass
     except Exception as e:
@@ -67,65 +69,69 @@ async def status_callback(client: Client, query: CallbackQuery):
         except Exception:
             pass
             
-        # --- [HAPUS DARI MONGODB & RAM] ---
         GLOBAL_UI_MSG.pop(chat_id, None)
         GLOBAL_UI_PAGES.pop(chat_id, None)
+        GLOBAL_UI_LAST_TEXT.pop(chat_id, None)
         await database.remove_ui_state(chat_id)
-        # ----------------------------------
         return
         
     if data.startswith("status_page_"):
         page = int(data.split("_")[-1])
-        
-        # --- [MEMORI HALAMAN] Simpan posisi halaman saat klik Next/Prev ---
+        old_page = GLOBAL_UI_PAGES.get(chat_id, 1)
         GLOBAL_UI_PAGES[chat_id] = page
         
-        # --- [SINKRONISASI KE MONGODB] ---
-        await database.save_ui_state(chat_id, query.message.id, page)
-        # ------------------------------------------------------------------
+        if GLOBAL_TASKS:
+            await database.save_ui_state(chat_id, query.message.id, page)
         
         text, markup = await get_status_text(page=page)
         try:
             await query.message.edit_text(text, reply_markup=markup)
-            try: await query.answer()
-            except Exception: pass
-        except FloodWait as e:
-            # --- [FIX SPAM TOMBOL] JANGAN DITIDURKAN, TOLAK KLIKNYA! ---
-            try: await query.answer(f"⏳ Terlalu cepat! Tunggu {e.value} detik.", show_alert=True)
-            except Exception: pass
-            
-            # Kembalikan posisi halaman karena edit ke halaman baru gagal
+            GLOBAL_UI_LAST_TEXT[chat_id] = text
             try:
-                if "Next" in query.message.reply_markup.inline_keyboard[0][0].text:
-                    GLOBAL_UI_PAGES[chat_id] = page - 1
-                    await database.save_ui_state(chat_id, query.message.id, page - 1)
-                else:
-                    GLOBAL_UI_PAGES[chat_id] = page + 1
-                    await database.save_ui_state(chat_id, query.message.id, page + 1)
-            except Exception: pass
+                await query.answer()
+            except Exception:
+                pass
+        except FloodWait as e:
+            try:
+                await query.answer(f"⏳ Terlalu cepat! Tunggu {e.value} detik.", show_alert=True)
+            except Exception:
+                pass
+            
+            # Kembalikan ke halaman sebelumnya karena edit gagal
+            GLOBAL_UI_PAGES[chat_id] = old_page
+            if GLOBAL_TASKS:
+                try:
+                    await database.save_ui_state(chat_id, query.message.id, old_page)
+                except Exception:
+                    pass
         except MessageNotModified:
-            try: await query.answer()
-            except Exception: pass
+            GLOBAL_UI_LAST_TEXT[chat_id] = text
+            try:
+                await query.answer()
+            except Exception:
+                pass
         except Exception:
             pass
             
     elif data.startswith("status_refresh_"):
         page = int(data.split("_")[-1])
-        
-        # --- [MEMORI HALAMAN] Simpan posisi halaman saat klik Refresh ---
         GLOBAL_UI_PAGES[chat_id] = page
-        # ----------------------------------------------------------------
         
         text, markup = await get_status_text(page=page)
         try:
             await query.message.edit_text(text, reply_markup=markup)
+            GLOBAL_UI_LAST_TEXT[chat_id] = text
             await query.answer("Status diperbarui!", show_alert=False)
         except FloodWait as e:
-            # --- [FIX SPAM TOMBOL] JANGAN DITIDURKAN, TOLAK KLIKNYA! ---
-            try: await query.answer(f"⏳ Terlalu cepat! Tunggu {e.value} detik.", show_alert=True)
-            except Exception: pass
+            try:
+                await query.answer(f"⏳ Terlalu cepat! Tunggu {e.value} detik.", show_alert=True)
+            except Exception:
+                pass
         except MessageNotModified:
-            try: await query.answer("Status sudah yang terbaru!", show_alert=False)
-            except Exception: pass
+            GLOBAL_UI_LAST_TEXT[chat_id] = text
+            try:
+                await query.answer("Status sudah yang terbaru!", show_alert=False)
+            except Exception:
+                pass
         except Exception:
             pass
