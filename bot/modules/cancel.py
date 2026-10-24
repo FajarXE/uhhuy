@@ -1,11 +1,9 @@
 # [GANTI TOTAL ISI FILE: bot/modules/cancel.py]
 
-import re
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery
-from pyrogram.enums import ChatType
 from bot.helpers.aria2_helper import aria2_cancel, ACTIVE_DOWNLOADS
-from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS
+from bot.helpers.ui_manager import GLOBAL_CANCEL_DICT, GLOBAL_TASKS, GLOBAL_STATE_LOCK
 from bot.settings import bot_set
 from bot.helpers.database.mongo_async import database
 
@@ -18,7 +16,6 @@ async def cancel_task_handler(client: Client, message: Message):
 # Handler untuk Tombol Merah Kurigram (InlineKeyboardButton)
 @Client.on_callback_query(filters.regex(r"^cancel_([a-zA-Z0-9]+)"))
 async def cancel_task_callback(client: Client, query: CallbackQuery):
-    # Ekstrak task_id dari tombol yang diklik
     gid = query.data.split('_')[1]
     await process_cancel(client, query.message, gid, query.from_user.id, is_callback=True, query_obj=query)
 
@@ -41,21 +38,25 @@ async def process_cancel(client, message, gid, user_id, is_callback=False, query
             return
             
     cancel_success_msg = ""
-    
-    if gid in ACTIVE_DOWNLOADS:
-        filename = ACTIVE_DOWNLOADS[gid]
-        success = await aria2_cancel(gid)
-        if success:
-            cancel_success_msg = f"🛑 Download Canceled:\n{filename}"
-        else:
-            cancel_success_msg = "❌ Failed to cancel Aria2 download."
-            
-    elif gid in GLOBAL_TASKS:
+    found_task = False
+
+    if gid in GLOBAL_TASKS:
+        found_task = True
         GLOBAL_CANCEL_DICT.add(gid)
         await database.add_cancel_task(gid)
         cancel_success_msg = "🛑 Cancel Signal Sent!\nThe process will be stopped shortly."
-        
-    else:
+
+    if gid in ACTIVE_DOWNLOADS:
+        found_task = True
+        filename = ACTIVE_DOWNLOADS.get(gid, "Unknown")
+        GLOBAL_CANCEL_DICT.add(gid)
+        success = await aria2_cancel(gid)
+        if success and not cancel_success_msg:
+            cancel_success_msg = f"🛑 Download Canceled:\n{filename}"
+        elif not cancel_success_msg:
+            cancel_success_msg = "🛑 Cancel Signal Sent to Aria2!"
+
+    if not found_task:
         cancel_success_msg = "❌ Task not found or already completed."
         
     # Kirim pop-up Toast Notification jika klik dari tombol, kirim pesan text jika manual
@@ -74,11 +75,20 @@ async def force_unlock_handler(client: Client, message: Message):
         return
         
     import bot.helpers.ui_manager as ui_manager
-    ui_manager.GLOBAL_TASKS.clear()
-    ui_manager.GLOBAL_CANCEL_DICT.clear()
+    async with GLOBAL_STATE_LOCK:
+        ui_manager.GLOBAL_TASKS.clear()
+        ui_manager.GLOBAL_CANCEL_DICT.clear()
+        ui_manager.GLOBAL_UI_LAST_TEXT.clear()
+        
     await database.clear_all_cancels()
+    
+    try:
+        from bot.modules.download import USER_SEMAPHORES
+        USER_SEMAPHORES.clear()
+    except Exception:
+        pass
     
     from bot.helpers.aria2_helper import aria2_purge_all
     await aria2_purge_all()
     
-    await message.reply("✅ **Global Board System has been successfully reset!**\nAll ghost tasks and stalled downloads have been cleared.")
+    await message.reply("✅ **Global Board System has been successfully reset!**\nAll ghost tasks, personal queues, and stalled downloads have been cleared.")
