@@ -843,16 +843,31 @@ async def start_link(link: str, user: dict) -> None:
     elif link.startswith(tuple(beatport)):
         user['provider'] = 'Beatport'
         
-        if not beatport_manager.clients:
-            raise Exception("Maaf, tidak ada akun Beatport bot yang aktif saat ini.")
+        user_id = user['user_id']
+        has_private = beatport_manager and beatport_manager.has_private_session(user_id)
+        global_list = list(getattr(beatport_manager, 'global_clients', None) or getattr(beatport_manager, 'clients', [])) if beatport_manager else []
 
-        clients_list = random.sample(beatport_manager.clients, len(beatport_manager.clients))
+        if not has_private and not global_list:
+            raise Exception("Maaf, tidak ada akun Beatport bot (Global/Private) yang aktif saat ini.")
+
+        clients_list = []
+        if has_private:
+            priv_client = beatport_manager.get_client(user_id)
+            if priv_client:
+                clients_list.append(priv_client)
+
+        if global_list:
+            shuffled_global = random.sample(global_list, len(global_list))
+            for gc in shuffled_global:
+                if gc not in clients_list:
+                    clients_list.append(gc)
+
         last_error = None
         for client in clients_list:
             try:
                 user['beatport_api'] = client 
                 await start_beatport(link, user)
-                LOGGER.info(f"Beatport: Unduhan berhasil menggunakan akun.") 
+                LOGGER.info("Beatport: Unduhan berhasil menggunakan akun.") 
                 return 
             except Exception as e:
                 error_str = str(e).lower()
@@ -871,7 +886,7 @@ async def start_link(link: str, user: dict) -> None:
             raise Exception(f"Item tidak tersedia di semua ({len(clients_list)}) akun Beatport yang dicoba. Error terakhir: {last_error}")
         else:
             raise Exception("Gagal mengunduh Beatport karena alasan yang tidak diketahui setelah mencoba semua akun.")
-    
+
     # Blok SOUNDCLOUD
     elif link.startswith(tuple(soundcloud)):
         user['provider'] = 'Soundcloud'
