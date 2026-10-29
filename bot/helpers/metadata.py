@@ -794,10 +794,10 @@ async def set_wav(data: Dict, handle: Union[WAVE, AIFF], dur_ms: int = 0):
 
 
 # ==========================================
-# HANDLER OGG VORBIS (KHUSUS SPOTIFY)
+# HANDLER OGG VORBIS & OPUS
 # ==========================================
 async def set_vorbis(data: Dict, handle: Union[OggVorbis, OggOpus], dur_ms: int = 0):
-    """Handler khusus untuk file OGG (Spotify)"""
+    """Handler khusus untuk file OGG Vorbis dan Opus"""
     # Pastikan container tags ada
     if handle.tags is None:
         try: handle.add_tags()
