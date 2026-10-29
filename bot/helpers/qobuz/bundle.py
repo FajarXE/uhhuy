@@ -1,9 +1,11 @@
+# [GANTI FILE: bot/helpers/qobuz/bundle.py]
+
 import re
 import base64
 from collections import OrderedDict
 
 from requests import Session
-from config import Config  # <--- IMPORT CONFIG DI SINI
+from config import Config
 
 # Modified code based on DashLt's spoofbuz
 
@@ -24,6 +26,9 @@ _BUNDLE_URL_REGEX = re.compile(
 class Bundle:
     def __init__(self):
         self._session = Session()
+        self._session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0"
+        })
 
         # --- SUNTIKAN PROXY GLOBAL ---
         if getattr(Config, 'QOBUZ_PROXY', None):
@@ -33,18 +38,21 @@ class Bundle:
             }
         # -----------------------------
 
-        response = self._session.get(f"{_BASE_URL}/login")
-        response.raise_for_status()
+        try:
+            response = self._session.get(f"{_BASE_URL}/login", timeout=20)
+            response.raise_for_status()
 
-        bundle_url_match = _BUNDLE_URL_REGEX.search(response.text)
-        if not bundle_url_match:
-            raise NotImplementedError("Bundle URL found")
+            bundle_url_match = _BUNDLE_URL_REGEX.search(response.text)
+            if not bundle_url_match:
+                raise NotImplementedError("Bundle URL not found")
 
-        bundle_url = bundle_url_match.group(1)
-        response = self._session.get(_BASE_URL + bundle_url)
-        response.raise_for_status()
+            bundle_url = bundle_url_match.group(1)
+            response = self._session.get(_BASE_URL + bundle_url, timeout=30)
+            response.raise_for_status()
 
-        self._bundle = response.text
+            self._bundle = response.text
+        finally:
+            self._session.close()
 
     def get_app_id(self):
         match = _APP_ID_REGEX.search(self._bundle)
@@ -62,7 +70,9 @@ class Bundle:
             secrets[timezone] = [seed]
 
         keypairs = list(secrets.items())
-        secrets.move_to_end(keypairs[1][0], last=False)
+        if len(keypairs) > 1:
+            secrets.move_to_end(keypairs[1][0], last=False)
+
         info_extras_regex = _INFO_EXTRAS_REGEX.format(
             timezones="|".join([timezone.capitalize() for timezone in secrets])
         )
@@ -70,8 +80,11 @@ class Bundle:
         for match in info_extras_matches:
             timezone, info, extras = match.group("timezone", "info", "extras")
             secrets[timezone.lower()] += [info, extras]
-        for secret_pair in secrets:
-            secrets[secret_pair] = base64.standard_b64decode(
-                "".join(secrets[secret_pair])[:-44]
-            ).decode("utf-8")
+        for secret_pair in list(secrets.keys()):
+            try:
+                secrets[secret_pair] = base64.standard_b64decode(
+                    "".join(secrets[secret_pair])[:-44]
+                ).decode("utf-8")
+            except Exception:
+                secrets[secret_pair] = ""
         return secrets
