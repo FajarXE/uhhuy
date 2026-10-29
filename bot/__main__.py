@@ -361,6 +361,12 @@ async def shutdown_all_services():
         pass
     # ---------------------------------------------
 
+    try:
+        from bot.helpers.qobuz.qopy import qobuz_manager
+        tasks.append(qobuz_manager.shutdown())
+    except Exception:
+        pass
+
 
 if __name__ == "__main__":
     import shutil
