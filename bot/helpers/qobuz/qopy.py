@@ -6,19 +6,17 @@ import aiohttp
 import aiolimiter
 import asyncio
 import traceback
-import json
-import os
 
 from config import Config
 from .bundle import Bundle
 from bot.logger import LOGGER
 
-# [BARU] Import Database & Settings untuk persistensi MongoDB
 from bot.helpers.database.mongo_async import database
 from bot.settings import bot_set
 
-# TAMBAHKAN BARIS INI: Limiter berbagi untuk semua akun
+# Limiter berbagi untuk semua akun (30 request / 60 detik)
 GLOBAL_QOBUZ_LIMITER = aiolimiter.AsyncLimiter(30, 60)
+
 
 class QoClient:
     def __init__(self, email=None, password=None, user_id=None, user_token=None, app_id=None, app_secret=None):
@@ -27,10 +25,8 @@ class QoClient:
         self.user_id = str(user_id) if user_id else None
         self.user_token = user_token
         
-        # --- [TAMBAHAN] Simpan kredensial spesifik akun ---
         self.custom_app_id = str(app_id) if app_id else None
         self.custom_app_secret = str(app_secret) if app_secret else None
-        # --------------------------------------------------
         
         self.uat = None
         self.label = None
@@ -38,10 +34,14 @@ class QoClient:
         self.id = None
         self.secrets = None
         self.session = None
-        # MATIKAN BARIS INI:
-        # self.ratelimit = aiolimiter.AsyncLimiter(30, 60)
         self.base = "https://www.qobuz.com/api.json/0.2/"
-        self.quality = 6 # Default 6 (Lossless)
+        
+        # Ambil kualitas default dari database Admin jika sudah diatur, fallback ke 6 (Lossless)
+        saved_global_qual = bot_set.set_db.get('QOBUZ_QUALITY', 6) if hasattr(bot_set, 'set_db') and bot_set.set_db else 6
+        try:
+            self.quality = int(saved_global_qual)
+        except Exception:
+            self.quality = 6
 
     def get_tokens(self):
         # 1. Prioritaskan App ID & Secret spesifik dari Akun tersebut
@@ -120,7 +120,12 @@ class QoClient:
             track_id = kwargs["id"]
             fmt_id = kwargs["fmt_id"]
             
-            if int(fmt_id) not in (5, 6, 7, 27):
+            try:
+                fmt_id = int(fmt_id)
+            except Exception:
+                fmt_id = 6
+
+            if fmt_id not in (5, 6, 7, 27):
                 LOGGER.warning(f"QOBUZ: Format ID {fmt_id} tidak valid, fallback ke 6 (Lossless).")
                 fmt_id = 6
             
@@ -142,7 +147,6 @@ class QoClient:
         return await self.session_call(epoint, params)
 
     async def session_call(self, epoint, params):
-        # GANTI self.ratelimit MENJADI GLOBAL_QOBUZ_LIMITER
         async with GLOBAL_QOBUZ_LIMITER:
             async with self.session.get(self.base + epoint, params=params) as r:
                 if epoint == "user/login":
@@ -224,7 +228,6 @@ class QoClient:
         self.session.headers.update({"X-User-Auth-Token": self.uat})
         self.label = usr_info["user"]["credential"]["parameters"]["short_label"]
         
-        # Override user_id jika login via email, untuk referensi
         if not self.user_id:
             self.user_id = str(usr_info["user"]["id"])
 
@@ -233,7 +236,6 @@ class QoClient:
     async def test_secret(self, sec):
         test_epoint = "track/getFileUrl"
         unix = int(time.time())
-        # Track ID Random untuk test sign
         r_sig = "trackgetFileUrlformat_id5intentstreamtrack_id5966783{}{}".format(unix, sec)
         r_sig_hashed = hashlib.md5(r_sig.encode("utf-8")).hexdigest()
         
@@ -246,7 +248,6 @@ class QoClient:
         }
         
         try:
-            # GANTI self.ratelimit MENJADI GLOBAL_QOBUZ_LIMITER
             async with GLOBAL_QOBUZ_LIMITER:
                 async with self.session.get(self.base + test_epoint, params=params) as r:
                     if r.status == 200:
@@ -256,52 +257,33 @@ class QoClient:
             LOGGER.debug(f"Test Secret Failed: {e}")
             return False
 
-    def get_tokens(self):
-        # 1. Prioritaskan App ID & Secret spesifik dari Akun tersebut
-        if self.custom_app_id and self.custom_app_secret:
-            self.id = self.custom_app_id
-            self.secrets = [self.custom_app_secret]
-            LOGGER.info(f"QOBUZ : Akun ini menggunakan APP_ID spesifik ({self.id}) dari .env")
-            
-        # 2. Fallback ke App ID Global jika akun tidak memiliki pengaturan spesifik
-        elif Config.QOBUZ_APP_ID and Config.QOBUZ_APP_SECRET:
-            self.id = str(Config.QOBUZ_APP_ID)
-            self.secrets = [str(Config.QOBUZ_APP_SECRET)]
-            LOGGER.info(f"QOBUZ : Menggunakan APP_ID Global ({self.id}) dari .env")
-            
-        # 3. Fallback terakhir ke Bundle Scraper (Dinamic Web)
-        else:
-            LOGGER.info("QOBUZ : Mengambil App ID & Secret dinamis via Bundle Scraper...")
-            bundle = Bundle()
-            self.id = str(bundle.get_app_id())
-            self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
-
     async def login(self):
-        # Lempar fungsi yang mengandung scraping 'requests' sinkron ke thread lain
-        await asyncio.to_thread(self.get_tokens)
-        
-        # --- LOGIKA SOCKS PROXY CONNECTOR GLOBAL ---
-        connector = None
-        if getattr(Config, 'QOBUZ_PROXY', None):
-            try:
-                from aiohttp_socks import ProxyConnector
-                connector = ProxyConnector.from_url(Config.QOBUZ_PROXY)
-            except ImportError:
-                LOGGER.warning("QOBUZ: Modul aiohttp_socks tidak terinstall! Mengabaikan Proxy.")
-        # -------------------------------------------
+        try:
+            await asyncio.to_thread(self.get_tokens)
+            
+            connector = None
+            if getattr(Config, 'QOBUZ_PROXY', None):
+                try:
+                    from aiohttp_socks import ProxyConnector
+                    connector = ProxyConnector.from_url(Config.QOBUZ_PROXY)
+                except ImportError:
+                    LOGGER.warning("QOBUZ: Modul aiohttp_socks tidak terinstall! Mengabaikan Proxy.")
 
-        self.session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=aiohttp.ClientTimeout(total=60)
-        ) 
-        self.session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0",
-                "X-App-Id": self.id,
-            }
-        )
-        await self.auth()
-        await self.cfg_setup()
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) 
+            self.session.headers.update(
+                {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0",
+                    "X-App-Id": self.id,
+                }
+            )
+            await self.auth()
+            await self.cfg_setup()
+        except Exception:
+            await self.close_session()
+            raise
 
     async def cfg_setup(self):
         for secret in self.secrets:
@@ -314,13 +296,14 @@ class QoClient:
             raise Exception("QOBUZ : Can't find any valid app secret") 
 
     async def get_track_url(self, id, user: dict):
-        tg_user_id = user.get("user_id")
+        tg_user_id = user.get("user_id") if user else None
         quality = self.quality
         
         if tg_user_id:
-            # Baca langsung dari RAM (Memory yang disinkronkan)
             user_settings = bot_set.user_data.get(int(tg_user_id), {})
-            quality = user_settings.get("qobuz_qual", self.quality)
+            user_qual = user_settings.get("qobuz_qual")
+            if user_qual is not None:
+                quality = user_qual
 
         return await self.api_call("track/getFileUrl", id=id, fmt_id=quality)
 
@@ -353,12 +336,10 @@ class QoClient:
             user_id = int(user_id)
             qual = int(qual)
             
-            # 1. Simpan ke Memory (agar akses cepat)
             if user_id not in bot_set.user_data:
                 bot_set.user_data[user_id] = {}
             bot_set.user_data[user_id]['qobuz_qual'] = qual
             
-            # 2. Simpan ke MongoDB (Permanen)
             await database.save_user_settings(user_id, {'qobuz_qual': qual})
         except Exception as e:
             LOGGER.error(f"QOBUZ: Gagal setup quality: {e}")
@@ -374,15 +355,13 @@ class QoClient:
 
 class QobuzManager:
     def __init__(self):
-        self.user_clients = {} # Cache Sesi Aktif
+        self.user_clients = {} # Cache Sesi Aktif per user_id
 
     def _read_db(self):
         return {} 
 
     async def add_user_account(self, tg_user_id, email=None, password=None, q_user_id=None, q_token=None, app_id=None, app_secret=None):
-        """Melakukan otentikasi via Email ATAU Token, dan mempertahankan sesi tetap hidup di Memory."""
-        
-        # 1. Inisialisasi klien berdasarkan data yang masuk
+        """Melakukan otentikasi via Email ATAU Token, dan mempertahankan seluruh sesi multi-akun di Memory."""
         if email and password:
             temp_client = QoClient(email=email, password=password, app_id=app_id, app_secret=app_secret)
             login_mode = "Email"
@@ -393,36 +372,26 @@ class QobuzManager:
             return False, "Data kredensial tidak lengkap."
         
         try:
-            # Login otomatis membedakan jalur berdasarkan parameter yang ada di QoClient
             await temp_client.login()
             label = temp_client.label
-            final_q_user_id = temp_client.user_id
-            final_q_token = temp_client.uat # Ambil token aktif
+            final_q_user_id = str(temp_client.user_id)
+            final_q_token = temp_client.uat
         except Exception as e:
-            # Tutup sesi HANYA jika login gagal
             await temp_client.close_session()
             return False, f"Gagal validasi akun ({login_mode}): {str(e)}"
-        
-        # --- [PERBAIKAN PENTING] ---
-        # BAGIAN INI DIHAPUS: await temp_client.close_session() 
-        # Tujuannya agar sesi tetap hidup dan bisa langsung dipakai unduh
-        # ---------------------------
 
         tg_user_id = int(tg_user_id)
         
-        # 2. Proses simpan ke Memory (bot_set)
         if tg_user_id not in bot_set.user_data:
             bot_set.user_data[tg_user_id] = {}
             
         current_accounts = bot_set.user_data[tg_user_id].get('qobuz_accounts', [])
+        new_list = [acc for acc in current_accounts if str(acc.get('user_id')) != final_q_user_id]
         
-        # Hapus akun lama jika user_id Qobuz-nya sama
-        new_list = [acc for acc in current_accounts if str(acc.get('user_id')) != str(final_q_user_id)]
-        
-        # Siapkan payload
+        display_email = email if email else final_q_user_id
         new_account = {
-            "user_id": str(final_q_user_id),
-            "email": email if email else str(final_q_user_id), # Gunakan email atau UID untuk label
+            "user_id": final_q_user_id,
+            "email": display_email,
             "token": final_q_token,
             "label": label
         }
@@ -432,22 +401,24 @@ class QobuzManager:
             new_account["app_secret"] = app_secret
 
         new_list.append(new_account)
+        temp_client.label = f"{display_email} (Private)"
         
-        # 3. Simpan ke Memory & DB
         bot_set.user_data[tg_user_id]['qobuz_accounts'] = new_list
         await database.save_user_settings(tg_user_id, {'qobuz_accounts': new_list})
         
-        # 4. Bersihkan cache lama dan MASUKKAN sesi yang baru
-        if tg_user_id in self.user_clients:
-            for c in self.user_clients[tg_user_id]:
+        # Pertahankan akun-akun lain yang sudah aktif di cache, hanya tutup jika UID-nya sama
+        existing_clients = self.user_clients.get(tg_user_id, [])
+        kept_clients = []
+        for c in existing_clients:
+            if str(c.user_id) == final_q_user_id:
                 await c.close_session()
+            elif c.session and not c.session.closed:
+                kept_clients.append(c)
                 
-        # --- [PERBAIKAN UTAMA] ---
-        # Simpan sesi yang berhasil login langsung ke RAM agar siap pakai
-        self.user_clients[tg_user_id] = [temp_client]
-        # -------------------------
+        kept_clients.append(temp_client)
+        self.user_clients[tg_user_id] = kept_clients
             
-        return True, f"Akun {label} berhasil diautentikasi dan siap digunakan detik ini juga!"
+        return True, f"Akun {label} berhasil diautentikasi dan siap digunakan!"
 
     async def remove_specific_account(self, tg_user_id, target_q_uid):
         tg_user_id = int(tg_user_id)
@@ -457,26 +428,28 @@ class QobuzManager:
             return False
             
         current_accounts = bot_set.user_data[tg_user_id].get('qobuz_accounts', [])
+        new_list = [acc for acc in current_accounts if str(acc.get('user_id')) != target_q_uid]
         
-        # Filter: Ambil semua KECUALI yang target_q_uid
-        new_list = [acc for acc in current_accounts if str(acc['user_id']) != target_q_uid]
-        
-        # Jika panjang list berubah, berarti ada yang dihapus
         if len(new_list) < len(current_accounts):
             bot_set.user_data[tg_user_id]['qobuz_accounts'] = new_list
             await database.save_user_settings(tg_user_id, {'qobuz_accounts': new_list})
             
-            # Reset cache agar sesi yang dihapus benar-benar hilang dari memori
             if tg_user_id in self.user_clients:
+                kept = []
                 for c in self.user_clients[tg_user_id]:
-                    await c.close_session()
-                del self.user_clients[tg_user_id]
+                    if str(c.user_id) == target_q_uid:
+                        await c.close_session()
+                    elif c.session and not c.session.closed:
+                        kept.append(c)
+                if kept:
+                    self.user_clients[tg_user_id] = kept
+                else:
+                    del self.user_clients[tg_user_id]
             return True
             
         return False
 
     def has_private_session(self, tg_user_id):
-        # Cek langsung dari Memory bot_set
         tg_user_id = int(tg_user_id)
         if tg_user_id in bot_set.user_data:
             accounts = bot_set.user_data[tg_user_id].get('qobuz_accounts', [])
@@ -485,50 +458,42 @@ class QobuzManager:
 
     async def get_user_clients(self, tg_user_id):
         tg_user_id = int(tg_user_id)
-        
-        # 1. Cek Cache Memory (Sesi yang sedang aktif / siap pakai)
+        accounts = bot_set.user_data.get(tg_user_id, {}).get('qobuz_accounts', [])
+        if not accounts:
+            return []
+
+        # Cek Cache Memory: gunakan kembali klien yang masih hidup, dan muat jika ada akun yang belum login
+        cached_map = {}
         if tg_user_id in self.user_clients:
-            active_clients = [c for c in self.user_clients[tg_user_id] if c.session and not c.session.closed]
-            if active_clients:
-                return active_clients
-        
-        # 2. Jika tidak ada di cache, buat instance baru dari data MongoDB (via bot_set)
+            for c in self.user_clients[tg_user_id]:
+                if c.session and not c.session.closed:
+                    cached_map[str(c.user_id)] = c
+
         loaded_clients = []
-        if tg_user_id in bot_set.user_data:
-            accounts = bot_set.user_data[tg_user_id].get('qobuz_accounts', [])
+        for acc in accounts:
+            uid_str = str(acc.get('user_id'))
+            if uid_str in cached_map:
+                loaded_clients.append(cached_map[uid_str])
+                continue
+
+            client = QoClient(
+                user_id=uid_str, 
+                user_token=acc['token'],
+                app_id=acc.get('app_id'),
+                app_secret=acc.get('app_secret')
+            )
+            try:
+                await client.login()
+                email_label = acc.get('email', client.label)
+                client.label = f"{email_label} (Private)"
+                loaded_clients.append(client)
+            except Exception as e:
+                LOGGER.error(f"Gagal login ulang akun Qobuz user {tg_user_id} (ID: {uid_str}): {e}")
+                await client.close_session()
+        
+        if loaded_clients:
+            self.user_clients[tg_user_id] = loaded_clients
             
-            for acc in accounts:
-                # --- [PERBAIKAN 1] ---
-                # Pastikan app_id dan app_secret ikut dipanggil dari database
-                client = QoClient(
-                    user_id=acc['user_id'], 
-                    user_token=acc['token'],
-                    app_id=acc.get('app_id'),
-                    app_secret=acc.get('app_secret')
-                )
-                # ---------------------
-                
-                try:
-                    await client.login()
-                    
-                    # Buat label lebih informatif (menampilkan email jika login via email)
-                    email_label = acc.get('email', client.label)
-                    client.label = f"{email_label} (Private)"
-                    
-                    loaded_clients.append(client)
-                except Exception as e:
-                    LOGGER.error(f"Gagal login ulang akun user {tg_user_id} (ID: {acc['user_id']}): {e}")
-                    
-                    # --- [PERBAIKAN 2: MENCEGAH MEMORY LEAK] ---
-                    # Tutup sesi HANYA jika login ulang ini gagal, 
-                    # agar tidak memicu error "Unclosed client session"
-                    if client.session and not client.session.closed:
-                        await client.close_session()
-                    # -------------------------------------------
-            
-            if loaded_clients:
-                self.user_clients[tg_user_id] = loaded_clients
-                
         return loaded_clients
 
     async def setup_quality(self, user_id, quality):
@@ -537,6 +502,18 @@ class QobuzManager:
             bot_set.user_data[user_id] = {}
         bot_set.user_data[user_id]['qobuz_qual'] = int(quality)
         await database.save_user_settings(user_id, {'qobuz_qual': int(quality)})
+
+    async def shutdown(self):
+        """Menutup seluruh sesi HTTP akun private saat bot dimatikan."""
+        for uid, clients in list(self.user_clients.items()):
+            for c in clients:
+                try:
+                    await c.close_session()
+                except Exception:
+                    pass
+        self.user_clients.clear()
+        from .utils import close_qobuz_utils_session
+        await close_qobuz_utils_session()
 
 # Instance Global
 qobuz_manager = QobuzManager()
