@@ -221,13 +221,15 @@ class DeezerAPI:
         if not track_token:
             raise Exception("Deezer: Track token kosong (Not available in country).")
 
-        # Server media Deezer menggunakan kode 'FLAC' untuk seluruh stream lossless
-        api_format = 'FLAC' if format in ('FLAC_24', 'FLAC') else format
-        fallback_chain = [api_format]
-        if api_format == 'FLAC':
-            fallback_chain.extend(['MP3_320', 'MP3_128'])
-        elif api_format == 'MP3_320':
-            fallback_chain.append('MP3_128')
+        # Susun rantai prioritas format sesuai pilihan kualitas (FLAC_24 tetap di urutan pertama)
+        if format == 'FLAC_24':
+            fallback_chain = ['FLAC_24', 'FLAC', 'MP3_320', 'MP3_128']
+        elif format == 'FLAC':
+            fallback_chain = ['FLAC', 'MP3_320', 'MP3_128']
+        elif format == 'MP3_320':
+            fallback_chain = ['MP3_320', 'MP3_128']
+        else:
+            fallback_chain = ['MP3_128']
 
         formats_payload = [{'cipher': 'BF_CBC_STRIPE', 'format': fmt} for fmt in fallback_chain]
         json_payload = { 
