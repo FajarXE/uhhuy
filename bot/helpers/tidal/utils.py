@@ -111,6 +111,7 @@ async def convert_ts_to_mp4(ts_path: str, output_path: str):
 
 async def get_stream_session(track_data: dict, user: dict):
     media_tags = (track_data.get('mediaMetadata') or {}).get('tags', [])
+    audio_modes = track_data.get('audioModes') or []
     formats = None
 
     if 'tidal_api' not in user:
@@ -119,38 +120,44 @@ async def get_stream_session(track_data: dict, user: dict):
     client: TidalApi = user['tidal_api']
     qual, spatial, _, __ = tidal_manager.get_user_quality_settings(user["user_id"])
 
+    is_atmos_track = ('DOLBY_ATMOS' in media_tags) or ('DOLBY_ATMOS' in audio_modes)
+    is_atmos_only = is_atmos_track and ('LOSSLESS' not in media_tags) and ('HIRES_LOSSLESS' not in media_tags)
+
     if 'SONY_360RA' in media_tags and spatial == 'Sony 360RA':
         formats = '360ra'
-    elif 'DOLBY_ATMOS' in media_tags and spatial == 'ATMOS AC3 JOC':
+    elif is_atmos_track and spatial == 'ATMOS AC3 JOC':
         formats = 'ac3'
-    elif 'DOLBY_ATMOS' in media_tags and spatial == 'ATMOS AC4':
+    elif is_atmos_track and spatial == 'ATMOS AC4':
         formats = 'ac4'
+    elif is_atmos_only:
+        # Jika link yang dikirim adalah rilisan khusus Dolby Atmos meskipun spatial user OFF
+        formats = 'ac3' if (client.tv_session or client.mobile_hires) else 'ac4'
     elif 'HIRES_LOSSLESS' in media_tags and qual == 'HI_RES':
         formats = 'flac_hires'
 
     session_map = {
         'flac_hires': client.mobile_hires,
         '360ra': client.mobile_hires or client.mobile_atmos,
-        'ac4': client.mobile_atmos,
-        'ac3': client.tv_session or client.mobile_atmos or client.mobile_hires,
+        'ac4': client.mobile_atmos or client.mobile_hires or client.tv_session,
+        'ac3': client.tv_session or client.mobile_hires or client.mobile_atmos,
         None: client.tv_session or client.mobile_hires or client.mobile_atmos, 
     }
     session = session_map.get(formats)
 
-    if not formats and 'DOLBY_ATMOS' in media_tags:
+    if not formats and is_atmos_track:
         if client.mobile_hires:
             session = client.mobile_hires
 
-    # Fallback jika session spesifik (misal mobile_hires) bernilai None pada akun ini
     if session is None:
         session = client.mobile_hires or client.tv_session or client.mobile_atmos or (client.saved[0] if client.saved else None)
         if formats == 'flac_hires' and not client.mobile_hires:
             formats = None
 
+    # Endpoint Tidal wajib menggunakan audioquality='LOW' saat menarik stream Atmos / 360RA
     if formats == 'flac_hires':
         quality = 'HI_RES' 
-    elif formats in ['360ra', 'ac3', 'ac4']:
-        quality = 'DOLBY_ATMOS' if 'ac' in str(formats) else 'LOW' 
+    elif formats in ['360ra', 'ac3', 'ac4'] or is_atmos_only:
+        quality = 'LOW' 
     else:
         if qual == 'HI_RES' and ('HIRES_LOSSLESS' not in media_tags or not client.mobile_hires):
             quality = 'LOSSLESS' 
