@@ -6,11 +6,9 @@ from bot.logger import LOGGER
 from config import Config
 from .dzapi import DeezerAPI
 
-# Import Database & Settings untuk persistensi MongoDB
 from bot.helpers.database.mongo_async import database
 from bot.settings import bot_set
 
-# --- Definisikan Error Kustom ---
 class DeezerError(Exception):
     pass
 
@@ -25,7 +23,14 @@ class DeezerLoginManager:
 
     async def initialize_clients(self):
         """Login akun Global (dari Config)."""
-        # 1. Muat Kualitas Default dari DB
+        if self.clients:
+            for old_c in self.clients:
+                try:
+                    await old_c.close()
+                except Exception:
+                    pass
+            self.clients = []
+
         try:
             all_settings = await database.get_variable()
             db_quality = all_settings.get('DEEZER_QUALITY') if all_settings else None
@@ -34,7 +39,6 @@ class DeezerLoginManager:
         except Exception as e:
             LOGGER.error(f"Deezer Manager: Gagal memuat kualitas DB: {e}")
 
-        # 2. Login Akun Global
         if not self.account_configs:
             LOGGER.warning("Deezer Manager: Tidak ada akun Global (Config).")
             return
@@ -60,24 +64,28 @@ class DeezerLoginManager:
 
     def get_client(self) -> DeezerAPI | None:
         """Ambil klien Global (Round Robin)."""
-        if not self._client_cycler: return None
+        if not self.clients:
+            return None
+        if not self._client_cycler:
+            self._client_cycler = itertools.cycle(self.clients)
         try:
             return next(self._client_cycler)
-        except: return None
+        except Exception:
+            return None
 
-    # --- PENGATURAN KUALITAS ---
     async def setup_quality(self, user_id: int, qual: str = None):
-        if user_id not in self.user_data: self.user_data[user_id] = {}
+        user_id = int(user_id)
+        if user_id not in self.user_data:
+            self.user_data[user_id] = {}
         if qual in ["FLAC_24", "FLAC", "MP3_320", "MP3_128"]:
             self.user_data[user_id]['deezer_qual'] = qual
-            # Simpan juga ke MongoDB permanen agar sinkron dengan qopy/settings
+            bot_set.user_data.setdefault(user_id, {})['deezer_qual'] = qual
             await database.save_user_settings(user_id, {'deezer_qual': qual})
 
     def get_user_quality(self, user_id: int) -> str:
-        # Cek Memory (bot_set) dulu karena user_settings.py menyimpannya di sana
+        user_id = int(user_id)
         if user_id in bot_set.user_data and 'deezer_qual' in bot_set.user_data[user_id]:
             return bot_set.user_data[user_id]['deezer_qual']
-        # Fallback ke cache internal manager
         return self.user_data.get(user_id, {}).get('deezer_qual', self.quality)
 
     # ==========================================
@@ -85,34 +93,29 @@ class DeezerLoginManager:
     # ==========================================
 
     async def add_user_account(self, tg_user_id, arl):
-        """Menambahkan akun pribadi ke MongoDB."""
-        # 1. Validasi Login
+        """Menambahkan akun pribadi ke MongoDB dan mempertahankan sesi aktif di RAM."""
         temp_client = DeezerAPI()
         try:
             await temp_client.login(arl=arl)
             user_data = temp_client.user
-            dz_user_id = user_data['USER']['USER_ID']
-            dz_name = user_data['USER']['BLOG_NAME'] # Username Deezer
+            dz_user_id = str(user_data['USER']['USER_ID'])
+            dz_name = user_data['USER']['BLOG_NAME']
             label = f"{dz_name} ({dz_user_id})"
+            temp_client.user['USER']['BLOG_NAME'] = f"{dz_name} (Pribadi)"
         except Exception as e:
             await temp_client.close()
             return False, f"Login Gagal: {str(e)}"
-        
-        await temp_client.close()
 
         tg_user_id = int(tg_user_id)
         
-        # 2. Update Memory & DB
         if tg_user_id not in bot_set.user_data:
             bot_set.user_data[tg_user_id] = {}
             
         current_accounts = bot_set.user_data[tg_user_id].get('deezer_accounts', [])
-        
-        # Hapus duplikat jika ID Deezer sama
-        new_list = [acc for acc in current_accounts if str(acc.get('user_id')) != str(dz_user_id)]
+        new_list = [acc for acc in current_accounts if str(acc.get('user_id')) != dz_user_id]
         
         new_account = {
-            "user_id": str(dz_user_id),
+            "user_id": dz_user_id,
             "arl": arl,
             "label": dz_name
         }
@@ -121,11 +124,17 @@ class DeezerLoginManager:
         bot_set.user_data[tg_user_id]['deezer_accounts'] = new_list
         await database.save_user_settings(tg_user_id, {'deezer_accounts': new_list})
         
-        # Reset cache agar dimuat ulang
-        if tg_user_id in self.user_clients:
-            for c in self.user_clients[tg_user_id]:
+        existing_clients = self.user_clients.get(tg_user_id, [])
+        kept_clients = []
+        for c in existing_clients:
+            c_uid = str(c.user.get('USER', {}).get('USER_ID', '')) if c.user else ''
+            if c_uid == dz_user_id:
                 await c.close()
-            del self.user_clients[tg_user_id]
+            elif c.session and not c.session.closed:
+                kept_clients.append(c)
+
+        kept_clients.append(temp_client)
+        self.user_clients[tg_user_id] = kept_clients
             
         return True, f"Akun {label} berhasil disimpan!"
 
@@ -133,7 +142,8 @@ class DeezerLoginManager:
         tg_user_id = int(tg_user_id)
         target_dz_uid = str(target_dz_uid)
         
-        if tg_user_id not in bot_set.user_data: return False
+        if tg_user_id not in bot_set.user_data:
+            return False
             
         current_accounts = bot_set.user_data[tg_user_id].get('deezer_accounts', [])
         new_list = [acc for acc in current_accounts if str(acc.get('user_id')) != target_dz_uid]
@@ -143,9 +153,17 @@ class DeezerLoginManager:
             await database.save_user_settings(tg_user_id, {'deezer_accounts': new_list})
             
             if tg_user_id in self.user_clients:
+                kept = []
                 for c in self.user_clients[tg_user_id]:
-                    await c.close()
-                del self.user_clients[tg_user_id]
+                    c_uid = str(c.user.get('USER', {}).get('USER_ID', '')) if c.user else ''
+                    if c_uid == target_dz_uid:
+                        await c.close()
+                    elif c.session and not c.session.closed:
+                        kept.append(c)
+                if kept:
+                    self.user_clients[tg_user_id] = kept
+                else:
+                    del self.user_clients[tg_user_id]
             return True
         return False
 
@@ -159,39 +177,56 @@ class DeezerLoginManager:
     async def get_user_clients(self, tg_user_id):
         """Mengembalikan LIST objek DeezerAPI yang aktif untuk user ini."""
         tg_user_id = int(tg_user_id)
-        
-        # Cek Cache
+        accounts = bot_set.user_data.get(tg_user_id, {}).get('deezer_accounts', [])
+        if not accounts:
+            return []
+
+        cached_map = {}
         if tg_user_id in self.user_clients:
-            active = [c for c in self.user_clients[tg_user_id] if c.session and not c.session.closed]
-            if active: return active
+            for c in self.user_clients[tg_user_id]:
+                if c.session and not c.session.closed and c.user:
+                    c_uid = str(c.user.get('USER', {}).get('USER_ID', ''))
+                    if c_uid:
+                        cached_map[c_uid] = c
         
-        # Load dari DB/Memory
         loaded_clients = []
-        if tg_user_id in bot_set.user_data:
-            accounts = bot_set.user_data[tg_user_id].get('deezer_accounts', [])
-            
-            for acc in accounts:
-                client = DeezerAPI()
-                try:
-                    await client.login(arl=acc['arl'])
-                    # Labeling untuk log
-                    client.user['USER']['BLOG_NAME'] += " (Pribadi)"
-                    loaded_clients.append(client)
-                except Exception as e:
-                    LOGGER.error(f"Gagal login ulang Deezer User {tg_user_id}: {e}")
-                    await client.close()
-            
-            if loaded_clients:
-                self.user_clients[tg_user_id] = loaded_clients
+        for acc in accounts:
+            uid_str = str(acc.get('user_id', ''))
+            if uid_str and uid_str in cached_map:
+                loaded_clients.append(cached_map[uid_str])
+                continue
+
+            client = DeezerAPI()
+            try:
+                await client.login(arl=acc['arl'])
+                client.user['USER']['BLOG_NAME'] += " (Pribadi)"
+                loaded_clients.append(client)
+            except Exception as e:
+                LOGGER.error(f"Gagal login ulang Deezer User {tg_user_id}: {e}")
+                await client.close()
+        
+        if loaded_clients:
+            self.user_clients[tg_user_id] = loaded_clients
                 
         return loaded_clients
 
     async def shutdown(self):
-        # Tutup Global
-        for c in self.clients: await c.close()
-        # Tutup Private
-        for uid, clients in self.user_clients.items():
-            for c in clients: await c.close()
+        for c in self.clients:
+            try:
+                await c.close()
+            except Exception:
+                pass
+        for uid, clients in list(self.user_clients.items()):
+            for c in clients:
+                try:
+                    await c.close()
+                except Exception:
+                    pass
+        try:
+            from .metadata import close_meta_session
+            await close_meta_session()
+        except Exception:
+            pass
         self.clients = []
         self.user_clients = {}
 
