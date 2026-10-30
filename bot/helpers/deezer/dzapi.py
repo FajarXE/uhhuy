@@ -3,7 +3,6 @@
 import re
 import os
 import aiohttp
-import aiofiles
 import aiolimiter
 import asyncio
 
@@ -21,13 +20,17 @@ from bot.logger import LOGGER
 GLOBAL_DZ_LIMITER = aiolimiter.AsyncLimiter(30, 60)
 # ---------------------------------------------------
 
+def get_deezer_speed() -> int:
+    """Kecepatan unduh Deezer sudah dihitung otomatis melalui Aria2c global stat."""
+    return 0
+
 class APIError(Exception):
     def __init__(self, type, msg, payload):
         self.type = type
         self.msg = msg
         self.payload = payload
     def __str__(self):
-        return ', '.join((self.type, self.msg, str(self.payload)))
+        return ', '.join((str(self.type), str(self.msg), str(self.payload)))
 
 class DeezerAPI:
     def __init__(self):
@@ -43,6 +46,7 @@ class DeezerAPI:
         self.renew_timestamp = ceil(time())
         self.language = 'en'
         self.available_formats = ['MP3_128']
+        self._auth_lock = asyncio.Lock()
         
         if not Config.DEEZER_BF_SECRET:
             LOGGER.warning("DEEZER_BF_SECRET tidak diatur di Config!")
@@ -50,12 +54,16 @@ class DeezerAPI:
         else:
             self.bf_secret = Config.DEEZER_BF_SECRET.encode('ascii')
 
-    async def _api_call(self, method, payload={}):
+    def _ensure_session(self):
         if not self.session or self.session.closed:
+            timeout = aiohttp.ClientTimeout(total=30)
+            connector = aiohttp.TCPConnector(limit=50, keepalive_timeout=30, enable_cleanup_closed=True)
             self.session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
                 headers={
                     'accept': '*/*',
-                    'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
+                    'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
                     'content-type': 'text/plain;charset=UTF-8',
                     'origin': 'https://www.deezer.com',
                     'sec-fetch-site': 'same-origin',
@@ -65,6 +73,11 @@ class DeezerAPI:
                     'accept-language': 'en-US,en;q=0.9',
                 }
             )
+
+    async def _api_call(self, method, payload=None, _retry=False):
+        if payload is None:
+            payload = {}
+        self._ensure_session()
             
         api_token = self.api_token if method not in ('deezer.getUserData', 'user.getArl') else ''
         params = {
@@ -77,40 +90,42 @@ class DeezerAPI:
 
         async with GLOBAL_DZ_LIMITER:
             async with self.session.post(self.gw_light_url, params=params, json=payload) as r:
-                resp = await r.json()
+                resp = await r.json(content_type=None)
 
-        if resp['error']:
-            type = list(resp['error'].keys())[0]
-            msg = list(resp['error'].values())[0]
-            if type=='VALID_TOKEN_REQUIRED':
-                LOGGER.debug("Deezer: Refreshing User data")
+        if resp.get('error'):
+            err_type = list(resp['error'].keys())[0]
+            err_msg = list(resp['error'].values())[0]
+            if err_type == 'VALID_TOKEN_REQUIRED' and not _retry:
+                LOGGER.debug("Deezer: Refreshing User data (VALID_TOKEN_REQUIRED)")
                 try:
-                    await asyncio.sleep(1)
-                    await self._api_call('deezer.getUserData')
-                    return await self._api_call(method, payload)
-                except:
-                    LOGGER.error("Deezer: Refreshing User data failed")
-            raise APIError(type, msg, resp['payload'])
+                    async with self._auth_lock:
+                        await asyncio.sleep(0.5)
+                        await self._api_call('deezer.getUserData', _retry=True)
+                    return await self._api_call(method, payload, _retry=True)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    LOGGER.error(f"Deezer: Refreshing User data failed: {e}")
+            raise APIError(err_type, err_msg, resp.get('payload'))
 
         if method == 'deezer.getUserData':
-            self.api_token = resp['results']['checkForm']
-            self.country = resp['results']['COUNTRY']
-            self.license_token = resp['results']['USER']['OPTIONS']['license_token']
+            results = resp['results']
+            self.api_token = results['checkForm']
+            self.country = results['COUNTRY']
+            self.license_token = results['USER']['OPTIONS']['license_token']
             self.renew_timestamp = ceil(time())
-            self.language = resp['results']['USER']['SETTING']['global']['language']
+            self.language = results['USER']['SETTING']['global'].get('language', 'en')
             
             self.available_formats = ['MP3_128']
             format_dict = {'web_hq': 'MP3_320', 'web_lossless': 'FLAC'}
             for k, v in format_dict.items():
-                if resp['results']['USER']['OPTIONS'][k]:
+                if results['USER']['OPTIONS'].get(k):
                     self.available_formats.append(v)
             
-            # --- [TAMBAHAN UNTUK HI-RES 24-BIT] ---
             if 'FLAC' in self.available_formats:
                 self.available_formats.append('FLAC_24')
-            # --------------------------------------
             
-            self.user = resp['results'] 
+            self.user = results 
         
         return resp['results']
 
@@ -125,95 +140,120 @@ class DeezerAPI:
                 
         except Exception as e:
             LOGGER.error(f"DEEZER : {e}")
-            if self.session:
-                await self.session.close()
+            await self.close()
             raise e 
 
         LOGGER.info(f"Deezer: Berhasil login untuk user ID {self.user['USER']['USER_ID']}")
         return True
 
     async def login_via_email(self, email, password):
-        async with GLOBAL_DZ_LIMITER:
-            await self._api_call('deezer.getUserData') 
+        await self._api_call('deezer.getUserData') 
         
-        password = MD5.new(password.encode()).hexdigest()
+        password_md5 = MD5.new(password.encode()).hexdigest()
 
         params = {
             'app_id': self.client_id,
             'login': email,
-            'password': password,
-            'hash': MD5.new((self.client_id + email + password + self.client_secret).encode()).hexdigest(),
+            'password': password_md5,
+            'hash': MD5.new((self.client_id + email + password_md5 + self.client_secret).encode()).hexdigest(),
         }
 
         async with GLOBAL_DZ_LIMITER:
             async with self.session.get('https://connect.deezer.com/oauth/user_auth.php', params=params) as r:
-                json_data = await r.json()
+                json_data = await r.json(content_type=None)
 
         if 'error' in json_data:
             raise Exception(f'Error saat mendapatkan access token: {json_data["error"]}')
 
         arl = await self._api_call('user.getArl')
-
         return arl, await self.login_via_arl(arl)
 
     async def login_via_arl(self, arl):
-        cookie = {'arl':arl}
-        if not self.session:
+        self._ensure_session()
+        if not self.api_token:
             await self._api_call('deezer.getUserData') 
             
-        self.session.cookie_jar.update_cookies(cookie)
+        self.session.cookie_jar.update_cookies({'arl': arl})
         user_data = await self._api_call('deezer.getUserData')
         if not user_data['USER']['USER_ID']:
             raise Exception('Invalid arl')
         self.user = user_data
         return user_data
 
-    async def custom_url_parse(self, link) -> (str, int):
+    async def custom_url_parse(self, link) -> tuple[str, str]:
+        self._ensure_session()
         url = urlparse(link)
-        if url.hostname == 'link.deezer.com':
+        if url.hostname and 'link.deezer.com' in url.hostname:
             async with GLOBAL_DZ_LIMITER:
-                if not self.session:
-                    raise Exception("Sesi Deezer belum diinisialisasi sebelum parsing URL")
-                
                 async with self.session.get(link, allow_redirects=True) as r:
                     if r.status != 200:
                         raise Exception(f'DEEZER : Invalid URL: {link}')
                     url = r.real_url
 
-        path_match = re.match(r'^\/(?:[a-z]{2}\/)?(track|album|artist|playlist)\/(\d+)\/?$', url.path)
+        path_str = str(url.path)
+        path_match = re.search(r'/(track|album|artist|playlist)/(\d+)', path_str)
         if not path_match:
             raise Exception(f'DEEZER : Invalid URL: {link}')
         return path_match.group(1), path_match.group(2)
 
     async def get_track(self, id):
-        res = await self._api_call('deezer.pageTrack', {'sng_id': id})
-        return res
+        return await self._api_call('deezer.pageTrack', {'sng_id': id})
 
     async def get_track_data(self, id):
-        # Memastikan kita meminta CONTRIBUTORS dan data ALBUM untuk label
         payload = {
             'sng_id': id,
             'array_default': ['CONTRIBUTORS', 'ALB_TITLE', 'ALB_LABEL', 'ART_NAME']
         }
-        res = await self._api_call('song.getData', payload)
-        return res
+        return await self._api_call('song.getData', payload)
 
     async def get_track_url(self, id, track_token, track_token_expiry, format):
         if time() - self.renew_timestamp >= 3600:
-            LOGGER.debug("Deezer: License token expired - trying to refresh User data")
-            await self._api_call('deezer.getUserData')
-        if time() - track_token_expiry >= 0:
-            LOGGER.debug("Deezer: Track token expired - trying to refresh token")
-            track_token = await self._api_call('song.getData', {'sng_id': id, 'array_default': ['TRACK_TOKEN']})['TRACK_TOKEN']
+            async with self._auth_lock:
+                if time() - self.renew_timestamp >= 3600:
+                    LOGGER.debug("Deezer: License token expired - trying to refresh User data")
+                    await self._api_call('deezer.getUserData')
+
+        if not track_token or (track_token_expiry and time() - track_token_expiry >= 0):
+            LOGGER.debug("Deezer: Track token expired or missing - refreshing token")
+            fresh_data = await self._api_call('song.getData', {'sng_id': id, 'array_default': ['TRACK_TOKEN']})
+            track_token = fresh_data.get('TRACK_TOKEN')
+
+        if not track_token:
+            raise Exception("Deezer: Track token kosong (Not available in country).")
+
+        # Server media Deezer menggunakan kode 'FLAC' untuk seluruh stream lossless
+        api_format = 'FLAC' if format in ('FLAC_24', 'FLAC') else format
+        fallback_chain = [api_format]
+        if api_format == 'FLAC':
+            fallback_chain.extend(['MP3_320', 'MP3_128'])
+        elif api_format == 'MP3_320':
+            fallback_chain.append('MP3_128')
+
+        formats_payload = [{'cipher': 'BF_CBC_STRIPE', 'format': fmt} for fmt in fallback_chain]
         json_payload = { 
             'license_token': self.license_token,
-            'media': [{'type': 'FULL','formats': [{'cipher': 'BF_CBC_STRIPE', 'format': format}]}],
+            'media': [{'type': 'FULL', 'formats': formats_payload}],
             'track_tokens': [track_token]
         }
+
         async with GLOBAL_DZ_LIMITER:
             async with self.session.post('https://media.deezer.com/v1/get_url', json=json_payload) as r:
-                resp = await r.json()
-        return resp['data'][0]['media'][0]['sources'][0]['url']
+                resp = await r.json(content_type=None)
+
+        data_list = resp.get('data') if isinstance(resp, dict) else None
+        if not data_list:
+            raise Exception(f"Deezer: Media URL response kosong ({resp}).")
+
+        first_data = data_list[0]
+        if 'errors' in first_data and not first_data.get('media'):
+            err_detail = first_data['errors'][0].get('message', 'Unknown media error')
+            raise Exception(f"Deezer: Track not available ({err_detail})")
+
+        media_list = first_data.get('media')
+        if not media_list or not media_list[0].get('sources'):
+            raise Exception("Deezer: Track not available (Sources kosong / Region lock).")
+
+        return media_list[0]['sources'][0]['url']
 
     async def get_album(self, id):
         try:
@@ -248,16 +288,18 @@ class DeezerAPI:
     async def get_artist_album_ids(self, id, start, nb, credited_albums):
         payload = {
             'art_id': id, 'start': start, 'nb': nb,
-            'filter_role_id': [0,5] if credited_albums else [0],
+            'filter_role_id': [0, 5] if credited_albums else [0],
             'nb_songs': 0, 'discography_mode': 'all' if credited_albums else None,
             'array_default': ['ALB_ID']
         }
         resp = await self._api_call('album.getDiscography', payload)
-        return [a['ALB_ID'] for a in resp['data']]
+        return [a['ALB_ID'] for a in resp.get('data', [])]
 
     async def get_playlist(self, id, nb, start):
-        res = await self._api_call('deezer.pagePlaylist', {'nb': nb, 'start': start, 'playlist_id': id, 'lang': self.language, 'tab': 0, 'tags': True, 'header': True})
-        return res
+        return await self._api_call('deezer.pagePlaylist', {
+            'nb': nb, 'start': start, 'playlist_id': id,
+            'lang': self.language, 'tab': 0, 'tags': True, 'header': True
+        })
 
     def _get_blowfish_key(self, track_id):
         md5_id = MD5.new(str(track_id).encode()).hexdigest().encode('ascii')
@@ -269,42 +311,54 @@ class DeezerAPI:
         enc_path = path + ".enc"
         
         from bot.helpers.utils import download_file
-        import os
-        import asyncio
         
-        # 1. Aria2 ngebut mengunduh file terenkripsi (.enc)
-        err = await download_file(url, enc_path, details=details)
+        try:
+            err = await download_file(url, enc_path, details=details)
+        except asyncio.CancelledError:
+            for p in (enc_path, f"{enc_path}.aria2", path):
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            raise
         
-        # Jika dibatalkan (/cancel) atau gagal, bersihkan!
         if err is not None:
             if os.path.exists(enc_path):
-                try: os.remove(enc_path)
-                except: pass
+                try:
+                    os.remove(enc_path)
+                except OSError:
+                    pass
             return err 
             
-        # 2. Dekripsi Super Cepat via Background Thread (Bot TIDAK akan freeze lagi!)
         try:
             await asyncio.to_thread(self._decrypt_file_sync, bf_key, enc_path, path)
-            
-            # Bersihkan file .enc mentah setelah sukses menjadi FLAC/MP3
             if os.path.exists(enc_path):
-                os.remove(enc_path)
+                try:
+                    os.remove(enc_path)
+                except OSError:
+                    pass
             return None 
-            
+        except asyncio.CancelledError:
+            for p in (enc_path, path):
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            raise
         except Exception as e:
-            from bot.logger import LOGGER
             LOGGER.error(f"Deezer Decryption error: {e}")
-            if os.path.exists(enc_path):
-                try: os.remove(enc_path)
-                except: pass
+            for p in (enc_path, path):
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
             return str(e)
 
-    # --- TAMBAHKAN FUNGSI BARU INI TEPAT DI BAWAH dl_track ---
     @staticmethod
     def _decrypt_file_sync(bf_key, enc_path, path):
-        from Cryptodome.Cipher import Blowfish
-        import os
-        
         encrypt_chunk_size = 3 * 2048
         iv = b"\x00\x01\x02\x03\x04\x05\x06\x07"
         
@@ -313,7 +367,6 @@ class DeezerAPI:
                 chunk = enc_file.read(encrypt_chunk_size)
                 if not chunk:
                     break
-                # Bongkar gembok hanya pada 2048 bytes pertama setiap potongan
                 if len(chunk) >= 2048:
                     cipher = Blowfish.new(bf_key, Blowfish.MODE_CBC, iv)
                     decrypted_chunk = cipher.decrypt(chunk[:2048]) + chunk[2048:]
