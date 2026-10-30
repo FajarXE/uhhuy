@@ -4,6 +4,7 @@ import aiohttp
 import asyncio
 import aiolimiter
 import logging
+import time
 
 from datetime import datetime, timedelta
 from traceback import format_exc
@@ -11,14 +12,10 @@ from traceback import format_exc
 from config import Config
 from bot.logger import LOGGER
 
-# from orpheusdl-tidal
-
 
 class TidalApi:
     def __init__(self):
-        # --- PERBAIKAN: Memperbaiki typo URL ---
         self.TIDAL_API_BASE = 'https://api.tidal.com/v1/'
-        # --- PERBAIKAN SELESAI ---
         
         self.ratelimit = aiolimiter.AsyncLimiter(30, 60)
         self.session: aiohttp.ClientSession | None = None
@@ -32,38 +29,38 @@ class TidalApi:
         self.sub_type: str | None = None
         self.user_data = {}
         
-        self.saved = [] # just for storing opened client session
+        self.saved = []
 
-        # --- Tambahan: Variabel ini sekarang ada di instance, bukan global ---
         self.user_id: str | None = None
         self.country_code: str | None = None
-        # --- Selesai ---
 
-        
+    def _ensure_http_session(self):
+        if self.session is None or self.session.closed:
+            timeout = aiohttp.ClientTimeout(total=30)
+            connector = aiohttp.TCPConnector(limit=50, keepalive_timeout=30, enable_cleanup_closed=True)
+            self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+            if self.tv_session:
+                self.tv_session.session = self.session
+            if self.mobile_hires:
+                self.mobile_hires.session = self.session
+            if self.mobile_atmos:
+                self.mobile_atmos.session = self.session
+
     async def _get(self, url: str, params: dict | None = None, session=None, refresh=False):
-        # --- [FIX] AUTO-RECONNECT SESI YANG MATI ---
         if self.session is None or self.session.closed:
             LOGGER.warning("TidalApi: Session is closed! Membuka ulang sesi aiohttp on-the-fly...")
-            self.session = aiohttp.ClientSession()
-            # Perbarui referensi sesi di objek turunan
-            if self.tv_session: self.tv_session.session = self.session
-            if self.mobile_hires: self.mobile_hires.session = self.session
-            if self.mobile_atmos: self.mobile_atmos.session = self.session
-        # -------------------------------------------
+            self._ensure_http_session()
         
-        # if no session is given, use the first one (default)
         if session is None:
             if not self.saved:
-                 raise Exception("TidalApi: Tidak ada sesi (self.saved) yang tersedia untuk panggilan _get.")
+                raise Exception("TidalApi: Tidak ada sesi (self.saved) yang tersedia untuk panggilan _get.")
             session = self.saved[0]
 
-        params = params or {}
+        params = params.copy() if params else {}
         params.setdefault("countryCode", session.country_code)
         
         if 'limit' not in params:
             params["limit"] = "9999"
-        # --- MODIFIKASI SELESAI ---
-
 
         async with self.ratelimit:
             async with self.session.get(
@@ -72,39 +69,39 @@ class TidalApi:
                 params=params
             ) as resp:
 
-                # if the request 401s or 403s, try refreshing the TV/Mobile session in case that helps
                 if not refresh and (resp.status == 401 or resp.status == 403):
-                    await session.refresh()
+                    await session.safe_refresh()
                     return await self._get(url, params, session, True)
 
                 resp_json = None
                 try:
-                    resp_json = await resp.json()
-                except:  # some tracks seem to return a JSON with leading whitespace
-                    raise Exception(f'TIDAL : Response was not valid JSON. HTTP status {resp.status}. {resp.text}')
+                    resp_json = await resp.json(content_type=None)
+                except Exception:
+                    raw_txt = ""
+                    try:
+                        raw_txt = await resp.text()
+                    except Exception:
+                        pass
+                    raise Exception(f'TIDAL : Response was not valid JSON. HTTP status {resp.status}. {raw_txt[:300]}')
 
-                if 'status' in resp_json and resp_json['status'] == 404 and \
-                        'subStatus' in resp_json and resp_json['subStatus'] == 2001:
-                    raise Exception('TIDAL : {}. This might be region-locked.'.format(resp_json['userMessage']))
+                if isinstance(resp_json, dict):
+                    if resp_json.get('status') == 404 and resp_json.get('subStatus') == 2001:
+                        raise Exception('TIDAL : {}. This might be region-locked.'.format(resp_json.get('userMessage')))
 
-                if 'status' in resp_json and not resp_json['status'] == 200:
-                    raise Exception('TIDAL : ' + str(resp_json))
+                    if 'status' in resp_json and resp_json['status'] != 200:
+                        raise Exception('TIDAL : ' + str(resp_json))
 
                 return resp_json
-
 
     async def get_track(self, track_id):
         return await self._get(f'tracks/{track_id}')
 
-    # --- TAMBAHAN BARU UNTUK COMPOSER ---
     async def get_track_contributors(self, track_id):
         """Mengambil daftar kontributor/kredit untuk sebuah lagu (untuk Composer)."""
         return await self._get(f'tracks/{track_id}/contributors')
-    # --- AKHIR TAMBAHAN ---
 
     async def get_album(self, album_id):
         return await self._get('albums/' + str(album_id))
-    
 
     async def get_album_tracks(self, album_id):
         return await self._get('albums/' + str(album_id) + '/tracks')
@@ -112,35 +109,29 @@ class TidalApi:
     async def get_video(self, video_id):
         return await self._get(f'videos/{video_id}')
 
-    async def get_video_stream_url(self, video_id, session):
+    async def get_video_stream_url(self, video_id, session=None):
+        target_session = session or self.tv_session or (self.saved[0] if self.saved else None)
         return await self._get(f'videos/{video_id}/playbackinfo', {
             'playbackmode': 'STREAM',
             'assetpresentation': 'FULL',
             'videoquality': 'HIGH',
             'prefetch': 'false'
-        }, session)
+        }, target_session)
 
-    # --- TAMBAHAN BARU UNTUK PLAYLIST ---
     async def get_playlist(self, playlist_id):
         return await self._get('playlists/' + str(playlist_id))
 
-    # --- MODIFIKASI UNTUK PAGINATION ---
     async def get_playlist_tracks(self, playlist_id, total_tracks: int):
-        # Playlist menggunakan 'items' bukan 'tracks' untuk kontennya
-        # API dibatasi hingga 100 item per halaman, kita perlu melakukan paginasi
-        
         limit = 100
         offset = 0
         all_items = []
         
-        # Ambil sesi default sekali
         if not self.saved:
-                raise Exception("TidalApi: Tidak ada sesi (self.saved) yang tersedia.")
+            raise Exception("TidalApi: Tidak ada sesi (self.saved) yang tersedia.")
         default_session = self.saved[0]
 
-        # Jika total_tracks adalah 0, kita coba ambil 1 halaman saja
         if total_tracks == 0:
-            total_tracks = limit # Coba ambil 100 pertama
+            total_tracks = limit
 
         while offset < total_tracks:
             page_params = {
@@ -152,61 +143,47 @@ class TidalApi:
                 page_data = await self._get(
                     f'playlists/{playlist_id}/items',
                     params=page_params,
-                    session=default_session # Gunakan sesi default
+                    session=default_session
                 )
                 
                 if 'items' in page_data and page_data['items']:
                     all_items.extend(page_data['items'])
                     offset += limit
-                    # Jika ini adalah loop pertama untuk total_tracks=0,
-                    # perbarui total_tracks dengan nilai sebenarnya
                     if total_tracks == limit and offset == limit: 
                         total_tracks = page_data.get('totalNumberOfItems', total_tracks)
                 else:
-                    # Tidak ada item lagi, hentikan loop
                     break
             
             except Exception as e:
-                # Jika satu halaman gagal, seluruh permintaan gagal
                 LOGGER.error(f"TidalAPI: Gagal mengambil halaman playlist (offset {offset}): {e}")
-                raise e # Lempar kembali error
+                raise e
 
-        # Kembalikan data dalam format yang diharapkan (sama seperti respons tunggal)
         return {
             'items': all_items,
             'limit': total_tracks,
             'offset': 0,
             'totalNumberOfItems': len(all_items)
         }
-    # --- AKHIR MODIFIKASI ---
 
     async def get_artist(self, artist_id):
         return await self._get('artists/' + str(artist_id))
 
-
     async def get_artist_albums(self, artist_id):
         return await self._get('artists/' + str(artist_id) + '/albums')
-
 
     async def get_artist_albums_ep_singles(self, artist_id):
         return await self._get('artists/' + str(artist_id) + '/albums', params={'filter': 'EPSANDSINGLES'})
 
-
     async def get_stream_url(self, track_id, quality, session):
         return await self._get('tracks/' + str(track_id) + '/playbackinfopostpaywall/v4', {
-            'playbackmode': 'STREAM', # <-- WAJIB KEMBALI KE STREAM
+            'playbackmode': 'STREAM',
             'assetpresentation': 'FULL',
             'audioquality': quality,
-            'prefetch': 'false' # <-- KEMBALIKAN JUGA BARIS INI
-        },
-        session)
+            'prefetch': 'false'
+        }, session)
 
-    # call this from bot settings panel only
     async def get_tv_login_url(self):
-        # --- MODIFIKASI: Inisialisasi sesi di sini ---
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
-        # --- MODIFIKASI SELESAI ---
+        self._ensure_http_session()
 
         if not (Config.TIDAL_TV_TOKEN and Config.TIDAL_TV_SECRET):
             return False, "No Token/Secret added"
@@ -224,15 +201,11 @@ class TidalApi:
             logging.error(format_exc())
             return False, e
 
-    # --- MODIFIKASI: Tambahkan blok 'finally' untuk menutup sesi ---
     async def login_tv(self):
         try:
             await self.tv_session.auth()
             self.saved.append(self.tv_session)
-            
-            # --- MODIFIKASI: Simpan user_id ke instance ---
             self.user_id = self.tv_session.user_id
-            # --- MODIFIKASI SELESAI ---
             
             self.sub_type = await self.get_subscription()
             LOGGER.info(f"TIDAL : Loaded account - {self.sub_type}")
@@ -241,20 +214,14 @@ class TidalApi:
             return self.sub_type, None
         except Exception as e:
             logging.error(format_exc())
-            # Hapus 'await self.session.close()' dari sini
             return False, e
         finally:
-            # Blok ini akan SELALU berjalan, baik sukses maupun gagal
             if self.session and not self.session.closed:
                 await self.session.close()
-                LOGGER.debug("TidalApi: Sesi login TV sementara (dari get_tv_login_url) ditutup.")
-    # --- AKHIR MODIFIKASI ---
-
+                LOGGER.debug("TidalApi: Sesi login TV sementara ditutup.")
 
     async def login_from_saved(self, data):
-        # Inisialisasi sesi
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
+        self._ensure_http_session()
 
         self.tv_session = TvSession(
             Config.TIDAL_TV_TOKEN,
@@ -273,18 +240,14 @@ class TidalApi:
             await self.tv_session.refresh()
             self.saved.append(self.tv_session)
         except Exception as e:
-            import logging
-            from traceback import format_exc
             logging.error(format_exc())
             self.tv_session = None
-            from bot.logger import LOGGER
             LOGGER.error("TIDAL : Couldn't load TV/Auto - " + str(e))
 
-        # --- PERBAIKAN 1: PASS DATA TOKEN LANGSUNG KE MOBILE ---
         await self.refresh_mobile(data)
 
-        # --- PERBAIKAN 2: BLOKIR KLIEN JIKA SEMUA SESI (TV & MOBILE) MATI ---
         if not self.saved:
+            await self.close()
             raise Exception("Semua sesi (TV & Mobile) gagal diperbarui. Token kedaluwarsa atau metode login tidak valid.")
 
         if any([self.tv_session, self.mobile_hires, self.mobile_atmos]):
@@ -292,26 +255,21 @@ class TidalApi:
         else:
             self.sub_type = 'UNKNOWN'
 
-        from bot.logger import LOGGER
         LOGGER.info(f"TIDAL : Loaded account - {self.sub_type}")
-    
 
     async def refresh_mobile(self, data=None):
         if not Config.TIDAL_MOBILE:
             return
 
         if Config.TIDAL_MOBILE_TOKEN:
-            # --- PERBAIKAN 3: TERUSKAN DATA KE INIT MOBILE ---
             self.mobile_hires = await self._init_mobile_session(Config.TIDAL_MOBILE_TOKEN, 'Hires', data)
 
         if Config.TIDAL_ATMOS_MOBILE_TOKEN:
             self.mobile_atmos = await self._init_mobile_session(Config.TIDAL_ATMOS_MOBILE_TOKEN, 'Atmos', data)
 
-
     async def _init_mobile_session(self, token: str, device: str, data: dict = None) -> "MobileSession | None":
         session = MobileSession(token, self.session)
         
-        # --- PERBAIKAN 4: PRIORITASKAN DATA MENTAH DARIPADA TV SESSION ---
         if data:
             session.refresh_token = data['refresh_token']
             session.country_code = data['country_code']
@@ -324,42 +282,28 @@ class TidalApi:
             self.saved.append(session)
             return session
         except Exception as e:
-            from bot.logger import LOGGER
             LOGGER.error(f"TIDAL: Couldn't load Mobile {device} session - {e}")
             return None
 
-
     async def get_subscription(self) -> str:
-        if self.saved != []:
+        if self.saved:
             usersess = self.saved[0]
-            async with self.session.get(f'https://api.tidal.com/v1/users/{usersess.user_id}/subscription',
+            async with self.session.get(
+                f'https://api.tidal.com/v1/users/{usersess.user_id}/subscription',
                 params={'countryCode': usersess.country_code},
                 headers=usersess.auth_headers()
             ) as r:
-                json_resp = await r.json()
+                json_resp = await r.json(content_type=None)
                 if r.status != 200:
-                    raise Exception(f"TIDAL : {json_resp['userMessage']}")
+                    raise Exception(f"TIDAL : {json_resp.get('userMessage', json_resp)}")
                 return json_resp['subscription']['type']
-        
-    # --- MODIFIKASI: Fungsi ini sekarang ada di manager ---
-    # async def setup_quality(self, user_id: int=0, qual: str="", spatial: str="") -> None:
-    #     data = {}
-    #     self.user_data.setdefault(user_id, {})
-    #     if qual:
-    #         data["tidal_qual"] = qual
-    #     if spatial:
-    #         data["tidal_spatial"] = spatial
-    #     self.user_data[user_id].update(data)
-    # --- MODIFIKASI SELESAI ---
+        return 'UNKNOWN'
 
-    # --- TAMBAHAN BARU: Metode Close ---
     async def close(self):
         """Menutup aiohttp.ClientSession internal."""
         if self.session and not self.session.closed:
             await self.session.close()
             LOGGER.debug(f"TidalApi (User {self.user_id}): Sesi aiohttp ditutup.")
-    # --- AKHIR TAMBAHAN ---
-        
 
 
 class BaseSession:
@@ -372,29 +316,36 @@ class BaseSession:
         self.access_token: str | None = None
         self.refresh_token: str | None = None
         self.expires: datetime | None = None
+        self._refresh_lock = asyncio.Lock()
+        self._last_refresh_ts = 0.0
 
     def copy_from(self, other: "BaseSession"):
-        # --- MODIFIKASI: Pastikan 'other' tidak None ---
         if other:
             self.country_code = other.country_code
             self.refresh_token = other.refresh_token
             self.user_id = other.user_id
-        # --- MODIFIKASI SELESAI ---
 
     def auth_headers(self) -> dict:
         raise NotImplementedError
 
     async def refresh(self):
-            raise NotImplementedError
+        raise NotImplementedError
 
-        
+    async def safe_refresh(self):
+        """Mencegah banyak worker me-refresh token secara bersamaan (Race Condition)."""
+        async with self._refresh_lock:
+            now = time.time()
+            if now - self._last_refresh_ts < 10.0 and self.access_token:
+                return
+            await self.refresh()
+            self._last_refresh_ts = time.time()
+
 
 class MobileSession(BaseSession):
     def __init__(self, token: str, session: aiohttp.ClientSession):
         super().__init__(session)
         self.client_id = token
-        
-        
+
     async def refresh(self):
         if not self.refresh_token:
             raise Exception("TIDAL: Missing refresh token for MobileSession")
@@ -407,20 +358,16 @@ class MobileSession(BaseSession):
                 'grant_type': 'refresh_token'
             }
         ) as r:
-            json_resp = await r.json()
+            json_resp = await r.json(content_type=None)
             if r.status == 200:
-                # get user_id in case of direct refresh token login
-                # --- MODIFIKASI: Gunakan self.user_id ---
-                self.user_id = self.user_id # or data["user_id"]
-                # --- MODIFIKASI SELESAI ---
+                self.user_id = self.user_id or json_resp.get("user_id")
                 self.access_token = json_resp['access_token']
                 self.expires = datetime.now() + timedelta(seconds=json_resp['expires_in'])
                 self.refresh_token = json_resp.get("refresh_token", self.refresh_token)
+                self._last_refresh_ts = time.time()
             else:
-                # --- PERBAIKAN: Tangkap semua error selain 200 dengan rapi ---
                 error_msg = json_resp.get('userMessage') or json_resp.get('error_description') or str(json_resp)
                 raise Exception(f"TIDAL : {error_msg}")
-
 
     def auth_headers(self):
         return {
@@ -439,7 +386,6 @@ class TvSession(BaseSession):
         self.client_id = token
         self.client_secret = secret
         self.temp_data: dict | None = None
-        
 
     async def get_device(self):
         async with self.session.post(
@@ -449,7 +395,7 @@ class TvSession(BaseSession):
             if r.status != 200:
                 raise Exception("TIDAL : Invalid TV Client ID or Token")
 
-            json_resp = await r.json()
+            json_resp = await r.json(content_type=None)
             auth_link = f"https://link.tidal.com/{json_resp['userCode']}"
 
             self.temp_data = {
@@ -461,33 +407,29 @@ class TvSession(BaseSession):
             }
         
             return auth_link
-            
 
     async def auth(self):
-        # keep a timer - not causing infinite wait
-        #expiry = datetime.now() + timedelta(seconds=self.login_timeout)
         status_code = 400
         i = 1
-        # --- MODIFIKASI: Tambahkan batas waktu ---
+        json_resp = {}
         timeout = datetime.now() + timedelta(minutes=5)
         while status_code == 400 and datetime.now() < timeout:
-        # --- MODIFIKASI SELESAI ---
-            """if datetime.now() > expiry:
-                raise Exception('TIDAL : Authorization Timedout')"""
-            r = await self.session.post(self.AUTH_BASE + 'oauth2/token', data=self.temp_data)
-            status_code = r.status
-            await asyncio.sleep(i)
-            i+=1
+            async with self.session.post(self.AUTH_BASE + 'oauth2/token', data=self.temp_data) as r:
+                status_code = r.status
+                try:
+                    json_resp = await r.json(content_type=None)
+                except Exception:
+                    json_resp = {}
+            if status_code == 200:
+                break
+            await asyncio.sleep(min(i, 5))
+            i += 1
             
-        # --- MODIFIKASI: Tambahkan penanganan timeout ---
         if status_code == 400 and datetime.now() >= timeout:
             raise Exception("TIDAL: Autentikasi TV timeout setelah 5 menit.")
-        # --- MODIFIKASI SELESAI ---
 
-        json_resp = await r.json()
-        
         if status_code != 200:
-            raise Exception(f"TIDAL : Auth error - {json_resp['error']}")
+            raise Exception(f"TIDAL : Auth error - {json_resp.get('error', json_resp)}")
 
         self.access_token = json_resp['access_token']
         self.refresh_token = json_resp['refresh_token']
@@ -495,15 +437,15 @@ class TvSession(BaseSession):
 
         async with self.session.get('https://api.tidal.com/v1/sessions', headers=self.auth_headers()) as r:
             assert (r.status == 200)
-            json_resp = await r.json()
-            self.user_id = json_resp['userId']
-            self.country_code = json_resp['countryCode']
+            session_resp = await r.json(content_type=None)
+            self.user_id = session_resp['userId']
+            self.country_code = session_resp['countryCode']
 
         async with self.session.get(
             f'https://api.tidal.com/v1/users/{self.user_id}?countryCode={self.country_code}',
-            headers=self.auth_headers()) as r:
+            headers=self.auth_headers()
+        ) as r:
             assert (r.status == 200)
-
 
     async def refresh(self):
         if not self.refresh_token:
@@ -518,16 +460,15 @@ class TvSession(BaseSession):
                 'grant_type': 'refresh_token'
             }
         ) as r:
-            json_resp = await r.json()
+            json_resp = await r.json(content_type=None)
             if r.status != 200:
-                raise Exception(f"TIDAL: TV refresh failed - {json_resp.get('userMessage')}")
+                raise Exception(f"TIDAL: TV refresh failed - {json_resp.get('userMessage', json_resp)}")
 
-            # get user_id in case of direct refresh token login
-            self.user_id = self.user_id or json_resp["user_id"]
+            self.user_id = self.user_id or json_resp.get("user_id")
             self.access_token = json_resp['access_token']
             self.expires = datetime.now() + timedelta(seconds=json_resp['expires_in'])
             self.refresh_token = json_resp.get("refresh_token", self.refresh_token)
-
+            self._last_refresh_ts = time.time()
 
     def auth_headers(self):
         return {
