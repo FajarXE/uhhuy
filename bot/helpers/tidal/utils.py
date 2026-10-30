@@ -2,14 +2,12 @@
 
 import re
 import os
-import aiofiles
 import asyncio
-import logging
 import json
 import base64
 import urllib.parse
+import shutil
 
-from shutil import copyfileobj
 from xml.etree import ElementTree
 from datetime import datetime 
 
@@ -25,13 +23,13 @@ async def parse_url(url):
         (r"/browse/artist/(\d+)", "artist"),
         (r"/browse/album/(\d+)", "album"),
         (r"/browse/playlist/([\w-]+)", "playlist"),
-        (r"/browse/video/(\d+)", "video"),  # <- TAUTAN VIDEO
+        (r"/browse/video/(\d+)", "video"),
         (r"/track/(\d+)", "track"),
         (r"/artist/(\d+)", "artist"),
         (r"/playlist/([\w-]+)", "playlist"),
         (r"/album/\d+/track/(\d+)", "track"),
         (r"/album/(\d+)", "album"),
-        (r"/video/(\d+)", "video"),          # <- TAUTAN VIDEO
+        (r"/video/(\d+)", "video"),
     ]
     
     for pattern, type_ in patterns:
@@ -47,16 +45,16 @@ async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
     master_url = manifest_json['urls'][0]
     
     import aiohttp
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=20)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(master_url, headers=auth_headers) as resp:
             master_m3u8 = await resp.text()
         
         best_url = None
         max_bw = 0
-        quality_str = "Unknown" # Default jika tidak terdeteksi
+        quality_str = "Unknown"
         lines = master_m3u8.splitlines()
         
-        # Cari resolusi tertinggi
         for i, line in enumerate(lines):
             if line.startswith('#EXT-X-STREAM-INF:'):
                 bw_match = re.search(r'BANDWIDTH=(\d+)', line)
@@ -66,13 +64,10 @@ async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
                     max_bw = bw
                     best_url = lines[i+1].strip()
                     
-                    # --- BACA RESOLUSI UNTUK QUALITY TAG ---
                     res_match = re.search(r'RESOLUTION=\d+x(\d+)', line)
                     if res_match:
                         quality_str = f"{res_match.group(1)}p"
-                    # ---------------------------------------
                     
-                    # Tangani URL relatif
                     if not best_url.startswith('http'):
                         best_url = urllib.parse.urljoin(master_url, best_url)
                     
@@ -82,7 +77,6 @@ async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
         async with session.get(best_url, headers=auth_headers) as resp:
             media_m3u8 = await resp.text()
             
-        # Ekstrak file TS
         segment_urls = []
         for line in media_m3u8.splitlines():
             line = line.strip()
@@ -91,30 +85,40 @@ async def parse_m3u8_video(manifest_b64: str, auth_headers: dict):
                     line = urllib.parse.urljoin(best_url, line)
                 segment_urls.append(line)
                 
-        # --- PERBAIKAN: Kembalikan 2 nilai (urls dan kualitas) ---
         return segment_urls, quality_str
 
 async def convert_ts_to_mp4(ts_path: str, output_path: str):
-    """Membungkus ulang (muxing) file .ts hasil gabungan ke .mp4 tanpa re-encode visual."""
-    cmd = f'ffmpeg -y -i "{ts_path}" -c copy -bsf:a aac_adtstoasc "{output_path}"'
-    task = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-    await task.wait()
+    """Membungkus ulang (muxing) file .ts hasil gabungan ke .mp4 tanpa re-encode visual (Aman dari Zombie Process)."""
+    cmd = ['ffmpeg', '-y', '-i', ts_path, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-loglevel', 'error', output_path]
+    task = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL
+    )
+    try:
+        await task.wait()
+    except asyncio.CancelledError:
+        try:
+            if task.returncode is None:
+                task.terminate()
+                await asyncio.sleep(0.3)
+                if task.returncode is None:
+                    task.kill()
+        except Exception:
+            pass
+        raise
 
 
 async def get_stream_session(track_data: dict, user: dict):
-    # Ambil tag kemampuan audio dari metadata track
-    media_tags = track_data['mediaMetadata']['tags']
+    media_tags = (track_data.get('mediaMetadata') or {}).get('tags', [])
     formats = None
 
     if 'tidal_api' not in user:
         raise ValueError("User dict tidak memiliki 'tidal_api' client instance.")
     
     client: TidalApi = user['tidal_api']
-    
-    # Ambil settingan user
     qual, spatial, _, __ = tidal_manager.get_user_quality_settings(user["user_id"])
 
-    # Logika Session Spasial/HiRes
     if 'SONY_360RA' in media_tags and spatial == 'Sony 360RA':
         formats = '360ra'
     elif 'DOLBY_ATMOS' in media_tags and spatial == 'ATMOS AC3 JOC':
@@ -124,28 +128,31 @@ async def get_stream_session(track_data: dict, user: dict):
     elif 'HIRES_LOSSLESS' in media_tags and qual == 'HI_RES':
         formats = 'flac_hires'
 
-    # Pilih Session berdasarkan format
-    session = {
-            'flac_hires': client.mobile_hires,
-            '360ra': client.mobile_hires if client.mobile_hires else client.mobile_atmos,
-            'ac4': client.mobile_atmos,
-            'ac3': client.tv_session,
-            None: client.tv_session, 
-    }[formats]
+    session_map = {
+        'flac_hires': client.mobile_hires,
+        '360ra': client.mobile_hires or client.mobile_atmos,
+        'ac4': client.mobile_atmos,
+        'ac3': client.tv_session or client.mobile_atmos or client.mobile_hires,
+        None: client.tv_session or client.mobile_hires or client.mobile_atmos, 
+    }
+    session = session_map.get(formats)
 
-    # Handle kasus khusus Atmos di session mobile
     if not formats and 'DOLBY_ATMOS' in media_tags:
         if client.mobile_hires:
             session = client.mobile_hires
 
-    # Logika Fallback Kualitas
+    # Fallback jika session spesifik (misal mobile_hires) bernilai None pada akun ini
+    if session is None:
+        session = client.mobile_hires or client.tv_session or client.mobile_atmos or (client.saved[0] if client.saved else None)
+        if formats == 'flac_hires' and not client.mobile_hires:
+            formats = None
+
     if formats == 'flac_hires':
         quality = 'HI_RES' 
     elif formats in ['360ra', 'ac3', 'ac4']:
-        quality = 'DOLBY_ATMOS' if 'DOLBY' in str(formats) else 'LOW' 
+        quality = 'DOLBY_ATMOS' if 'ac' in str(formats) else 'LOW' 
     else:
-        # Jika user minta MAX (HI_RES) TAPI lagu TIDAK punya tag HIRES_LOSSLESS
-        if qual == 'HI_RES' and 'HIRES_LOSSLESS' not in media_tags:
+        if qual == 'HI_RES' and ('HIRES_LOSSLESS' not in media_tags or not client.mobile_hires):
             quality = 'LOSSLESS' 
         else:
             quality = qual 
@@ -154,10 +161,11 @@ async def get_stream_session(track_data: dict, user: dict):
     
 
 def parse_mpd(xml: bytes):
-    xml = xml.decode('UTF-8')
-    xml = re.sub(r'xmlns="[^"]+"', '', xml, count=1)
-    root = ElementTree.fromstring(xml)
+    xml_str = xml.decode('UTF-8')
+    xml_str = re.sub(r'xmlns="[^"]+"', '', xml_str, count=1)
+    root = ElementTree.fromstring(xml_str)
     tracks = []
+    codec = 'FLAC'
     for period in root.findall('Period'):
         for adaptation_set in period.findall('AdaptationSet'):
             for rep in adaptation_set.findall('Representation'):
@@ -189,49 +197,48 @@ def parse_mpd(xml: bytes):
 async def merge_tracks(temp_tracks: list, output_path: str):
     """Menggabungkan segmen HLS/DASH menggunakan shutil dengan buffer 1MB di background thread."""
     def _sync_merge():
-        import shutil
-        import os
         with open(output_path, 'wb') as dest_file:
             for temp_location in temp_tracks:
-                with open(temp_location, 'rb') as segment_file:
-                    # Menggunakan buffer 1MB (1024 * 1024), jauh lebih cepat dari 64KB
-                    shutil.copyfileobj(segment_file, dest_file, 1024 * 1024)
-                os.remove(temp_location)  # Langsung hapus file setelah selesai digabung
+                if os.path.exists(temp_location):
+                    with open(temp_location, 'rb') as segment_file:
+                        shutil.copyfileobj(segment_file, dest_file, 1024 * 1024)
+                    try:
+                        os.remove(temp_location)
+                    except OSError:
+                        pass
                 
     await asyncio.to_thread(_sync_merge)
 
 
 async def get_quality(stream_data: dict):
-    quality_dict = qualities = {
-        'LOW':'LOW',
-        'HIGH':'HIGH',
-        'LOSSLESS':'LOSSLESS',
-        'HI_RES':'MAX',
-        'HI_RES_LOSSLESS':'MAX'
+    quality_dict = {
+        'LOW': 'LOW',
+        'HIGH': 'HIGH',
+        'LOSSLESS': 'LOSSLESS',
+        'HI_RES': 'MAX',
+        'HI_RES_LOSSLESS': 'MAX'
     }
     if stream_data.get('audioMode') == 'DOLBY_ATMOS':
         return 'DOLBY ATMOS'
     return quality_dict.get(stream_data.get('audioQuality', 'LOW'), 'LOW')
 
 
-async def sort_album_from_artist(album_data: dict, user: dict):
+async def sort_album_from_artist(album_data: list, user: dict):
     albums = []
     _, spatial, _, __ = tidal_manager.get_user_quality_settings(user["user_id"])
 
     for album in album_data:
         audio_modes = album.get('audioModes', [])
-        if 'DOLBY_ATMOS' in audio_modes \
-            and spatial in ['ATMOS AC3 JOC', 'ATMOS AC4']: 
+        if 'DOLBY_ATMOS' in audio_modes and spatial in ['ATMOS AC3 JOC', 'ATMOS AC4']: 
             albums.append(album)
-        elif 'STEREO' in audio_modes \
-            and spatial == 'OFF':
+        elif 'STEREO' in audio_modes and spatial == 'OFF':
             albums.append(album)
         elif not audio_modes: 
-             albums.append(album)
+            albums.append(album)
 
     unique_albums = {}
     for album in albums:
-        unique_key = (album['title'], album.get('version', ''))
+        unique_key = (album.get('title', ''), album.get('version', ''))
         if unique_key not in unique_albums:
             unique_albums[unique_key] = album
         else:
@@ -239,23 +246,18 @@ async def sort_album_from_artist(album_data: dict, user: dict):
             new_metadata = album.get('mediaMetadata', {})
             if len(new_metadata) > len(existing_metadata):  
                 unique_albums[unique_key] = album
-    filtered_tracks = list(unique_albums.values())
-    return filtered_tracks
+    return list(unique_albums.values())
 
 
 async def ffmpeg_convert_and_tag(input_file: str, track_meta: dict):
     """
     Mengonversi dan menulis tag metadata lengkap menggunakan FFmpeg.
-    (Versi Eksekusi List: Aman dari Command Injection)
+    (Dilengkapi proteksi anti-zombie process saat dibatalkan).
     """
     output_file = f"{input_file}.flac"
     
-    cmd = [
-        'ffmpeg', '-y', 
-        '-i', input_file
-    ]
+    cmd = ['ffmpeg', '-y', '-i', input_file]
     
-    # 1. Setup Cover Art & Stream Mapping
     cover_path = track_meta.get('cover')
     if cover_path and os.path.exists(cover_path):
         cmd.extend([
@@ -270,10 +272,8 @@ async def ffmpeg_convert_and_tag(input_file: str, track_meta: dict):
     else:
         cmd.extend(['-map', '0:a'])
 
-    # Setel format flac dan kompresi
     cmd.extend(['-c:a', 'flac', '-compression_level', '8'])
 
-    # 2. Persiapan Data Metadata
     t_num = str(track_meta.get('tracknumber') or '1')
     t_tot = str(track_meta.get('totaltracks') or '1')
     track_str = f"{t_num}/{t_tot}" 
@@ -286,55 +286,53 @@ async def ffmpeg_convert_and_tag(input_file: str, track_meta: dict):
     copyright_val = track_meta.get('copyright') or ''
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # 3. Mapping Metadata FFmpeg
     tags_to_write = {
         'title': track_meta.get('title'),
         'album': track_meta.get('album'),
         'album_artist': track_meta.get('albumartist'),
         'artist': track_meta.get('artist'),
-        
         'copyright': copyright_val,
         'publisher': publisher,
         'organization': publisher, 
         'label': publisher,
         'producer': publisher, 
-        
         'track': track_str,
         'disc': disc_str,
-        
         'genre': track_meta.get('genre'),
         'date': track_meta.get('date'), 
-        
         'creation_time': now_str, 
-        
         'ISRC': track_meta.get('isrc'),
         'UPC': track_meta.get('upc'),
         'BARCODE': track_meta.get('upc'),
-        
         'lyrics': track_meta.get('lyrics'),
         'composer': track_meta.get('composer'),
-        
         'rating': '1' if track_meta.get('explicit') is True else '0',
-        
-        # Custom Metadata Tambahan
         'pub': publisher,
         'cpr': copyright_val,
         'encoded_date': now_str,
         'tagging_time': now_str
     }
 
-    # 4. Build Command Metadata (Aman tanpa Shell Escaping)
     for key, value in tags_to_write.items():
         if value is not None and str(value).strip() != '':
             cmd.extend(['-metadata', f'{key}={value}'])
 
-    # Output file dan loglevel
     cmd.extend(['-loglevel', 'error', output_file])
     
-    # 5. Eksekusi menggunakan list (Sangat Aman)
     task = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL
     )
-    await task.wait()
+    try:
+        await task.wait()
+    except asyncio.CancelledError:
+        try:
+            if task.returncode is None:
+                task.terminate()
+                await asyncio.sleep(0.3)
+                if task.returncode is None:
+                    task.kill()
+        except Exception:
+            pass
+        raise
