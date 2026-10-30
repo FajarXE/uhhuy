@@ -307,18 +307,21 @@ class TidalLoginManager:
 
     def get_user_quality_settings(self, user_id: int) -> tuple[str, str, str, str]:
         """Mendapatkan kualitas, spasial, mqa, & convert untuk pengguna."""
-        user_dict = self.user_data.get(user_id) or {}
-        if not user_dict:
-            try:
-                from bot.settings import bot_set
-                user_dict = bot_set.user_data.get(user_id, {})
-            except Exception:
-                user_dict = {}
+        combined_dict = {}
+        try:
+            from bot.settings import bot_set
+            bot_user_dict = bot_set.user_data.get(user_id) or bot_set.user_data.get(str(user_id)) or {}
+            combined_dict.update(bot_user_dict)
+        except Exception:
+            pass
+
+        local_user_dict = self.user_data.get(user_id) or self.user_data.get(str(user_id)) or {}
+        combined_dict.update(local_user_dict)
         
-        user_qual = user_dict.get('tidal_qual') or self.quality
-        user_spatial = user_dict.get('tidal_spatial') or self.spatial
-        user_mqa_fix = user_dict.get('tidal_mqa_fix') or self.mqa_fix
-        user_convert_m4a = user_dict.get('tidal_convert_m4a') or self.convert_m4a
+        user_qual = combined_dict.get('tidal_qual') or self.quality
+        user_spatial = combined_dict.get('tidal_spatial') or self.spatial
+        user_mqa_fix = combined_dict.get('tidal_mqa_fix') or self.mqa_fix
+        user_convert_m4a = combined_dict.get('tidal_convert_m4a') or self.convert_m4a
         
         return user_qual, user_spatial, user_mqa_fix, user_convert_m4a
     
